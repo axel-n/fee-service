@@ -1,0 +1,67 @@
+# Dev environment for fee-service, on one network:
+#   restate  the dev Restate server
+#   dev      the sandboxed dev container (JDK, Maven, Claude Code, nested podman for Testcontainers)
+# On the host:  podman compose up -d --build   then   podman compose exec dev bash
+# Details: README.md
+name: fee-service
+
+services:
+  restate:
+    # TODO pin a version once spike 0.4 confirms which server version works with SDK 2.9.3
+    image: docker.restate.dev/restatedev/restate:latest
+    container_name: fee-service-restate
+    ports:
+      - "127.0.0.1:8080:8080"   # ingress
+      - "127.0.0.1:9070:9070"   # admin API and UI: http://localhost:9070
+
+  dev:
+    build:
+      context: .
+      args:
+        USER_NAME: ${USER}      # the container user mirrors yours, so home paths match the host
+    image: localhost/fee-service-dev
+    container_name: fee-service-dev
+    hostname: sandboxed-dev
+    command: ["sleep", "infinity"]
+    init: true
+    # The image's user has UID/GID 1000. keep-id maps it to your host user, whatever your host UID is.
+    userns_mode: "keep-id:uid=1000,gid=1000"
+    cap_drop: [ALL]
+    # newuidmap/newgidmap need these to set up the nested podman's user namespace.
+    # They apply inside this container's own user namespace and grant nothing on the host.
+    cap_add: [SETUID, SETGID]
+    devices:
+      - /dev/fuse               # fuse-overlayfs fallback for nested image storage
+      - /dev/net/tun            # pasta networking for nested containers
+    security_opt: ["label=disable"]
+    pids_limit: 4096
+    ports:
+      - "127.0.0.1:8081:8081"   # the app's HTTP API, for curl from the host
+    working_dir: /workspace/project
+    environment:
+      HOME: /home/${USER}
+      # The dev Restate above. Restate calls the app's endpoint at dev:9080 over this network, so 9080 isn't published.
+      # Tests ignore these and start their own Restate (D18).
+      RESTATE_INGRESS_URL: http://restate:8080
+      RESTATE_ADMIN_URL: http://restate:9070
+      RESTATE_ADVERTISED_URL: http://dev:9080
+    # The host's podman socket is deliberately not mounted: holding it means controlling the host's podman.
+    volumes:
+      - ../:/workspace/project:rw,Z
+      - type: tmpfs             # hides .git: git runs on the host
+        target: /workspace/project/.git
+        read_only: true
+      - ${HOME}/.m2:/home/${USER}/.m2:rw,z
+      # Claude Code's login, settings and memory. The volume is named per compose project (fee-service_claude-state).
+      # Don't share it between projects: all of them are mounted at /workspace/project, so their memories would mix.
+      - claude-state:/home/${USER}/.claude
+      # nested image storage: overlay can't sit on the container's own overlay filesystem
+      - containers:/home/${USER}/.local/share/containers
+    depends_on: [restate]
+
+volumes:
+  claude-state:
+  containers:
+
+x-podman:
+  in_pod: false                 # keep-id can't be used inside a pod (podman-compose)
