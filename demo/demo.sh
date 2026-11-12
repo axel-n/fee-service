@@ -2,7 +2,7 @@
 # fee-service live demo (docs/demo.md): self-registration → a fee → the same payload again (one charge) → kill -9 while
 # the wallet is slow → restart → Restate resumes the workflow (one charge) → the journal.
 #
-# It runs the packaged app (target/fee-service-*.jar) as a real process, so "kill" is a real kill -9. It checks every
+# It runs the packaged app (service/target/fee-service-*.jar) as a real process, so "kill" is a real kill -9. It checks every
 # claim it makes and exits non-zero if one doesn't hold; DemoIT runs it in the build against a Testcontainers Restate.
 #
 # Usage: demo/demo.sh [--no-pause]
@@ -15,9 +15,9 @@
 #   DEMO_API_PORT     the app's HTTP port (default 8081); must be free
 #   DEMO_SLOW_WALLET  the wallet's wait in the crash part (default 20s)
 #   DEMO_RUN          a suffix for the transaction ids (txn_001-<run>), for a Restate that already saw txn_001
-#   DEMO_JAR          the app jar (default: target/fee-service-*.jar, built with mvn if missing)
+#   DEMO_JAR          the app jar (default: service/target/fee-service-*.jar, built with mvn if missing)
 #   DEMO_APP_ARGS     extra command-line arguments for the app, separated by spaces
-#   DEMO_LOG_DIR      where the app logs go (default target/demo)
+#   DEMO_LOG_DIR      where the app logs go (default service/target/demo)
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -37,7 +37,7 @@ SLOW_WALLET="${DEMO_SLOW_WALLET:-20s}"
 SUFFIX="${DEMO_RUN:+-$DEMO_RUN}"
 TXN1="txn_001$SUFFIX"
 TXN2="txn_002$SUFFIX"
-LOG_DIR="${DEMO_LOG_DIR:-target/demo}"
+LOG_DIR="${DEMO_LOG_DIR:-service/target/demo}"
 read -r -a APP_ARGS <<<"${DEMO_APP_ARGS:-}"
 
 APP_PID=""
@@ -75,11 +75,11 @@ find_jar() {
         return
     fi
     local jar
-    jar=$(ls target/fee-service-*.jar 2>/dev/null | grep -v '\.original$' | head -n 1 || true)
+    jar=$(ls service/target/fee-service-*.jar 2>/dev/null | grep -v '\.original$' | head -n 1 || true)
     if [[ -z "$jar" ]]; then
         say "Building the app jar (mvn -DskipTests package)…" >&2
         mvn -q -DskipTests package >&2 || fail "mvn package failed"
-        jar=$(ls target/fee-service-*.jar | grep -v '\.original$' | head -n 1)
+        jar=$(ls service/target/fee-service-*.jar | grep -v '\.original$' | head -n 1)
     fi
     echo "$jar"
 }

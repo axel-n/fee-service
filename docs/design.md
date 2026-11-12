@@ -100,6 +100,13 @@ It asks Restate to discover the endpoint in a dry run and compares that with the
 
 ## Class design
 
+Two Maven modules under the root `pom.xml` (`fee-service-parent`), D76:
+
+| Module | Artifact | Holds |
+|--------|----------|-------|
+| `api/` | `com.example:fee-service-api` | the HTTP contract other services depend on: `contract` and `contract.error` below. Compile dependencies: Jackson and the Kotlin stdlib only |
+| `service/` | `com.example:fee-service` | the app: every other package below, `application.yml`, and all the ITs and BDD features |
+
 Base package: `com.example.fee`. The tree lists **files**. A package holds one kind of class, and an extension point's
 implementations get their own sub-package (`fee.rule`, `fee.formula`, `validation.rule`). A file holds one main type plus the
 small types and helpers that exist only to serve it: its result and field types, its default implementation, its internal
@@ -119,23 +126,27 @@ com.example.fee
 │
 ├── api/                                HTTP only
 │   ├── TransactionFeeController.kt     POST /transaction/fee (200, or 202 + Location), GET /transaction/fee/{id} → calls only FeeService
-│   └── ApiExceptionHandler.kt          @RestControllerAdvice: FeeException and Spring MVC errors → ProblemDetail (D60)
+│   └── ApiExceptionHandler.kt          @RestControllerAdvice: FeeException (+ its `code`) and Spring MVC errors → ProblemDetail (D60, D76)
 │
-├── contract/                           DTOs shared by HTTP and Restate (pure Kotlin + Jackson annotations, snake_case), D21
+├── contract/                           [api module] DTOs shared by HTTP and Restate (pure Kotlin + Jackson annotations, snake_case), D21
 │   ├── FeeRequest.kt                   all fields nullable; enums/dates as String, amount as BigDecimal. Journaled as the workflow input
 │   ├── FeeResponse.kt                  transaction_id, amount, asset, type, fee, rate, description. Stored permanently in TransactionFeeRecord
 │   ├── FeeStatusResponse.kt            GET body: transaction_id, status, the FeeResponse fields once COMPLETED, failure_reason once FAILED
 │   │                                   (HTTP only, never stored)
-│   └── PlainBigDecimalSerializer.kt    BigDecimal as a plain JSON number (D38)
+│   ├── PlainBigDecimalSerializer.kt    BigDecimal as a plain JSON number (D38)
+│   └── error/                          [api module] what the API answers instead of a fee (D76)
+│       ├── FeeException.kt             sealed, Spring-free: ValidationException(field, value, message, kind) (400/422), DuplicateTransactionException (409),
+│       │                               ChargeFailedException (422), TransactionNotFoundException (404, GET), WorkflowUnavailableException (503);
+│       │                               + FeeErrorCode: the problem's `code`, with its HTTP status. Gateway only: the workflow returns FeeOutcome
+│       │                               and never throws these
+│       └── FeeProblem.kt               the problem+json body as a client reads it; toException() rebuilds the FeeException from the `code`
 │
 ├── application/                        thin gateway to Restate
 │   ├── FeeService.kt                   FeeService: key pre-check → WorkflowKey → submit/attach (bounded by attachTimeout) → FeeOutcome →
-│   │                                   FeeSubmission or FeeException; FeeSubmission (sealed): Completed(response) → 200, Processing(transactionId) → 202
-│   ├── WorkflowKey.kt                  WorkflowKey (value class "{transactionId}:{payloadHash}") + PayloadHash: SHA-256 of the canonical FeeRequest
-│   │                                   (amount normalized: 1000 == 1000.00)
-│   └── FeeException.kt                 sealed: ValidationException (400/422), DuplicateTransactionException (409),
-│                                       ChargeFailedException (422), TransactionNotFoundException (404, GET), WorkflowUnavailableException (503).
-│                                       Gateway only: the workflow returns FeeOutcome and never throws these
+│   │                                   FeeSubmission or FeeException (a ValidationError becomes a ValidationException here);
+│   │                                   FeeSubmission (sealed): Completed(response) → 200, Processing(transactionId) → 202
+│   └── WorkflowKey.kt                  WorkflowKey (value class "{transactionId}:{payloadHash}") + PayloadHash: SHA-256 of the canonical FeeRequest
+│                                       (amount normalized: 1000 == 1000.00)
 │
 ├── validation/                         executed inside the workflow
 │   ├── TransactionValidator.kt         interface validate(request): ValidationError? + ValidationOrder: `const val`s spaced by 100
@@ -251,7 +262,8 @@ Rules:
 2. **Every business step runs inside `FeeWorkflow`.** Non-deterministic work (clock, wallet, I/O) goes inside `ctx.run`. So does
    reading configuration that affects a decision (the fee numbers), so a restart with new values can't make a replay diverge.
 3. **Restate is reached only through the generated clients** (ingress clients in `FeeService`, `ctx` clients in the workflow) and through `RestateAdminClient` for registration.
-4. **`contract`, `domain`, `fee`, `validation` and `ClaimDecider` are pure.** They are unit-tested without Restate.
+4. **`contract`, `domain`, `fee`, `validation` and `ClaimDecider` are pure.** They are unit-tested without Restate. The api module
+   (`contract`, `contract.error`) is published to other services, so it imports neither Spring nor anything of the service (D76).
 5. **The workflow returns `FeeOutcome` for business results** and throws only for infrastructure problems (which Restate retries) or for `TerminalException` (charge declined).
 
 ### Extension points
@@ -265,6 +277,7 @@ Rules:
 | a workflow step | a `WorkflowStep` value + a step in `FeeWorkflow` wrapped with `StepHook` (recovery tests then cover it) |
 | a real wallet | a `WalletGateway` implementation that replaces the fake |
 | a tunable value | a field in the matching `@ConfigurationProperties` class in `config` (a new top-level section gets its own file there) + its default in `application.yml` (+ a `${ENV_VAR:…}` placeholder for an operational setting) |
+| an error the API answers with | in the api module: a `FeeException` subclass + its `FeeErrorCode` value, its properties in `FeeProblem` and a branch in `toException()`; in the service: an `@ExceptionHandler` in `ApiExceptionHandler` that adds those properties (D76) |
 
 ---
 

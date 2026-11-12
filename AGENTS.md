@@ -19,6 +19,8 @@ in Restate state, and the app registers its Restate endpoint itself on startup.
 ## Stack (fixed: don't change without asking)
 
 - Kotlin, JDK 25 (or 21 if the toolchain requires it), **Maven 3.9+**, the system `mvn` (no wrapper; the dev image in `dev-setup/` pins the version)
+- Two Maven modules under the root `pom.xml` (D76): **`api/`** (`fee-service-api`, the HTTP contract other services depend on)
+  and **`service/`** (`fee-service`, the app). Run `mvn` from the root
 - Spring Boot (`spring-boot-starter-web` only)
 - Restate **Java SDK 2.9.3** (`dev.restate:sdk-java-http`, `sdk-api-gen` through kapt), used from Kotlin. The Restate server runs
   **externally** in Docker
@@ -45,7 +47,9 @@ Follow the call graph in `docs/design.md`:
 - **All business logic runs inside `FeeWorkflow`** as journaled steps: VALIDATE → MAP → CLAIM → CALCULATE → CHARGE → RECORD.
   Every step is wrapped with `StepHook.before/after`.
 - `contract`, `domain`, `fee`, `validation` and `ClaimDecider` are **pure Kotlin** (no Restate imports) and unit-tested without Restate.
-- The request/response DTOs live in `contract`, which every layer may import. Nothing outside `api` imports `api`.
+- The request/response DTOs live in `contract` and the exceptions with the error body in `contract.error`, both in the **api
+  module**, which every layer may import. The api module is published to other services: only Jackson and Kotlin, no Spring,
+  no Restate, and nothing of the service (D76). Nothing outside `api` imports `api` (the service's HTTP package).
 - Restate is reached only through the generated clients (ingress in `FeeService`, `ctx` in `FeeWorkflow`) and through
   `RestateAdminClient` (registration).
 - The endpoint is started and stopped only by `RestateEndpointLifecycle`. Registration is done only by `RestateRegistrar`.
@@ -98,7 +102,8 @@ Follow the call graph in `docs/design.md`:
   serve it (its result and field types, its default implementation, internal helpers). Don't create a file for a lone data class,
   enum or helper function that belongs to another type. A test file mirrors its production file, one test class per production class.
 - JSON uses snake_case through `@JsonProperty` on DTOs; `BigDecimal` is serialized as a plain number.
-- Errors are subclasses of the sealed `FeeException` and are mapped to `ProblemDetail` in `ApiExceptionHandler`.
+- Errors are subclasses of the sealed `FeeException` (api module, each with a `FeeErrorCode`) and are mapped to `ProblemDetail`
+  in `ApiExceptionHandler`. A new property of an error goes into `FeeProblem` too, so clients can read it (D76).
 - Small classes with one responsibility. Comment only *why*, not *what*. Add KDoc to public extension points (`FeeRule`, `TransactionValidator`).
 
 ## Testing
@@ -109,7 +114,7 @@ Follow the call graph in `docs/design.md`:
 - Unit tests (`*Test`, Surefire): no Spring context unless it is a `@WebMvcTest` slice. Use plain constructors, Mockito mocks and
   `Clock.fixed(...)`.
 - Integration and BDD tests (`*IT`, Failsafe): Testcontainers Restate (`restatedev/restate`), and Cucumber features in
-  `src/test/resources/features/`.
+  `service/src/test/resources/features/`.
 - Money assertions use `compareTo` / `isEqualByComparingTo`, so `1.5` equals `1.50`.
 - Assert idempotency by charge count (`chargeCount(key)`), not just by the response.
 - **Workflow and recovery tests are first-class.** Every workflow change must keep these passing: crash at each step boundary
@@ -125,7 +130,8 @@ Follow the call graph in `docs/design.md`:
 ```bash
 mvn test             # unit tests only (fast, no Docker)
 mvn verify           # + Testcontainers and Cucumber (needs Docker)
-mvn spring-boot:run      # starts the endpoint and registers it with the external Restate automatically
+mvn spring-boot:run      # from the root: starts the app (service module), its endpoint, and registers it with Restate
+mvn -pl api -am install  # puts fee-service-api (and the parent pom it needs) in the local repository for other services
 scripts/check.sh     # the gate: rules + mvn clean verify, every test must actually run (--fast, --unit: see --help)
 scripts/task-runner.sh   # implements tasks.md task by task (see "Task automation")
 ```

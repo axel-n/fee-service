@@ -72,16 +72,16 @@ HISTORY=$RUNS/history
 SUMMARY=$RUNS/summary.md
 SKILL=.claude/skills/implement-task/SKILL.md
 # Not part of the tree that the runner snapshots, compares and restores (gitignored, or the runner's own files).
-PRUNE=(./.git ./target ./.task-runs ./.idea ./out ./logs)
+PRUNE=(./.git ./target ./api/target ./service/target ./.task-runs ./.idea ./out ./logs)
 # The plan, the rules, the gate and the environment. A task that changes them is rejected outright.
 PROTECTED=(./tasks.md ./AGENTS.md ./requirements.md ./scripts/ ./.claude/skills/ ./.claude/settings.json ./dev-setup/)
 # A task may change these, but then an interactive run halts so a person reviews it (AGENTS.md: decisions change knowingly).
 REVIEW=(./docs/)
 # The stack AGENTS.md fixes (Spring Boot web, Kotlin, Jackson, the Restate SDK, JUnit 5, Mockito, Testcontainers, Cucumber):
 # its modules are approved. Anything else needs the user's approval (hard rule 1). check.sh rejects the ones ruled out.
-STACK_DEPS='^(org\.springframework\.boot:spring-boot-(starter|starter-web|starter-json|starter-test|testcontainers)|org\.jetbrains\.kotlin:.+|com\.fasterxml\.jackson(\.[a-z.]+)?:.+|dev\.restate:.+|org\.junit(\.[a-z.]+)?:.+|org\.mockito:.+|org\.testcontainers:.+|io\.cucumber:.+)$'
+STACK_DEPS='^(com\.example:fee-service-api|org\.springframework\.boot:spring-boot-(starter|starter-web|starter-json|starter-test|testcontainers)|org\.jetbrains\.kotlin:.+|com\.fasterxml\.jackson(\.[a-z.]+)?:.+|dev\.restate:.+|org\.junit(\.[a-z.]+)?:.+|org\.mockito:.+|org\.testcontainers:.+|io\.cucumber:.+)$'
 # The same list for the sessions' prompt (keep both in sync)
-STACK_DEPS_TEXT='org.springframework.boot:spring-boot-starter, -starter-web, -starter-json, -starter-test, -testcontainers;
+STACK_DEPS_TEXT='com.example:fee-service-api (the api module of this project); org.springframework.boot:spring-boot-starter, -starter-web, -starter-json, -starter-test, -testcontainers;
 org.jetbrains.kotlin:*; com.fasterxml.jackson*:*; dev.restate:*; org.junit*:*; org.mockito:*; org.testcontainers:*; io.cucumber:*'
 # Defense in depth for the sessions; the runner checks the result itself anyway.
 DENY='Bash(git *),Bash(podman *),Bash(docker *),Bash(claude *),Bash(scripts/task-runner.sh *),Bash(scripts/autopilot.sh *),'\
@@ -239,7 +239,7 @@ runner_context() {
 This prompt already contains your task's whole section of tasks.md (above), docs/design.md and docs/decisions.md (below,
 as they are now), the project's file list, the approved dependencies, the environment and the usage of scripts/check.sh.
 Don't read those files again, and don't explore the tree with find/ls: the list below is complete. Read the code your task
-builds on or changes (pom.xml, the src/ files it touches or uses), and nothing beyond that.
+builds on or changes (the pom.xml files, the api/ and service/ sources it touches or uses), and nothing beyond that.
 
 Not your context, don't open them:
 - \`.task-runs/\`: the runner's logs, snapshots and the copy of this prompt. What earlier tasks did is in the code and docs/.
@@ -366,7 +366,7 @@ matching() { # <changes-file> <prefix…>: the change lines under one of the pre
   return 0
 }
 
-# groupId:artifactId of every <dependency> and <annotationProcessorPath> in a pom (exclusions and comments skipped)
+# groupId:artifactId of every <dependency> and <annotationProcessorPath> in the poms (exclusions and comments skipped)
 pom_deps() {
   awk 'BEGIN { RS = "<" }
     incomment { if (index($0, "-->")) incomment = 0; next }
@@ -379,7 +379,15 @@ pom_deps() {
       if (blk && !ex && tag == "groupId") g = text
       if (blk && !ex && tag == "artifactId") a = text
       if ((tag == "/dependency" || tag == "/annotationProcessorPath") && blk) { print g ":" a; blk = 0 }
-    }' "$1" | LC_ALL=C sort -u
+    }' "$@" | LC_ALL=C sort -u
+}
+
+# The same over the root pom and the module poms (D76): a dependency is declared in a module, not in the root. Empty
+# while there is no pom yet.
+all_pom_deps() {
+  local poms=() p
+  for p in pom.xml api/pom.xml service/pom.xml; do if [[ -f $p ]]; then poms+=("$p"); fi; done
+  if ((${#poms[@]})); then pom_deps "${poms[@]}"; fi
 }
 
 # Leftovers of test JVMs that were killed (Ryuk is off in the dev container) would pile up over a long run. Only inside
@@ -534,7 +542,7 @@ run_task() {
   cleanup_test_containers
   snapshot "$dir/before.tar"
   manifest > "$dir/before.manifest"
-  if [[ -f pom.xml ]]; then pom_deps pom.xml > "$dir/deps.before"; else : > "$dir/deps.before"; fi
+  all_pom_deps > "$dir/deps.before"
   build_prompt "$id" "$note" > "$dir/prompt.md"
   sid=$(cat /proc/sys/kernel/random/uuid)
   CUR_SID=$sid
@@ -604,7 +612,7 @@ run_task() {
       fi
     else
       if [[ -f pom.xml ]]; then
-        pom_deps pom.xml > "$dir/deps.after"
+        all_pom_deps > "$dir/deps.after"
         new_deps=$(LC_ALL=C comm -13 "$dir/deps.before" "$dir/deps.after" | grep -vE "$STACK_DEPS" || true)
         if [[ -n $new_deps ]] && ((!ALLOW_NEW_DEPS)); then
           PROBLEMS+=("Dependencies outside the approved stack need the user's approval first (AGENTS.md hard rule 1). Remove them and solve it with what the stack offers:" "$new_deps")
@@ -619,7 +627,7 @@ run_task() {
         if ((!UNIT_ONLY && GATE_IT < prev_it)); then
           PROBLEMS+=("Integration tests went down from $prev_it to $GATE_IT. Don't delete or merge away tests; restore them.")
         fi
-        if grep -qE '^[AM] \./src/main/kotlin/' "$dir/changes.txt" && ((GATE_UNIT + GATE_IT <= prev_unit + prev_it)); then
+        if grep -qE '^[AM] \./(api|service)/src/main/kotlin/' "$dir/changes.txt" && ((GATE_UNIT + GATE_IT <= prev_unit + prev_it)); then
           WARNINGS+=("Production code changed, but no new test ran (AGENTS.md: every production class gets a test).")
         fi
       else
@@ -688,7 +696,7 @@ finish_accepted() { # <id> <dir> <run>
 
   review=$(matching "$dir/changes.txt" "${REVIEW[@]}")
   if [[ ! -s $dir/deps.before && -f pom.xml ]]; then
-    review+=$'\n'"A ./pom.xml (created; review its dependencies:"$'\n'"$(pom_deps pom.xml | sed 's/^/    /'))"
+    review+=$'\n'"A ./pom.xml (created; review its dependencies:"$'\n'"$(all_pom_deps | sed 's/^/    /'))"
   fi
   if [[ -n ${new_deps:-} ]]; then WARNINGS+=("New dependencies, approved with --allow-new-deps: $(tr '\n' ' ' <<< "$new_deps")"); fi
   review=$(sed '/^$/d' <<< "$review")

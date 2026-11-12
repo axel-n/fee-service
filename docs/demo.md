@@ -21,11 +21,11 @@ Testcontainers Restate, so it can't drift from the app.
 - **Ports:** the API port 8081 and the endpoint port 9080 are free. Nothing else may run the app.
 - **Configuration:** the script passes the usual `RESTATE_*` variables on to the app. In the dev container they are already
   set (`dev-setup/README.md`). On the host, the defaults (`localhost`, `host.docker.internal:9080`) fit the `docker run` in the README.
-- **Jar:** the script runs `target/fee-service-*.jar`, so `kill -9` hits the app itself and not a Maven process. It builds
+- **Jar:** the script runs `service/target/fee-service-*.jar`, so `kill -9` hits the app itself and not a Maven process. It builds
   the jar if it's missing. After a code change, run `mvn -DskipTests package` again.
 - **Browser:** open the Restate UI at `<admin URL>/ui/`, e.g. `http://localhost:9070/ui/`. Use the admin port as it is
   published on the machine with the browser.
-- **Rehearse:** run `DEMO_RUN=rehearsal1 demo/demo.sh --no-pause`. It takes about 30 seconds. The app logs go to `target/demo/`.
+- **Rehearse:** run `DEMO_RUN=rehearsal1 demo/demo.sh --no-pause`. It takes about 30 seconds. The app logs go to `service/target/demo/`.
 
 ## Running it
 
@@ -63,17 +63,17 @@ The same steps by hand, in two terminals (use `kill -9` on the `java` process, n
 
 ```bash
 # terminal 1
-java -jar target/fee-service-0.0.1-SNAPSHOT.jar                          # 1. watch the RestateRegistrar line
+java -jar service/target/fee-service-0.0.1-SNAPSHOT.jar                  # 1. watch the RestateRegistrar line
 # terminal 2
 BODY='{"transaction_id":"txn_001","amount":1000,"asset":"USD","asset_type":"FIAT","type":"Mobile Top Up","state":"SETTLED - PENDING FEE","created_at":"2023-08-30 15:42:17.610059"}'
 curl -s -X POST localhost:8081/transaction/fee -H 'Content-Type: application/json' -d "$BODY"     # 2.
 curl -s -X POST localhost:8081/transaction/fee -H 'Content-Type: application/json' -d "$BODY"     # 3. same body
 # terminal 1: Ctrl-C, then
-WALLET_FAKE_DELAY=20s java -jar target/fee-service-0.0.1-SNAPSHOT.jar   # 4.
+WALLET_FAKE_DELAY=20s java -jar service/target/fee-service-0.0.1-SNAPSHOT.jar   # 4.
 # terminal 2: submit txn_002 (same body with "transaction_id":"txn_002"), and as soon as terminal 1 logs
 # "Fake wallet: waiting": kill -9 $(pgrep -f 'fee-service-.*\.jar')
 # terminal 1
-java -jar target/fee-service-0.0.1-SNAPSHOT.jar                          # 5. the charge of fee-txn_002 appears
+java -jar service/target/fee-service-0.0.1-SNAPSHOT.jar                  # 5. the charge of fee-txn_002 appears
 curl -s localhost:8081/transaction/fee/txn_002                           #    COMPLETED
 grep -h 'Fake wallet: charged' <the logs>                                #    one line per transaction
 ```

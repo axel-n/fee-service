@@ -87,11 +87,20 @@ reachable, the app still starts, logs a WARN and keeps retrying in the backgroun
 
 ## Architecture
 
+Two Maven modules under the root `pom.xml` (the parent, `fee-service-parent`):
+
+| Module | Artifact | What it holds |
+|--------|----------|---------------|
+| [`api/`](api) | `com.example:fee-service-api` | the HTTP contract other services depend on: `contract/` (`FeeRequest`, `FeeResponse`, `FeeStatusResponse`) and `contract/error/` (the `FeeException` classes, `FeeErrorCode`, `FeeProblem`, the error body). Jackson and Kotlin only, no Spring, no Restate |
+| [`service/`](service) | `com.example:fee-service` | the app: everything below, plus `application.yml` and every test of it |
+
+The packages of the service module:
+
 ```
 config/            RestateProperties, FeeProperties, FakeWalletProperties   every @ConfigurationProperties class: one file per
                                                                             top-level section of application.yml
 api/               TransactionFeeController, ApiExceptionHandler            HTTP only, errors as RFC 7807 ProblemDetail
-application/       FeeService, WorkflowKey, FeeException                    thin gateway: key → submit/attach → HTTP result
+application/       FeeService, WorkflowKey                                  thin gateway: key → submit/attach → HTTP result
 workflow/          FeeWorkflow, its durable types, StepHook                 the Restate workflow: every business step
 record/            TransactionFeeRecord, FeeRecord, ClaimDecider            the Restate virtual object: one fee per transaction_id
 restate/           RestateEndpointLifecycle, RestateRegistrar, …            Restate plumbing: endpoint, self-registration, clients
@@ -101,7 +110,6 @@ fee/               FeeRule, FeeCalculator                                   run 
 fee/formula/       PercentageFee, FlatFee, …                                the building blocks
 fee/rule/          one FeeRule bean per transaction type
 domain/            Transaction and its enums, TransactionMapper             pure Kotlin
-contract/          FeeRequest, FeeResponse, FeeStatusResponse               the JSON shared by HTTP and Restate
 wallet/            WalletGateway, FakeWalletGateway                         the charge (an in-memory fake)
 ```
 
@@ -162,7 +170,7 @@ fake wallet can wait before it charges, which leaves time to kill the app in the
 ## Configuration
 
 Every tunable value comes from Spring Boot's externalized configuration, so a change needs **a restart, not a rebuild**.
-The packaged [`application.yml`](src/main/resources/application.yml) holds the defaults. Overrides, highest priority first:
+The packaged [`application.yml`](service/src/main/resources/application.yml) holds the defaults. Overrides, highest priority first:
 command-line arguments (`--restate.ingress-url=…`), environment variables, a `config/application.yml` in the directory the
 app starts from (or `--spring.config.additional-location=file:/etc/fee-service/`), the packaged file.
 
@@ -247,21 +255,49 @@ curl -s localhost:8081/transaction/fee/txn_001
 {"transaction_id":"txn_001","status":"COMPLETED","amount":1000,"asset":"USD","type":"Mobile Top Up","fee":1.50,"rate":0.0015,"description":"Standard fee rate of 0.15%"}
 ```
 
-**Errors** are `application/problem+json`:
+**Errors** are `application/problem+json`. Every error the service raises itself carries a stable `code`:
 
 | Request | Status | Body (shortened) |
 |---------|--------|------------------|
-| `"state": "PENDING"` | 422 | `"detail":"Unsupported state 'PENDING'. Supported: 'SETTLED - PENDING FEE'","field":"state","value":"PENDING"` |
-| `"amount": -5` | 400 | `"detail":"Invalid amount '-5'. Allowed: a number greater than 0","field":"amount","value":"-5"` |
-| `txn_001` again with `"amount": 2000` | 409 | `"detail":"Transaction 'txn_001' was already charged or is being processed with a different payload","transaction_id":"txn_001"` |
-| `GET /transaction/fee/unknown` | 404 | `"detail":"No fee record for transaction 'unknown'","transaction_id":"unknown"` |
-| a charge the wallet declines | 422 | `"transaction_id"` and the wallet's `"reason"` |
-| Restate unreachable | 503 | resending the same payload later is safe |
+| `"state": "PENDING"` | 422 | `"code":"UNSUPPORTED_REQUEST","detail":"Unsupported state 'PENDING'. Supported: 'SETTLED - PENDING FEE'","field":"state","value":"PENDING"` |
+| `"amount": -5` | 400 | `"code":"INVALID_REQUEST","detail":"Invalid amount '-5'. Allowed: a number greater than 0","field":"amount","value":"-5"` |
+| `txn_001` again with `"amount": 2000` | 409 | `"code":"DUPLICATE_TRANSACTION","detail":"Transaction 'txn_001' was already charged or is being processed with a different payload","transaction_id":"txn_001"` |
+| `GET /transaction/fee/unknown` | 404 | `"code":"TRANSACTION_NOT_FOUND","detail":"No fee record for transaction 'unknown'","transaction_id":"unknown"` |
+| a charge the wallet declines | 422 | `"code":"CHARGE_FAILED"`, `"transaction_id"` and the wallet's `"reason"` |
+| Restate unreachable | 503 | `"code":"WORKFLOW_UNAVAILABLE"`; resending the same payload later is safe |
+
+Spring MVC's own errors (a body that isn't JSON, 415, 405, an unknown path) are problems too, without a `code`.
 
 A run that takes longer than `restate.attach-timeout` answers **202** with `Location: /transaction/fee/{id}` and
 `{"transaction_id":"…","status":"IN_PROGRESS"}`; poll the location or resend the same payload.
 
 A rejected request can be corrected and sent again with the same `transaction_id` (e.g. `PENDING` → `SETTLED - PENDING FEE`).
+
+### Calling it from another service
+
+Depend on the api module instead of copying the DTOs. `mvn -pl api -am install` puts it, and the parent pom it needs, in
+the local repository (no container engine needed):
+
+```xml
+<dependency>
+    <groupId>com.example</groupId>
+    <artifactId>fee-service-api</artifactId>
+    <version>0.0.1-SNAPSHOT</version>
+</dependency>
+```
+
+It brings `FeeRequest`, `FeeResponse` and `FeeStatusResponse` with their snake_case JSON names, and the errors: read an
+error body as `FeeProblem`, and `toException()` gives back the `FeeException` the service raised
+(`DuplicateTransactionException`, `ChargeFailedException`, …), or `null` for a problem without a known `code`.
+
+```kotlin
+val problem = objectMapper.readValue(errorBody, FeeProblem::class.java)
+when (val failure = problem.toException()) {
+    is DuplicateTransactionException -> log.info("already charged: {}", failure.transactionId)
+    is ValidationException -> throw failure            // field, value and message of the rejected request
+    else -> throw IllegalStateException("fee service answered ${problem.status}: ${problem.detail}")
+}
+```
 
 ## Tests
 
@@ -274,7 +310,7 @@ scripts/check.sh      # the project's gate: rule checks + mvn clean verify, and 
 - **Unit tests** (`*Test`) cover every production class: each validator and its messages, each fee rule and building
   block (rounding, minimums, `BigDecimal` comparisons), the claim rules, the payload hash, the serde of every durable type,
   the gateway's HTTP mapping, the registrar's retries. `TestCoverageAuditTest` fails when a production file has no test.
-- **BDD features** ([`src/test/resources/features/`](src/test/resources/features)) describe the behaviour end to end against
+- **BDD features** ([`service/src/test/resources/features/`](service/src/test/resources/features)) describe the behaviour end to end against
   a real Restate: fee calculation per type and asset, validation, transaction state (rejected → corrected), idempotency
   and workflow recovery.
 - **Integration tests** (`*IT`) share one Testcontainers Restate and use only random ports, so a Restate or an app already

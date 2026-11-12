@@ -22,8 +22,13 @@ case ${1:-} in
   *) echo "unknown option: $1 (see --help)" >&2; exit 2 ;;
 esac
 
-MAIN=src/main/kotlin
-TEST=src/test/kotlin
+# Two Maven modules (D76): api (the published contract) and service (the app)
+MODULES=(api service)
+MAIN=service/src/main/kotlin
+TEST=service/src/test/kotlin
+API=api/src/main/kotlin/com/example/fee
+ALL_MAIN=(api/src/main/kotlin service/src/main/kotlin)
+ALL_TEST=(api/src/test/kotlin service/src/test/kotlin)
 PKG=$MAIN/com/example/fee
 violations=0
 
@@ -49,22 +54,26 @@ rule() {
 echo "== rules (AGENTS.md)"
 # Only the code that handles money: a Double elsewhere (say, a backoff multiplier in restate/ or RestateProperties) is
 # not money. Of config/, only the fee numbers are money.
-rule "Money is BigDecimal: no Double/Float in contract, domain, fee, validation, wallet, application, workflow, record or the fee properties (hard rule 3)" \
-  "$(g '\b(Double|Float)\b|\.to(Double|Float)\(' "$PKG/contract" "$PKG/domain" "$PKG/fee" "$PKG/validation" "$PKG/wallet" "$PKG/application" "$PKG/workflow" "$PKG/record" "$PKG/config/FeeProperties.kt")"
+rule "Money is BigDecimal: no Double/Float in the api module, domain, fee, validation, wallet, application, workflow, record or the fee properties (hard rule 3)" \
+  "$(g '\b(Double|Float)\b|\.to(Double|Float)\(' "$API" "$PKG/domain" "$PKG/fee" "$PKG/validation" "$PKG/wallet" "$PKG/application" "$PKG/workflow" "$PKG/record" "$PKG/config/FeeProperties.kt")"
 rule "Create BigDecimal from a String, never from a floating-point literal (hard rule 3)" \
-  "$(g 'BigDecimal\(\s*-?[0-9]+\.[0-9]' "$MAIN" "$TEST")"
-rule "contract, domain, fee, validation and ClaimDecider are pure: no Restate imports" \
-  "$(g '^import dev\.restate' "$PKG/contract" "$PKG/domain" "$PKG/fee" "$PKG/validation" "$PKG/record/ClaimDecider.kt")"
+  "$(g 'BigDecimal\(\s*-?[0-9]+\.[0-9]' "${ALL_MAIN[@]}" "${ALL_TEST[@]}")"
+rule "The api module, domain, fee, validation and ClaimDecider are pure: no Restate imports" \
+  "$(g '^import dev\.restate' "${ALL_MAIN[0]}" "$PKG/domain" "$PKG/fee" "$PKG/validation" "$PKG/record/ClaimDecider.kt")"
+# Other services depend on it, so it carries no framework: only Jackson and Kotlin (D76)
+rule "The api module is the published contract: no Spring imports, and nothing of the service" \
+  "$(g '^import (org\.springframework|com\.example\.fee\.(api|application|config|domain|fee|record|restate|validation|wallet|workflow))\.' "${ALL_MAIN[0]}")"
 rule "Nothing outside api imports api" \
   "$(g '^import com\.example\.fee\.api\.' "$MAIN" | grep -v "^$PKG/api/")"
 rule "Inject Clock: no now() or currentTimeMillis() without a Clock in production code" \
-  "$(g '\b(Instant|LocalDateTime|LocalDate|LocalTime|OffsetDateTime|ZonedDateTime)\.now\(\s*\)|System\.currentTimeMillis\(' "$MAIN")"
-rule "Constructor injection only: no @Autowired in production code" "$(g '@Autowired' "$MAIN")"
-rule "No !! and no lateinit in production code" "$(g '!!|\blateinit\b' "$MAIN")"
-rule "No disabled tests: every test must run" "$(g '@(Disabled[A-Za-z]*|Ignore)\b' "$TEST")"
-if [[ -f pom.xml ]]; then
+  "$(g '\b(Instant|LocalDateTime|LocalDate|LocalTime|OffsetDateTime|ZonedDateTime)\.now\(\s*\)|System\.currentTimeMillis\(' "${ALL_MAIN[@]}")"
+rule "Constructor injection only: no @Autowired in production code" "$(g '@Autowired' "${ALL_MAIN[@]}")"
+rule "No !! and no lateinit in production code" "$(g '!!|\blateinit\b' "${ALL_MAIN[@]}")"
+rule "No disabled tests: every test must run" "$(g '@(Disabled[A-Za-z]*|Ignore)\b' "${ALL_TEST[@]}")"
+mapfile -t POMS < <(existing pom.xml "${MODULES[@]/%//pom.xml}")
+if ((${#POMS[@]})); then
   rule "Dependencies the project ruled out (AGENTS.md hard rule 1, decisions.md 'Not used')" \
-    "$(grep -nE '<artifactId>(spring-boot-starter-(actuator|validation|data-jpa|jdbc)|lombok|mockito-kotlin|kotest[a-z-]*|sdk-testing|flyway[a-z-]*|postgresql|h2|spring-cloud-[a-z-]*)</artifactId>' pom.xml)"
+    "$(grep -nE '<artifactId>(spring-boot-starter-(actuator|validation|data-jpa|jdbc)|lombok|mockito-kotlin|kotest[a-z-]*|sdk-testing|flyway[a-z-]*|postgresql|h2|spring-cloud-[a-z-]*)</artifactId>' "${POMS[@]}")"
 fi
 if ((violations == 0)); then echo "✓ no rule violations"; fi
 
@@ -103,10 +112,13 @@ echo "== mvn ${goals[*]}"
 mvn -B "${goals[@]}"
 rc=$?
 
-# sum_reports <dir>: "tests skipped" summed over the JUnit XML reports in <dir>
+# reports <kind>: the report directories of every module, <kind> surefire (unit) or failsafe (integration)
+reports() { local m; for m in "${MODULES[@]}"; do printf '%s\n' "$m/target/$1-reports"; done; }
+
+# sum_reports <dir...>: "tests skipped" summed over the JUnit XML reports in the dirs
 sum_reports() {
   local files
-  mapfile -t files < <(find "$1" -maxdepth 1 -name 'TEST-*.xml' 2>/dev/null)
+  mapfile -t files < <(find "$@" -maxdepth 1 -name 'TEST-*.xml' 2>/dev/null)
   if ((${#files[@]} == 0)); then echo "0 0"; return; fi
   awk 'function attr(line, name) {
          return match(line, " " name "=\"[0-9]+\"") ? substr(line, RSTART + length(name) + 3, RLENGTH - length(name) - 4) + 0 : 0
@@ -117,7 +129,7 @@ sum_reports() {
 }
 
 skipped_tests() {
-  find target/surefire-reports target/failsafe-reports -maxdepth 1 -name 'TEST-*.xml' -print0 2>/dev/null |
+  find $(reports surefire) $(reports failsafe) -maxdepth 1 -name 'TEST-*.xml' -print0 2>/dev/null |
     xargs -0 -r awk '
       /<testcase / {
         c = match($0, /classname="[^"]*"/) ? substr($0, RSTART + 11, RLENGTH - 12) : ""
@@ -126,8 +138,10 @@ skipped_tests() {
       /<skipped/ { print "    " c " > " n }' | head -n 20
 }
 
-read -r unit_tests unit_skipped < <(sum_reports target/surefire-reports)
-read -r it_tests it_skipped < <(sum_reports target/failsafe-reports)
+mapfile -t UNIT_REPORTS < <(reports surefire)
+mapfile -t IT_REPORTS < <(reports failsafe)
+read -r unit_tests unit_skipped < <(sum_reports "${UNIT_REPORTS[@]}")
+read -r it_tests it_skipped < <(sum_reports "${IT_REPORTS[@]}")
 
 problems=()
 if ((rc != 0)); then problems+=("mvn ${goals[*]} failed (exit $rc): see the [ERROR] lines above"); fi
@@ -138,12 +152,17 @@ if [[ $mode == fast ]]; then
 else
   echo "== tests: unit $unit_tests, integration $it_tests, skipped $((unit_skipped + it_skipped))"
   if ((rc == 0)); then
-    if [[ -n $(find src/test -name '*Test.kt' 2>/dev/null) ]] && ((unit_tests == 0)); then
-      problems+=("*Test classes exist, but Surefire ran no tests")
-    fi
-    if [[ $mode == full && -n $(find src/test -name '*IT.kt' 2>/dev/null) ]] && ((it_tests == 0)); then
-      problems+=("*IT classes exist, but Failsafe ran none of them: maven-failsafe-plugin must be declared in pom.xml (task 0.1)")
-    fi
+    # per module: one module's tests must not hide that the other's never ran
+    for m in "${MODULES[@]}"; do
+      read -r ran _ < <(sum_reports "$m/target/surefire-reports")
+      if [[ -n $(find "$m/src/test" -name '*Test.kt' 2>/dev/null) ]] && ((ran == 0)); then
+        problems+=("*Test classes exist in $m, but Surefire ran none of them: maven-surefire-plugin must be declared in $m/pom.xml")
+      fi
+      read -r ran _ < <(sum_reports "$m/target/failsafe-reports")
+      if [[ $mode == full && -n $(find "$m/src/test" -name '*IT.kt' 2>/dev/null) ]] && ((ran == 0)); then
+        problems+=("*IT classes exist in $m, but Failsafe ran none of them: maven-failsafe-plugin must be declared in $m/pom.xml")
+      fi
+    done
   fi
   if ((unit_skipped + it_skipped > 0)); then
     problems+=("$((unit_skipped + it_skipped)) test(s) skipped; every test must run:")

@@ -88,7 +88,7 @@ These guards are written for the ways an AI agent tends to go wrong:
 | Risk | Guard |
 |------|-------|
 | Dropping or weakening a test to get green | The runner rejects fewer tests than before; `check.sh` fails on skipped tests or on tests that didn't run; AGENTS.md forbids weakening assertions |
-| A production class without a test | `TestCoverageAuditTest` fails for any file in `src/main/kotlin` without its own test or a justified entry (D68) |
+| A production class without a test | `TestCoverageAuditTest` fails for any file in `api/src/main/kotlin` or `service/src/main/kotlin` without its own test or a justified entry (D68) |
 | Quietly adding a library | Hard rule 1, enforced by the runner's dependency guard |
 | Changing the rules or the plan to suit the code | Protected files; a change to the design must update `docs/` in the same change, and the runner stops for review |
 | Docs that drift from the code | `HttpRequestsFileIT` runs `http/requests.http` and checks its `# Expect:` lines (D73) |

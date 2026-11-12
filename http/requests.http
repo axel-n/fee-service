@@ -88,7 +88,7 @@ Content-Type: application/json
 }
 
 ### Conflict: the charged Mobile Top Up id with another amount. The fee was already charged, so 409
-# Expect: 409 {"status": 409, "transaction_id": "mtu-{{run}}"}
+# Expect: 409 {"status": 409, "code": "DUPLICATE_TRANSACTION", "transaction_id": "mtu-{{run}}"}
 POST {{host}}/transaction/fee
 Content-Type: application/json
 
@@ -103,7 +103,7 @@ Content-Type: application/json
 }
 
 ### Rejected: the transaction is still PENDING. Only SETTLED - PENDING FEE is processed
-# Expect: 422 {"field": "state", "value": "PENDING", "detail": "Unsupported state 'PENDING'. Supported: 'SETTLED - PENDING FEE'"}
+# Expect: 422 {"code": "UNSUPPORTED_REQUEST", "field": "state", "value": "PENDING", "detail": "Unsupported state 'PENDING'. Supported: 'SETTLED - PENDING FEE'"}
 POST {{host}}/transaction/fee
 Content-Type: application/json
 
@@ -154,7 +154,7 @@ Content-Type: application/json
 }
 
 ### Invalid payload: the amount is not positive
-# Expect: 400 {"field": "amount", "value": "-5", "detail": "Invalid amount '-5'. Allowed: a number greater than 0"}
+# Expect: 400 {"code": "INVALID_REQUEST", "field": "amount", "value": "-5", "detail": "Invalid amount '-5'. Allowed: a number greater than 0"}
 POST {{host}}/transaction/fee
 Content-Type: application/json
 

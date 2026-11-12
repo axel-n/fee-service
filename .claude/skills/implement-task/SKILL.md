@@ -17,7 +17,7 @@ One task per session. Your context is the plan and the code, not earlier convers
 - Read `docs/design.md`, `docs/decisions.md`, and the task's whole section in `tasks.md`, including the text above the
   checkboxes. For example, section 8 defines the test harness and the random-port rules there.
   In runner mode they are already in your prompt, with the file list and the environment: don't read them again.
-- Look at what earlier tasks built (`pom.xml`, `src/`) before adding anything. Extend it; don't duplicate it. Read the
+- Look at what earlier tasks built (the `pom.xml` files, `api/src/`, `service/src/`) before adding anything. Extend it; don't duplicate it. Read the
   files your task builds on or changes, not the whole tree, and never the runner's `.task-runs/` or `scripts/`.
 - If an earlier task that this one depends on is missing or broken, stop (see 4) instead of quietly doing its work.
 
