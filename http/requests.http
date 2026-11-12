@@ -13,7 +13,7 @@
 @run = 001
 
 ### Mobile Top Up in USD: 0.15% of 1000
-# Expect: 200 {"transaction_id": "mtu-{{run}}", "amount": 1000, "asset": "USD", "type": "Mobile Top Up", "fee": 1.50, "rate": 0.0015, "description": "Standard fee rate of 0.15%"}
+# Expect: 200 {"transaction_id": "mtu-{{run}}", "status": "COMPLETED", "amount": 1000, "asset": "USD", "type": "Mobile Top Up", "fee": 1.50, "rate": 0.0015, "description": "Standard fee rate of 0.15%"}
 POST {{host}}/transaction/fee
 Content-Type: application/json
 
@@ -28,7 +28,7 @@ Content-Type: application/json
 }
 
 ### Bank Transfer in EUR: 0.5% of 100 is 0.50, so the minimum of 1.00 applies
-# Expect: 200 {"transaction_id": "bt-{{run}}", "asset": "EUR", "type": "Bank Transfer", "fee": 1.00, "rate": 0.005, "description": "Fee rate of 0.5% (min 1.00 EUR)"}
+# Expect: 200 {"transaction_id": "bt-{{run}}", "status": "COMPLETED", "asset": "EUR", "type": "Bank Transfer", "fee": 1.00, "rate": 0.005, "description": "Fee rate of 0.5% (min 1.00 EUR)"}
 POST {{host}}/transaction/fee
 Content-Type: application/json
 
@@ -43,7 +43,7 @@ Content-Type: application/json
 }
 
 ### Merchant Payment in USD: 1% of 1000 plus 0.30 fixed
-# Expect: 200 {"transaction_id": "mp-{{run}}", "type": "Merchant Payment", "fee": 10.30, "rate": 0.01, "description": "Fee rate of 1% plus 0.30 USD fixed"}
+# Expect: 200 {"transaction_id": "mp-{{run}}", "status": "COMPLETED", "type": "Merchant Payment", "fee": 10.30, "rate": 0.01, "description": "Fee rate of 1% plus 0.30 USD fixed"}
 POST {{host}}/transaction/fee
 Content-Type: application/json
 
@@ -58,7 +58,7 @@ Content-Type: application/json
 }
 
 ### Cash Withdrawal in EUR: a flat 2.00, whatever the amount
-# Expect: 200 {"transaction_id": "cw-{{run}}", "type": "Cash Withdrawal", "fee": 2.00, "rate": 0, "description": "Flat fee of 2.00 EUR"}
+# Expect: 200 {"transaction_id": "cw-{{run}}", "status": "COMPLETED", "type": "Cash Withdrawal", "fee": 2.00, "rate": 0, "description": "Flat fee of 2.00 EUR"}
 POST {{host}}/transaction/fee
 Content-Type: application/json
 
@@ -73,7 +73,7 @@ Content-Type: application/json
 }
 
 ### Duplicate: the Mobile Top Up again, same payload. Same response, and the wallet is not charged again
-# Expect: 200 {"transaction_id": "mtu-{{run}}", "fee": 1.50, "description": "Standard fee rate of 0.15%"}
+# Expect: 200 {"transaction_id": "mtu-{{run}}", "status": "COMPLETED", "fee": 1.50, "description": "Standard fee rate of 0.15%"}
 POST {{host}}/transaction/fee
 Content-Type: application/json
 
@@ -118,7 +118,7 @@ Content-Type: application/json
 }
 
 ### Corrected: the same id once settled. A rejection doesn't use up the id, so this one is charged
-# Expect: 200 {"transaction_id": "settle-{{run}}", "type": "Bank Transfer", "fee": 1.25, "rate": 0.005, "description": "Fee rate of 0.5% (min 1.00 USD)"}
+# Expect: 200 {"transaction_id": "settle-{{run}}", "status": "COMPLETED", "type": "Bank Transfer", "fee": 1.25, "rate": 0.005, "description": "Fee rate of 0.5% (min 1.00 USD)"}
 POST {{host}}/transaction/fee
 Content-Type: application/json
 

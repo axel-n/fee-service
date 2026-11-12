@@ -6,7 +6,8 @@ import com.fasterxml.jackson.databind.annotation.JsonSerialize
 import java.math.BigDecimal
 
 /**
- * The body of `GET /transaction/fee/{id}`: where the fee for a transaction stands.
+ * Where the fee for a transaction stands: the body of `GET /transaction/fee/{id}` and of every `POST /transaction/fee`
+ * that isn't an error (200 `COMPLETED`, 202 `IN_PROGRESS`, D77).
  *
  * The [FeeResponse] fields are present once [Status.COMPLETED], [failureReason] once [Status.FAILED]; absent fields are
  * left out of the JSON. HTTP only and never stored, so its shape may change freely.

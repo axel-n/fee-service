@@ -125,13 +125,15 @@ com.example.fee
 │   └── FakeWalletProperties.kt         wallet.fake: delay (D24, D46)
 │
 ├── api/                                HTTP only
-│   ├── TransactionFeeController.kt     POST /transaction/fee (200, or 202 + Location), GET /transaction/fee/{id} → calls only FeeService
-│   └── ApiExceptionHandler.kt          @RestControllerAdvice: FeeException (+ its `code`) and Spring MVC errors → ProblemDetail (D60, D76)
+│   ├── TransactionFeeController.kt     POST /transaction/fee (200, or 202 + Location), GET /transaction/fee/{id}; both answer FeeStatusResponse (D77) → calls only FeeService
+│   └── ApiExceptionHandler.kt          @RestControllerAdvice: FeeException (+ its `code`) and Spring MVC errors → ProblemDetail (D60, D76);
+│                                       FeeInProgressException → 202 + Location + FeeStatusResponse IN_PROGRESS (D77)
 │
 ├── contract/                           [api module] DTOs shared by HTTP and Restate (pure Kotlin + Jackson annotations, snake_case), D21
 │   ├── FeeRequest.kt                   all fields nullable; enums/dates as String, amount as BigDecimal. Journaled as the workflow input
-│   ├── FeeResponse.kt                  transaction_id, amount, asset, type, fee, rate, description. Stored permanently in TransactionFeeRecord
-│   ├── FeeStatusResponse.kt            GET body: transaction_id, status, the FeeResponse fields once COMPLETED, failure_reason once FAILED
+│   ├── FeeResponse.kt                  transaction_id, amount, asset, type, fee, rate, description. Stored permanently in TransactionFeeRecord;
+│   │                                   HTTP clients get it only inside FeeStatusResponse (D77)
+│   ├── FeeStatusResponse.kt            POST and GET body: transaction_id, status, the FeeResponse fields once COMPLETED, failure_reason once FAILED
 │   │                                   (HTTP only, never stored)
 │   ├── PlainBigDecimalSerializer.kt    BigDecimal as a plain JSON number (D38)
 │   └── error/                          [api module] what the API answers instead of a fee (D76)
@@ -143,8 +145,8 @@ com.example.fee
 │
 ├── application/                        thin gateway to Restate
 │   ├── FeeService.kt                   FeeService: key pre-check → WorkflowKey → submit/attach (bounded by attachTimeout) → FeeOutcome →
-│   │                                   FeeSubmission or FeeException (a ValidationError becomes a ValidationException here);
-│   │                                   FeeSubmission (sealed): Completed(response) → 200, Processing(transactionId) → 202
+│   │                                   FeeStatusResponse COMPLETED (200) or FeeException (a ValidationError becomes a ValidationException here);
+│   │                                   FeeInProgressException(transactionId): no result within attachTimeout → 202 (not a FeeException, D77)
 │   └── WorkflowKey.kt                  WorkflowKey (value class "{transactionId}:{payloadHash}") + PayloadHash: SHA-256 of the canonical FeeRequest
 │                                       (amount normalized: 1000 == 1000.00)
 │
@@ -240,7 +242,7 @@ FeeService
   ├─▶ TransactionIdValidator.validate(request)   key pre-check only (400 if bad)
   ├─▶ PayloadHash.of(request) → WorkflowKey
   ├─▶ FeeWorkflowClient(ingress).submit(key, input) → attach  (also when PREVIOUSLY_ACCEPTED, D30)
-  └─▶ FeeOutcome → FeeSubmission | throw FeeException
+  └─▶ FeeOutcome → FeeStatusResponse | throw FeeException   (still running → throw FeeInProgressException)
       (GET /{id} → TransactionFeeRecordClient(ingress).get(id) → FeeStatusResponse)
 
   ─ ─ ─ ─ Restate server (external) invokes the app's endpoint (port 9080) ─ ─ ─ ─

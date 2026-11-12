@@ -61,6 +61,7 @@ class HappyPathIT @Autowired constructor(
         assertThat(response.status).describedAs("POST status, body %s", response.body).isEqualTo(200)
         val body = response.body
         assertThat(body["transaction_id"].asText()).isEqualTo(transactionId)
+        assertThat(body["status"].asText()).isEqualTo("COMPLETED")
         assertThat(body["amount"].decimalValue()).isEqualByComparingTo(amount)
         assertThat(body["asset"].asText()).isEqualTo(asset)
         assertThat(body["type"].asText()).isEqualTo(type)

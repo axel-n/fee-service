@@ -8,6 +8,7 @@ import com.example.fee.contract.FeeResponse
 import com.example.fee.contract.FeeStatusResponse
 import com.example.fee.contract.error.ChargeFailedException
 import com.example.fee.contract.error.DuplicateTransactionException
+import com.example.fee.contract.error.FeeException
 import com.example.fee.contract.error.TransactionNotFoundException
 import com.example.fee.contract.error.ValidationException
 import com.example.fee.contract.error.WorkflowUnavailableException
@@ -130,7 +131,7 @@ class FeeServiceTest {
         val submission = service().submit(request)
 
         // then
-        assertThat(submission).isEqualTo(FeeSubmission.Completed(response))
+        assertThat(submission).isEqualTo(FeeStatusResponse.completed(response))
     }
 
     @Test
@@ -172,7 +173,7 @@ class FeeServiceTest {
         val submission = service().submit(request)
 
         // then
-        assertThat(submission).isEqualTo(FeeSubmission.Completed(response))
+        assertThat(submission).isEqualTo(FeeStatusResponse.completed(response))
         verify(invocation).attachAsync(anyOptions())
     }
 
@@ -305,16 +306,16 @@ class FeeServiceTest {
     }
 
     @Test
-    fun `no result within the attach timeout is processing with the transaction id`() {
+    fun `no result within the attach timeout is an in progress exception with the transaction id`() {
         // given: the workflow was accepted but never finishes
         submitReturns(CompletableFuture.completedFuture(sendResponse(SendResponse.SendStatus.ACCEPTED)))
         attachReturns(CompletableFuture())
 
-        // when
-        val submission = service(attachTimeout = Duration.ofMillis(50)).submit(request)
-
-        // then
-        assertThat(submission).isEqualTo(FeeSubmission.Processing("txn_001"))
+        // when / then
+        assertThatThrownBy { service(attachTimeout = Duration.ofMillis(50)).submit(request) }
+            .isInstanceOfSatisfying(FeeInProgressException::class.java) {
+                assertThat(it.transactionId).isEqualTo("txn_001")
+            }
     }
 
     @Test
@@ -451,54 +452,53 @@ class FeeServiceTest {
     }
 }
 
-class FeeSubmissionTest {
-
-    private val response = FeeResponse(
-        transactionId = "txn_001",
-        amount = BigDecimal("1000"),
-        asset = "USD",
-        type = "Mobile Top Up",
-        fee = BigDecimal("1.50"),
-        rate = BigDecimal("0.0015"),
-        description = "Standard fee rate of 0.15%",
-    )
+class FeeInProgressExceptionTest {
 
     @Test
-    fun `a completed submission carries the fee response`() {
+    fun `carries the transaction id the caller polls`() {
         // given
-        val submission: FeeSubmission = FeeSubmission.Completed(response)
+        val exception = FeeInProgressException("txn_001")
 
         // when
-        val carried = (submission as FeeSubmission.Completed).response
-
-        // then
-        assertThat(carried).isEqualTo(response)
-        assertThat(carried.fee).isEqualByComparingTo("1.5")
-    }
-
-    @Test
-    fun `a submission still processing carries the transaction id the caller polls`() {
-        // given
-        val submission: FeeSubmission = FeeSubmission.Processing("txn_001")
-
-        // when
-        val transactionId = (submission as FeeSubmission.Processing).transactionId
+        val transactionId = exception.transactionId
 
         // then
         assertThat(transactionId).isEqualTo("txn_001")
     }
 
     @Test
-    fun `submissions are values compared by content`() {
+    fun `names the transaction in a readable message`() {
         // given
-        val first = FeeSubmission.Processing("txn_001")
+        val exception = FeeInProgressException("txn_001")
 
         // when
-        val same = FeeSubmission.Processing("txn_001")
+        val message = exception.message
 
         // then
-        assertThat(same).isEqualTo(first)
-        assertThat(FeeSubmission.Completed(response.copy())).isEqualTo(FeeSubmission.Completed(response))
-        assertThat(FeeSubmission.Processing("txn_002")).isNotEqualTo(first)
+        assertThat(message).isEqualTo("The fee for transaction 'txn_001' is still being processed")
+    }
+
+    @Test
+    fun `is not a fee exception, so it never becomes a problem body`() {
+        // given
+        val exception: RuntimeException = FeeInProgressException("txn_001")
+
+        // when
+        val isFailure = exception is FeeException
+
+        // then
+        assertThat(isFailure).isFalse()
+    }
+
+    @Test
+    fun `has no stack trace because a slow run is expected, not a bug`() {
+        // given
+        val exception = FeeInProgressException("txn_001")
+
+        // when
+        val stackTrace = exception.stackTrace
+
+        // then
+        assertThat(stackTrace).isEmpty()
     }
 }

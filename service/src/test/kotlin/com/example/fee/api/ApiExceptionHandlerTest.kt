@@ -1,5 +1,6 @@
 package com.example.fee.api
 
+import com.example.fee.application.FeeInProgressException
 import com.example.fee.application.FeeService
 import com.example.fee.contract.FeeRequest
 import com.example.fee.contract.error.ChargeFailedException
@@ -19,6 +20,7 @@ import org.mockito.Mockito.verifyNoInteractions
 import org.mockito.Mockito.`when`
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest
+import org.springframework.http.HttpHeaders
 import org.springframework.http.MediaType
 import org.springframework.test.context.bean.override.mockito.MockitoBean
 import org.springframework.test.web.servlet.MockMvc
@@ -26,6 +28,7 @@ import org.springframework.test.web.servlet.ResultActions
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.content
+import org.springframework.test.web.servlet.result.MockMvcResultMatchers.header
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
 import java.net.ConnectException
@@ -175,6 +178,39 @@ class ApiExceptionHandlerTest(@Autowired private val mockMvc: MockMvc) {
             .andExpect(jsonPath("$.code").value("WORKFLOW_UNAVAILABLE"))
             .andExpect(jsonPath("$.detail").value("Fee processing is temporarily unavailable. Retry the same request later"))
         assertThat(result.andReturn().response.contentAsString).doesNotContain("Connection refused", "restate:8080")
+    }
+
+    @Test
+    fun `a fee still processing is 202 with the status location and an in progress body, not a problem`() {
+        // given
+        submitThrows(FeeInProgressException("txn_001"))
+
+        // when
+        val result = postFee()
+
+        // then
+        result
+            .andExpect(status().isAccepted)
+            .andExpect(content().contentType(MediaType.APPLICATION_JSON))
+            .andExpect(header().string(HttpHeaders.LOCATION, "/transaction/fee/txn_001"))
+            .andExpect(jsonPath("$.transaction_id").value("txn_001"))
+            .andExpect(jsonPath("$.status").value("IN_PROGRESS"))
+            .andExpect(jsonPath("$.fee").doesNotExist())
+            .andExpect(jsonPath("$.code").doesNotExist())
+    }
+
+    @Test
+    fun `the status location of a fee still processing encodes the transaction id`() {
+        // given
+        submitThrows(FeeInProgressException("txn 001"))
+
+        // when
+        val result = postFee()
+
+        // then
+        result
+            .andExpect(status().isAccepted)
+            .andExpect(header().string(HttpHeaders.LOCATION, "/transaction/fee/txn%20001"))
     }
 
     @Test

@@ -4,7 +4,6 @@ package com.example.fee.application
 
 import com.example.fee.config.RestateProperties
 import com.example.fee.contract.FeeRequest
-import com.example.fee.contract.FeeResponse
 import com.example.fee.contract.FeeStatusResponse
 import com.example.fee.contract.error.ChargeFailedException
 import com.example.fee.contract.error.DuplicateTransactionException
@@ -29,12 +28,12 @@ import java.util.concurrent.TimeoutException
 
 /**
  * The thin gateway between the API and `FeeWorkflow` (D7): it checks the `transaction_id` it needs for the key, builds
- * the [WorkflowKey], submits the workflow and attaches to it, and maps the [FeeOutcome] to a [FeeSubmission] or a
- * [FeeException]. Every business decision is made inside the workflow.
+ * the [WorkflowKey], submits the workflow and attaches to it, and maps the [FeeOutcome] to a `COMPLETED`
+ * [FeeStatusResponse] or a [FeeException] (D77). Every business decision is made inside the workflow.
  *
  * It always submits, then attaches: a resubmitted payload gets `PREVIOUSLY_ACCEPTED`, its input is ignored, and the
  * attach returns the first run's result, so the same payload is charged once (D8, D30). Submit and attach together wait
- * at most `restate.attach-timeout`. A run still going by then is [FeeSubmission.Processing]; a submit Restate didn't
+ * at most `restate.attach-timeout`. A run still going by then is a [FeeInProgressException]; a submit Restate didn't
  * acknowledge by then, or a Restate call that failed, is a [WorkflowUnavailableException], because resending the same
  * payload is safe (D58).
  *
@@ -48,7 +47,7 @@ class FeeService(
     private val restateProperties: RestateProperties,
 ) {
 
-    fun submit(request: FeeRequest): FeeSubmission {
+    fun submit(request: FeeRequest): FeeStatusResponse {
         transactionIdValidator.validate(request)?.let { throw rejected(it) }
         val transactionId = checkNotNull(request.transactionId) { "transaction_id passed the pre-check but is null" }
         val payloadHash = PayloadHash.of(request)
@@ -67,14 +66,14 @@ class FeeService(
         } catch (e: TimeoutException) {
             if (!accepted(submitted)) throw unavailable("workflow $key", e)
             log.info("Workflow {} still running after {}; answering 202", key, restateProperties.attachTimeout)
-            return FeeSubmission.Processing(transactionId)
+            throw FeeInProgressException(transactionId)
         } catch (e: ExecutionException) {
             throw unavailable("workflow $key", e.cause ?: e)
         } catch (e: InterruptedException) {
             Thread.currentThread().interrupt()
             throw unavailable("workflow $key", e)
         }
-        return toSubmission(transactionId, checkNotNull(result) { "Workflow $key returned no outcome" })
+        return toResponse(transactionId, checkNotNull(result) { "Workflow $key returned no outcome" })
     }
 
     /**
@@ -101,8 +100,8 @@ class FeeService(
         return toStatus(transactionId, record ?: throw TransactionNotFoundException(transactionId))
     }
 
-    private fun toSubmission(transactionId: String, outcome: FeeOutcome): FeeSubmission = when (outcome) {
-        is FeeOutcome.Charged -> FeeSubmission.Completed(outcome.response)
+    private fun toResponse(transactionId: String, outcome: FeeOutcome): FeeStatusResponse = when (outcome) {
+        is FeeOutcome.Charged -> FeeStatusResponse.completed(outcome.response)
         is FeeOutcome.Rejected -> throw rejected(outcome.error)
         is FeeOutcome.Conflict -> throw DuplicateTransactionException(outcome.transactionId)
         is FeeOutcome.Failed -> throw ChargeFailedException(transactionId, outcome.reason)
@@ -143,17 +142,11 @@ class FeeService(
 }
 
 /**
- * What `FeeService` returns for an accepted `POST /transaction/fee`; every other result is a [FeeException].
- * HTTP only, never stored.
+ * Thrown by [FeeService.submit] when the workflow is still running after `restate.attach-timeout`. It isn't a failure, so
+ * it isn't a [FeeException]: `ApiExceptionHandler` answers 202 with `Location: /transaction/fee/{transactionId}`, where
+ * the caller polls the status, and the `IN_PROGRESS` status as body (D59, D77). Resubmitting the same payload attaches to
+ * the same run, so it charges once. HTTP only, never stored.
  */
-sealed interface FeeSubmission {
-
-    /** The fee was charged, now or by an earlier run for the same payload: 200 with [response]. */
-    data class Completed(val response: FeeResponse) : FeeSubmission
-
-    /**
-     * The workflow is still running after `restate.attach-timeout`: 202 with `Location: /transaction/fee/{transactionId}`,
-     * where the caller polls the status. Resubmitting the same payload attaches to the same run, so it charges once.
-     */
-    data class Processing(val transactionId: String) : FeeSubmission
-}
+class FeeInProgressException(val transactionId: String) :
+    // No stack trace: an expected outcome of every slow run, not a bug to locate.
+    RuntimeException("The fee for transaction '$transactionId' is still being processed", null, false, false)

@@ -5,7 +5,7 @@ import com.fasterxml.jackson.databind.annotation.JsonSerialize
 import java.math.BigDecimal
 
 /**
- * The fee charged for a transaction: the body of a successful `POST /transaction/fee`.
+ * The fee charged for a transaction. HTTP clients get it inside a [FeeStatusResponse] (D77).
  *
  * [asset] and [type] are the contract strings (`"USD"`, `"Mobile Top Up"`), not the domain enums, so the stored shape
  * doesn't depend on enum names. [rate] is the configured rate that produced [fee] (`0` for a flat fee).

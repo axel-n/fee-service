@@ -1,5 +1,7 @@
 package com.example.fee.api
 
+import com.example.fee.application.FeeInProgressException
+import com.example.fee.contract.FeeStatusResponse
 import com.example.fee.contract.error.ChargeFailedException
 import com.example.fee.contract.error.DuplicateTransactionException
 import com.example.fee.contract.error.FeeException
@@ -18,6 +20,7 @@ import org.springframework.web.bind.annotation.ExceptionHandler
 import org.springframework.web.bind.annotation.RestControllerAdvice
 import org.springframework.web.context.request.WebRequest
 import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExceptionHandler
+import org.springframework.web.util.UriComponentsBuilder
 
 /**
  * Turns every failure of the API into an RFC 7807 `ProblemDetail` (D19, D60): a [FeeException] answers with its own
@@ -27,9 +30,19 @@ import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExcep
  * A [FeeException] adds its `code` (D76). A rejected field adds `field`, `value` (as sent, `null` when missing) and
  * `message`, which names the allowed values for a 422. A failure about one transaction adds `transaction_id`, a
  * declined charge also `reason`.
+ *
+ * The one exception that isn't a failure, [FeeInProgressException], is answered with the fee's status instead (D77).
  */
 @RestControllerAdvice
 class ApiExceptionHandler : ResponseEntityExceptionHandler() {
+
+    /** A run still going after `restate.attach-timeout`: 202, where to poll, and the `IN_PROGRESS` status (D59). */
+    @ExceptionHandler(FeeInProgressException::class)
+    fun handleInProgress(exception: FeeInProgressException): ResponseEntity<FeeStatusResponse> =
+        ResponseEntity
+            .accepted()
+            .location(statusLocation(exception.transactionId))
+            .body(FeeStatusResponse.inProgress(exception.transactionId))
 
     @ExceptionHandler(ValidationException::class)
     fun handleValidation(exception: ValidationException): ProblemDetail =
@@ -71,6 +84,9 @@ class ApiExceptionHandler : ResponseEntityExceptionHandler() {
         val body = unreadableBodyProblem(status, ex.cause)
         return handleExceptionInternal(ex, body, headers, status, request)
     }
+
+    private fun statusLocation(transactionId: String) =
+        UriComponentsBuilder.fromPath("${TransactionFeeController.PATH}/{id}").buildAndExpand(transactionId).encode().toUri()
 
     private fun problem(exception: FeeException): ProblemDetail =
         ProblemDetail.forStatusAndDetail(HttpStatusCode.valueOf(exception.status), exception.message).apply {

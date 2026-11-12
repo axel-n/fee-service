@@ -34,6 +34,7 @@ corrected payload is processed normally. Nothing is stored outside Restate.
 // POST /transaction/fee                          // 200 OK
 {                                                 {
   "transaction_id": "txn_001",                      "transaction_id": "txn_001",
+                                                    "status": "COMPLETED",
   "amount": 1000,                                   "amount": 1000,
   "asset": "USD",                                   "asset": "USD",
   "asset_type": "FIAT",                             "type": "Mobile Top Up",
@@ -230,7 +231,7 @@ curl -s -X POST localhost:8081/transaction/fee -H 'Content-Type: application/jso
   "type": "Mobile Top Up", "state": "SETTLED - PENDING FEE", "created_at": "2023-08-30 15:42:17.610059"}'
 ```
 ```json
-{"transaction_id":"txn_001","amount":1000,"asset":"USD","type":"Mobile Top Up","fee":1.50,"rate":0.0015,"description":"Standard fee rate of 0.15%"}
+{"transaction_id":"txn_001","status":"COMPLETED","amount":1000,"asset":"USD","type":"Mobile Top Up","fee":1.50,"rate":0.0015,"description":"Standard fee rate of 0.15%"}
 ```
 
 Sending the **same payload again** returns the same body, and the wallet is not charged again.
@@ -243,7 +244,7 @@ curl -s -X POST localhost:8081/transaction/fee -H 'Content-Type: application/jso
   "type": "Bank Transfer", "state": "SETTLED - PENDING FEE", "created_at": "2023-08-30 15:42:17.610059"}'
 ```
 ```json
-{"transaction_id":"txn_002","amount":100,"asset":"EUR","type":"Bank Transfer","fee":1.00,"rate":0.005,"description":"Fee rate of 0.5% (min 1.00 EUR)"}
+{"transaction_id":"txn_002","status":"COMPLETED","amount":100,"asset":"EUR","type":"Bank Transfer","fee":1.00,"rate":0.005,"description":"Fee rate of 0.5% (min 1.00 EUR)"}
 ```
 
 **Look up the record**:

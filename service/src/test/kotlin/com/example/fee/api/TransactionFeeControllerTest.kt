@@ -1,7 +1,6 @@
 package com.example.fee.api
 
 import com.example.fee.application.FeeService
-import com.example.fee.application.FeeSubmission
 import com.example.fee.contract.FeeRequest
 import com.example.fee.contract.FeeResponse
 import com.example.fee.contract.FeeStatusResponse
@@ -62,9 +61,9 @@ class TransactionFeeControllerTest(@Autowired private val mockMvc: MockMvc) {
     )
 
     @Test
-    fun `a charged fee is 200 with the fee response in snake case`() {
+    fun `a charged fee is 200 with the completed status and the fee in snake case`() {
         // given
-        `when`(feeService.submit(request)).thenReturn(FeeSubmission.Completed(response))
+        `when`(feeService.submit(request)).thenReturn(FeeStatusResponse.completed(response))
 
         // when
         val result = mockMvc.perform(
@@ -77,9 +76,11 @@ class TransactionFeeControllerTest(@Autowired private val mockMvc: MockMvc) {
             .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
             .andExpect(header().doesNotExist(HttpHeaders.LOCATION))
             .andExpect(jsonPath("$.transaction_id").value("txn_001"))
+            .andExpect(jsonPath("$.status").value("COMPLETED"))
             .andExpect(jsonPath("$.asset").value("USD"))
             .andExpect(jsonPath("$.type").value("Mobile Top Up"))
             .andExpect(jsonPath("$.description").value("Standard fee rate of 0.15%"))
+            .andExpect(jsonPath("$.failure_reason").doesNotExist())
         val body = result.andReturn().response.contentAsString
         assertThat(body).contains("\"amount\":1000,", "\"fee\":1.50,", "\"rate\":0.0015,")
     }
@@ -87,32 +88,13 @@ class TransactionFeeControllerTest(@Autowired private val mockMvc: MockMvc) {
     @Test
     fun `the request body reaches the service with every snake case field`() {
         // given
-        `when`(feeService.submit(request)).thenReturn(FeeSubmission.Completed(response))
+        `when`(feeService.submit(request)).thenReturn(FeeStatusResponse.completed(response))
 
         // when
         mockMvc.perform(post("/transaction/fee").contentType(MediaType.APPLICATION_JSON).content(requestJson))
 
         // then
         verify(feeService).submit(request)
-    }
-
-    @Test
-    fun `a fee still processing is 202 with the status location and an in progress body`() {
-        // given
-        `when`(feeService.submit(request)).thenReturn(FeeSubmission.Processing("txn_001"))
-
-        // when
-        val result = mockMvc.perform(
-            post("/transaction/fee").contentType(MediaType.APPLICATION_JSON).content(requestJson),
-        )
-
-        // then
-        result
-            .andExpect(status().isAccepted)
-            .andExpect(header().string(HttpHeaders.LOCATION, "/transaction/fee/txn_001"))
-            .andExpect(jsonPath("$.transaction_id").value("txn_001"))
-            .andExpect(jsonPath("$.status").value("IN_PROGRESS"))
-            .andExpect(jsonPath("$.fee").doesNotExist())
     }
 
     @Test
