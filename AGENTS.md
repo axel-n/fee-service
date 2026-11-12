@@ -43,7 +43,8 @@ Follow the call graph in `docs/design.md`:
 - `TransactionFeeController` calls **only** `FeeService`. It handles HTTP concerns only.
 - `FeeService` is a **thin gateway with no business logic**. It runs the `transaction_id` pre-check (needed for the workflow key),
   builds `WorkflowKey`, submits or attaches to `FeeWorkflow`, and maps `FeeOutcome` to HTTP.
-- **All business logic runs inside `FeeWorkflow`** as journaled steps: VALIDATE → MAP → CLAIM → CALCULATE → CHARGE → RECORD.
+- **All business logic runs inside `FeeWorkflow`** as journaled steps: VALIDATE → MAP → CLAIM → CALCULATE → RECORD (RECORD
+  is the charge: the fee is stored as the transaction's charged fee).
   Every step is wrapped with `StepHook.before/after`.
 - `contract`, `domain`, `fee`, `validation` and `ClaimDecider` are **pure Kotlin** (no Restate imports) and unit-tested without Restate.
 - The request/response DTOs live in `contract` and the exceptions with the error body in `contract.error`, both in the **api
@@ -58,15 +59,15 @@ Follow the call graph in `docs/design.md`:
 ### Restate workflow code
 
 - Workflow and virtual object handlers must be **deterministic**. Anything non-deterministic or side-effecting goes
-  inside `ctx.run("name") { … }`. That covers calling `WalletGateway`, reading the clock, random values, UUIDs and I/O.
+  inside `ctx.run("name") { … }`. That covers reading the clock, random values, UUIDs and I/O.
   Validation runs in `ctx.run` too, because it reads the `Clock`.
 - Configuration that affects a workflow decision (the fee numbers) is read only inside `ctx.run`, so a value changed between
   restarts can't make a replay diverge.
-- Business results are **returned** as `FeeOutcome` (`Charged`, `Rejected`, `Conflict`, `Failed`), never encoded in exception messages.
-  A wallet decline → `TerminalException` (not retried). Infrastructure failures → plain exceptions (Restate retries them).
+- Business results are **returned** as `FeeOutcome` (`Charged`, `Rejected`, `Conflict`), never encoded in exception messages.
+  Infrastructure failures → plain exceptions (Restate retries them).
 - The workflow key is `{transaction_id}:{payloadHash}`. Duplicate protection per `transaction_id` is the CLAIM on
   `TransactionFeeRecord`; never bypass it.
-- Keep handlers thin. Logic lives in injected, unit-tested classes (`RequestValidator`, `FeeCalculator`, `ClaimDecider`, `WalletGateway`).
+- Keep handlers thin. Logic lives in injected, unit-tested classes (`RequestValidator`, `FeeCalculator`, `ClaimDecider`).
 - A new workflow step needs a `WorkflowStep` value, the `StepHook` wrapping, and a row in the crash-recovery tests.
 - Changing a handler signature, step order or stored state shape is a breaking change for in-flight workflows; call it out.
   That includes the JSON shape of `FeeRequest` and `FeeResponse` (journaled input and permanently stored record): renaming or
@@ -113,10 +114,10 @@ Follow the call graph in `docs/design.md`:
 - Integration and BDD tests (`*IT`, Failsafe): Testcontainers Restate (`restatedev/restate`), and Cucumber features in
   `service/src/test/resources/features/`.
 - Money assertions use `compareTo` / `isEqualByComparingTo`, so `1.5` equals `1.50`.
-- Assert idempotency by charge count (`chargeCount(key)`), not just by the response.
+- Assert idempotency by the number of CALCULATE executions (`CountingFeeCalculator.count(id)`), not just by the response.
 - **Workflow and recovery tests are first-class.** Every workflow change must keep these passing: crash at each step boundary
-  (`FaultInjectingStepHook`), endpoint restart (`RestateEndpointLifecycle.stop/start`), Restate outage (container frozen with SIGSTOP), transient
-  and declined wallet calls. All of them run in `RestateTestEnvironment` (one shared Testcontainers Restate, which registers
+  (`FaultInjectingStepHook`), endpoint restart (`RestateEndpointLifecycle.stop/start`), Restate outage (container frozen with
+  SIGSTOP). All of them run in `RestateTestEnvironment` (one shared Testcontainers Restate, which registers
   the shared app's endpoint once it is ready).
 - **Tests never use fixed ports.** Restate container ports come from `getMappedPort`, the API runs on `RANDOM_PORT`, and the endpoint
   port is a free port picked per run. Every `restate.*` setting is set by `@DynamicPropertySource`. A Restate or app already running

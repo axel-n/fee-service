@@ -4,8 +4,6 @@ package com.example.fee.restate
 
 import com.example.fee.config.RestateProperties
 import com.example.fee.contract.FeeRequest
-import com.example.fee.record.TransactionFeeRecord
-import com.example.fee.record.TransactionFeeRecordHandlers
 import com.example.fee.workflow.FeeWorkflow
 import com.example.fee.workflow.FeeWorkflowHandlers
 import com.example.fee.workflow.FeeWorkflowInput
@@ -74,21 +72,5 @@ class RestateConfigTest {
 
         // then
         assertThat(first).isNotSameAs(second)
-    }
-
-    @Test
-    fun `fee record client factory addresses the TransactionFeeRecord of the given transaction id`() {
-        // given
-        val client = mock(Client::class.java)
-        val factory = config.transactionFeeRecordClients(client)
-
-        // when
-        factory.forKey("txn_001").send().claim("abc123")
-
-        // then
-        val target = sentRequest(client).target
-        assertThat(target.service).isEqualTo(TransactionFeeRecordHandlers.Metadata.SERVICE_NAME)
-        assertThat(target.key).isEqualTo("txn_001")
-        assertThat(target.handler).isEqualTo("claim")
     }
 }

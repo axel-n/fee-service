@@ -32,12 +32,6 @@ enum class FeeErrorCode(val status: Int) {
     /** The transaction id is claimed by another payload ([DuplicateTransactionException]). */
     DUPLICATE_TRANSACTION(409),
 
-    /** The wallet declined the charge ([ChargeFailedException]). */
-    CHARGE_FAILED(422),
-
-    /** No fee record for the transaction id ([TransactionNotFoundException]). */
-    TRANSACTION_NOT_FOUND(404),
-
     /** Fee processing can't be reached right now ([WorkflowUnavailableException]). */
     WORKFLOW_UNAVAILABLE(503),
 }
@@ -67,23 +61,6 @@ class DuplicateTransactionException(val transactionId: String) : FeeException(
     "Transaction '$transactionId' was already charged or is being processed with a different payload",
 ) {
     override val code: FeeErrorCode get() = FeeErrorCode.DUPLICATE_TRANSACTION
-}
-
-/** The wallet declined the charge for [transactionId] with [reason]; the id may be retried: 422. */
-class ChargeFailedException(val transactionId: String, val reason: String) : FeeException(
-    "The fee for transaction '$transactionId' could not be charged: $reason",
-) {
-    override val code: FeeErrorCode get() = FeeErrorCode.CHARGE_FAILED
-}
-
-/**
- * `GET /transaction/fee/{id}` found no fee record for [transactionId]: it was never submitted, was rejected by
- * validation, or its run hasn't reached CLAIM yet: 404.
- */
-class TransactionNotFoundException(val transactionId: String) : FeeException(
-    "No fee record for transaction '$transactionId'",
-) {
-    override val code: FeeErrorCode get() = FeeErrorCode.TRANSACTION_NOT_FOUND
 }
 
 /**

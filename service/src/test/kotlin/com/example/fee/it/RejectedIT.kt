@@ -6,7 +6,6 @@ import com.example.fee.validation.ValidationError
 import com.example.fee.validation.ValidationError.Kind.INVALID
 import com.example.fee.validation.ValidationError.Kind.UNSUPPORTED
 import com.example.fee.workflow.FeeOutcome
-import com.example.fee.workflow.FeeWorkflow
 import com.example.fee.workflow.WorkflowStep
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
@@ -19,11 +18,11 @@ import java.util.UUID
 
 /**
  * Rejections end to end: every kind of validator rejects through the workflow's VALIDATE step, which returns
- * `FeeOutcome.Rejected` before CLAIM, so nothing is recorded or charged and the `transaction_id` is not used up:
+ * `FeeOutcome.Rejected` before CLAIM, so nothing is calculated or recorded and the `transaction_id` is not used up:
  * the same id with a corrected payload is a new workflow and is charged.
  */
 class RejectedIT @Autowired constructor(
-    private val wallet: TestWalletGateway,
+    private val calculator: CountingFeeCalculator,
     @LocalServerPort apiPort: Int,
 ) : RestateIntegrationTest() {
 
@@ -85,12 +84,9 @@ class RejectedIT @Autowired constructor(
         assertThat(error.kind).isEqualTo(case.kind)
         assertThat(error.message).isEqualTo(problem["message"].asText())
 
-        // then: no record, no charge
+        // then: no record, no calculation
         assertThat(StoredFeeRecords.of(transactionId)).isNull()
-        assertThat(api.status(transactionId).status).isEqualTo(404)
-        val chargeKey = FeeWorkflow.chargeKey(transactionId)
-        assertThat(wallet.callCount(chargeKey)).isZero()
-        assertThat(wallet.chargeCount(chargeKey)).isZero()
+        assertThat(calculator.count(transactionId)).isZero()
 
         // when: the same id with the corrected payload
         val corrected = api.submit(bodyOf(valid))
@@ -103,8 +99,7 @@ class RejectedIT @Autowired constructor(
         val record = StoredFeeRecords.of(transactionId)
         assertThat(record?.status).isEqualTo(FeeRecordStatus.COMPLETED)
         assertThat(record?.response?.fee).isEqualByComparingTo(BigDecimal("1.50"))
-        assertThat(wallet.chargeCount(chargeKey)).isEqualTo(1)
-        assertThat(wallet.callCount(chargeKey)).isEqualTo(1)
+        assertThat(calculator.count(transactionId)).isEqualTo(1)
 
         // then: the rejected payload keeps its own result
         assertThat(StoredWorkflows.outcome(rejected)).isEqualTo(outcome)
@@ -129,7 +124,7 @@ class RejectedIT @Autowired constructor(
         )
         assertThat(StoredWorkflows.step(rejected)).isNull()
         assertThat(StoredFeeRecords.of(transactionId)).isNull()
-        assertThat(wallet.callCount(FeeWorkflow.chargeKey(transactionId))).isZero()
+        assertThat(calculator.count(transactionId)).isZero()
     }
 
     private fun newTransactionId() = "it-rejected-${UUID.randomUUID().toString().take(13)}"

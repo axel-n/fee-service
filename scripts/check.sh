@@ -54,15 +54,15 @@ rule() {
 echo "== rules (AGENTS.md)"
 # Only the code that handles money: a Double elsewhere (say, a backoff multiplier in restate/ or RestateProperties) is
 # not money. Of config/, only the fee numbers are money.
-rule "Money is BigDecimal: no Double/Float in the api module, domain, fee, validation, wallet, application, workflow, record or the fee properties (hard rule 3)" \
-  "$(g '\b(Double|Float)\b|\.to(Double|Float)\(' "$API" "$PKG/domain" "$PKG/fee" "$PKG/validation" "$PKG/wallet" "$PKG/application" "$PKG/workflow" "$PKG/record" "$PKG/config/FeeProperties.kt")"
+rule "Money is BigDecimal: no Double/Float in the api module, domain, fee, validation, application, workflow, record or the fee properties (hard rule 3)" \
+  "$(g '\b(Double|Float)\b|\.to(Double|Float)\(' "$API" "$PKG/domain" "$PKG/fee" "$PKG/validation" "$PKG/application" "$PKG/workflow" "$PKG/record" "$PKG/config/FeeProperties.kt")"
 rule "Create BigDecimal from a String, never from a floating-point literal (hard rule 3)" \
   "$(g 'BigDecimal\(\s*-?[0-9]+\.[0-9]' "${ALL_MAIN[@]}" "${ALL_TEST[@]}")"
 rule "The api module, domain, fee, validation and ClaimDecider are pure: no Restate imports" \
   "$(g '^import dev\.restate' "${ALL_MAIN[0]}" "$PKG/domain" "$PKG/fee" "$PKG/validation" "$PKG/record/ClaimDecider.kt")"
 # Other services depend on it, so it carries no framework: only Jackson and Kotlin
 rule "The api module is the published contract: no Spring imports, and nothing of the service" \
-  "$(g '^import (org\.springframework|com\.example\.fee\.(api|application|config|domain|fee|record|restate|validation|wallet|workflow))\.' "${ALL_MAIN[0]}")"
+  "$(g '^import (org\.springframework|com\.example\.fee\.(api|application|config|domain|fee|record|restate|validation|workflow))\.' "${ALL_MAIN[0]}")"
 rule "Nothing outside api imports api" \
   "$(g '^import com\.example\.fee\.api\.' "$MAIN" | grep -v "^$PKG/api/")"
 rule "Inject Clock: no now() or currentTimeMillis() without a Clock in production code" \

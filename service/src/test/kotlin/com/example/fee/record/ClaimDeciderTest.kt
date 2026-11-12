@@ -65,18 +65,6 @@ class ClaimDeciderTest {
         assertThat(result).isEqualTo(ClaimResult.Conflict)
     }
 
-    @ParameterizedTest
-    @ValueSource(strings = [HASH, OTHER_HASH])
-    fun `a failed record frees the id for a new claim, whatever the payload`(hash: String) {
-        // given
-        val record = FeeRecord.inProgress(HASH).fail("Charge declined: insufficient funds")
-
-        // when
-        val result = decider.decide(record, hash)
-
-        // then
-        assertThat(result).isEqualTo(ClaimResult.New)
-    }
 }
 
 class ClaimResultTest {

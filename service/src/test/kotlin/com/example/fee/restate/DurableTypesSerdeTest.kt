@@ -2,14 +2,13 @@ package com.example.fee.restate
 
 import com.example.fee.contract.FeeRequest
 import com.example.fee.contract.FeeResponse
-import com.example.fee.domain.Asset
 import com.example.fee.fee.FeeQuote
 import com.example.fee.record.ClaimResult
 import com.example.fee.record.FeeRecord
 import com.example.fee.record.FeeRecords.HASH
 import com.example.fee.record.FeeRecords.response
 import com.example.fee.validation.ValidationError
-import com.example.fee.wallet.ChargeReceipt
+
 import com.example.fee.workflow.FeeOutcome
 import com.example.fee.workflow.FeeWorkflowInput
 import com.example.fee.workflow.WorkflowStep
@@ -60,19 +59,18 @@ class DurableTypesSerdeTest {
             Arguments.of("FeeOutcome.Charged", FeeOutcome.Charged(response), FeeOutcome::class.java),
             Arguments.of("FeeOutcome.Rejected", FeeOutcome.Rejected(error), FeeOutcome::class.java),
             Arguments.of("FeeOutcome.Conflict", FeeOutcome.Conflict("txn_001"), FeeOutcome::class.java),
-            Arguments.of("FeeOutcome.Failed", FeeOutcome.Failed("Charge declined"), FeeOutcome::class.java),
+
             Arguments.of("ClaimResult.New", ClaimResult.New, ClaimResult::class.java),
             Arguments.of("ClaimResult.AlreadyCompleted", ClaimResult.AlreadyCompleted(response), ClaimResult::class.java),
             Arguments.of("ClaimResult.InProgress", ClaimResult.InProgress, ClaimResult::class.java),
             Arguments.of("ClaimResult.Conflict", ClaimResult.Conflict, ClaimResult::class.java),
             Arguments.of("FeeRecord IN_PROGRESS", FeeRecord.inProgress(HASH), FeeRecord::class.java),
             Arguments.of("FeeRecord COMPLETED", FeeRecord.inProgress(HASH).complete(response), FeeRecord::class.java),
-            Arguments.of("FeeRecord FAILED", FeeRecord.inProgress(HASH).fail("Charge declined"), FeeRecord::class.java),
+
             Arguments.of("ValidationError", error, ValidationError::class.java),
             Arguments.of("FeeRequest", request, FeeRequest::class.java),
             Arguments.of("FeeResponse", response, FeeResponse::class.java),
             Arguments.of("FeeQuote", FeeQuote(BigDecimal("1.50"), BigDecimal("0.0015"), "Fee"), FeeQuote::class.java),
-            Arguments.of("ChargeReceipt", ChargeReceipt("c-1", "fee-txn_001", BigDecimal("1.50"), Asset.USD), ChargeReceipt::class.java),
         ) + WorkflowStep.entries.map { Arguments.of("WorkflowStep.$it", it, WorkflowStep::class.java) }
     }
 }

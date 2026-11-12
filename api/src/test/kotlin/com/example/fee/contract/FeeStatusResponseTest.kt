@@ -54,21 +54,6 @@ class FeeStatusResponseTest {
     }
 
     @Test
-    fun `failed status carries the failure reason under failure_reason`() {
-        // given
-        val status = FeeStatusResponse.failed("txn_001", "Charge declined: insufficient funds")
-
-        // when
-        val json = mapper.write(status, FeeStatusResponse::class.java)
-
-        // then
-        assertThat(ContractMapper.fieldNames(json)).containsExactlyInAnyOrder("transaction_id", "status", "failure_reason")
-        val node = ContractMapper.tree(json)
-        assertThat(node["status"].asText()).isEqualTo("FAILED")
-        assertThat(node["failure_reason"].asText()).isEqualTo("Charge declined: insufficient funds")
-    }
-
-    @Test
     fun `round-trips a completed status unchanged`() {
         // given
         val status = FeeStatusResponse.completed(response)

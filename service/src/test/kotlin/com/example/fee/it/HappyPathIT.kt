@@ -1,7 +1,6 @@
 package com.example.fee.it
 
 import com.example.fee.record.FeeRecordStatus
-import com.example.fee.workflow.FeeWorkflow
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.CsvSource
@@ -12,10 +11,10 @@ import java.util.UUID
 
 /**
  * The happy path end to end: every transaction type in every supported asset goes through the real app and the shared
- * Restate (VALIDATE → MAP → CLAIM → CALCULATE → CHARGE → RECORD) and comes back charged with the packaged fees.
+ * Restate (VALIDATE → MAP → CLAIM → CALCULATE → RECORD) and comes back charged with the packaged fees.
  */
 class HappyPathIT @Autowired constructor(
-    private val wallet: TestWalletGateway,
+    private val calculator: CountingFeeCalculator,
     @LocalServerPort apiPort: Int,
 ) : RestateIntegrationTest() {
 
@@ -78,17 +77,8 @@ class HappyPathIT @Autowired constructor(
         assertThat(record?.response?.rate).isEqualByComparingTo(rate)
         assertThat(record?.response?.description).isEqualTo(description)
 
-        // then: the API reports it as completed
-        val status = api.status(transactionId)
-        assertThat(status.status).isEqualTo(200)
-        assertThat(status.body["status"].asText()).isEqualTo("COMPLETED")
-        assertThat(status.body["fee"].decimalValue()).isEqualByComparingTo(fee)
 
-        // then: the wallet was charged once, with the fee in the transaction's asset
-        val chargeKey = FeeWorkflow.chargeKey(transactionId)
-        assertThat(wallet.chargeCount(chargeKey)).isEqualTo(1)
-        assertThat(wallet.callCount(chargeKey)).isEqualTo(1)
-        assertThat(wallet.receipt(chargeKey)?.amount).isEqualByComparingTo(fee)
-        assertThat(wallet.receipt(chargeKey)?.asset?.value).isEqualTo(asset)
+        // then: the fee was calculated once
+        assertThat(calculator.count(transactionId)).describedAs("CALCULATE executions").isEqualTo(1)
     }
 }

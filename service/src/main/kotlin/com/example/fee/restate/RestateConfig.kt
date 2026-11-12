@@ -3,7 +3,7 @@
 package com.example.fee.restate
 
 import com.example.fee.config.RestateProperties
-import com.example.fee.record.TransactionFeeRecordClient
+
 import com.example.fee.workflow.FeeWorkflowClient
 import dev.restate.client.Client
 import dev.restate.serde.jackson.JacksonSerdeFactory
@@ -11,8 +11,8 @@ import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 
 /**
- * The app's side of the Restate ingress: one shared [Client] and the keyed factories `FeeService` uses to reach the
- * generated clients. Creating the client opens no connection, so startup doesn't need Restate to be up.
+ * The app's side of the Restate ingress: one shared [Client] and the keyed factory `FeeService` uses to reach the
+ * generated workflow client. Creating the client opens no connection, so startup doesn't need Restate to be up.
  */
 @Configuration(proxyBeanMethods = false)
 class RestateConfig {
@@ -26,9 +26,6 @@ class RestateConfig {
     fun feeWorkflowClients(restateIngressClient: Client): FeeWorkflowClients =
         FeeWorkflowClients { workflowKey -> FeeWorkflowClient.fromClient(restateIngressClient, workflowKey) }
 
-    @Bean
-    fun transactionFeeRecordClients(restateIngressClient: Client): TransactionFeeRecordClients =
-        TransactionFeeRecordClients { transactionId -> TransactionFeeRecordClient.fromClient(restateIngressClient, transactionId) }
 }
 
 /**
@@ -41,12 +38,3 @@ fun interface FeeWorkflowClients {
     fun forKey(workflowKey: String): FeeWorkflowClient.IngressClient
 }
 
-/**
- * Creates the generated ingress client of `TransactionFeeRecord` for one `transaction_id`. Generated clients are bound
- * to a key, so `FeeService` gets this factory instead of a client, and tests replace it with a mock.
- */
-fun interface TransactionFeeRecordClients {
-
-    /** The ingress client of the virtual object `TransactionFeeRecord/{transactionId}`. */
-    fun forKey(transactionId: String): TransactionFeeRecordClient.IngressClient
-}

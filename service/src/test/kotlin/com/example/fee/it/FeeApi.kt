@@ -4,7 +4,6 @@ import com.fasterxml.jackson.databind.DeserializationFeature
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import java.net.URI
-import java.net.URLEncoder
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
@@ -16,11 +15,10 @@ import java.time.Duration
  */
 class FeeApi(port: Int, private val timeout: Duration = Duration.ofSeconds(60)) {
 
-    /** A response: its status code, its body as JSON and its `Location` header (`null` when absent). */
-    data class Response(val status: Int, val body: JsonNode, val location: String? = null)
+    /** A response: its status code and its body as JSON. */
+    data class Response(val status: Int, val body: JsonNode)
 
     private val root = "http://localhost:$port"
-    private val baseUrl = "$root$FEE_PATH"
     private val http = HttpClient.newBuilder().connectTimeout(timeout).build()
     private val mapper = ObjectMapper().enable(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS)
 
@@ -32,17 +30,10 @@ class FeeApi(port: Int, private val timeout: Duration = Duration.ofSeconds(60)) 
                 .POST(HttpRequest.BodyPublishers.ofString(mapper.writeValueAsString(body))),
         )
 
-    /** `GET /transaction/fee/{transactionId}`. */
-    fun status(transactionId: String): Response =
-        send(HttpRequest.newBuilder(URI("$baseUrl/${URLEncoder.encode(transactionId, Charsets.UTF_8)}")).GET())
 
     private fun send(request: HttpRequest.Builder): Response {
         val response = http.send(request.timeout(timeout).build(), HttpResponse.BodyHandlers.ofString())
-        return Response(
-            response.statusCode(),
-            mapper.readTree(response.body()),
-            response.headers().firstValue("Location").orElse(null),
-        )
+        return Response(response.statusCode(), mapper.readTree(response.body()))
     }
 
     companion object {

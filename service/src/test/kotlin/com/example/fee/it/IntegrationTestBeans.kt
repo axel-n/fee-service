@@ -18,11 +18,6 @@ class IntegrationTestBeans {
     @Bean
     fun endpointRegistration(): EndpointRegistration = EndpointRegistration()
 
-    // @Primary: FakeWalletGateway stays a bean, but the workflow gets this one
-    @Bean
-    @Primary
-    fun testWalletGateway(): TestWalletGateway = TestWalletGateway()
-
     // @Primary over NoOpStepHook; unarmed it does nothing
     @Bean
     @Primary

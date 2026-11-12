@@ -8,7 +8,6 @@ import com.example.fee.record.FeeRecord
 import com.example.fee.record.FeeRecordStatus
 import com.example.fee.record.TransactionFeeRecordClient
 import com.example.fee.workflow.FeeOutcome
-import com.example.fee.workflow.FeeWorkflow
 import com.example.fee.workflow.FeeWorkflowClient
 import com.example.fee.workflow.FeeWorkflowInput
 import com.example.fee.workflow.WorkflowStep
@@ -29,7 +28,7 @@ import java.util.UUID
  * charged payload, and the old run purged through the admin API, then the same payload sent through the app again.
  */
 class RetentionExpiredIT @Autowired constructor(
-    private val wallet: TestWalletGateway,
+    private val calculator: CountingFeeCalculator,
     @LocalServerPort apiPort: Int,
 ) : RestateIntegrationTest() {
 
@@ -102,7 +101,7 @@ class RetentionExpiredIT @Autowired constructor(
         assertChargedOnce(request)
     }
 
-    // A payload charged through the API, so its record is COMPLETED and the wallet charged once
+    // A payload charged through the API, so its record is COMPLETED and its fee calculated once
     private fun chargedRequest(): FeeRequest {
         val request = validRequest(newTransactionId())
         val response = api.submit(bodyOf(request))
@@ -127,10 +126,8 @@ class RetentionExpiredIT @Autowired constructor(
     }
 
     private fun assertChargedOnce(request: FeeRequest) {
-        val chargeKey = FeeWorkflow.chargeKey(transactionIdOf(request))
-        assertThat(wallet.chargeCount(chargeKey)).isEqualTo(1)
-        assertThat(wallet.callCount(chargeKey)).describedAs("CHARGE executions").isEqualTo(1)
-        assertThat(wallet.receipt(chargeKey)?.amount).isEqualByComparingTo(BigDecimal("1.50"))
+        assertThat(calculator.count(transactionIdOf(request))).describedAs("CALCULATE executions").isEqualTo(1)
+        assertThat(StoredFeeRecords.of(transactionIdOf(request))?.response?.fee).isEqualByComparingTo(BigDecimal("1.50"))
     }
 
     private fun transactionIdOf(request: FeeRequest): String = checkNotNull(request.transactionId)

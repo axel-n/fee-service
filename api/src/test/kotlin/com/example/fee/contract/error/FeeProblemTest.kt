@@ -108,14 +108,10 @@ class FeeProblemTest {
         // given
         val originals = listOf(
             DuplicateTransactionException("txn_001"),
-            ChargeFailedException("txn_002", "insufficient funds"),
-            TransactionNotFoundException("txn_404"),
             WorkflowUnavailableException(),
         )
         val problems = listOf(
             FeeProblem(status = 409, code = "DUPLICATE_TRANSACTION", transactionId = "txn_001"),
-            FeeProblem(status = 422, code = "CHARGE_FAILED", transactionId = "txn_002", reason = "insufficient funds"),
-            FeeProblem(status = 404, code = "TRANSACTION_NOT_FOUND", transactionId = "txn_404"),
             FeeProblem(status = 503, code = "WORKFLOW_UNAVAILABLE"),
         )
 
@@ -125,7 +121,7 @@ class FeeProblemTest {
         // then
         assertThat(rebuilt.map { it?.javaClass }).containsExactlyElementsOf(originals.map { it.javaClass })
         assertThat(rebuilt.map { it?.message }).containsExactlyElementsOf(originals.map { it.message })
-        assertThat(rebuilt.map { it?.status }).containsExactly(409, 422, 404, 503)
+        assertThat(rebuilt.map { it?.status }).containsExactly(409, 503)
     }
 
     @Test
@@ -145,11 +141,11 @@ class FeeProblemTest {
     @Test
     fun `a problem missing a property its exception needs is not rebuilt`() {
         // given
-        val withoutReason = FeeProblem(status = 422, code = "CHARGE_FAILED", transactionId = "txn_002")
+        val withoutId = FeeProblem(status = 409, code = "DUPLICATE_TRANSACTION")
         val withoutField = FeeProblem(status = 400, code = "INVALID_REQUEST", message = "Field is required")
 
         // when
-        val exceptions = listOf(withoutReason.toException(), withoutField.toException())
+        val exceptions = listOf(withoutId.toException(), withoutField.toException())
 
         // then
         assertThat(exceptions).containsOnlyNulls()

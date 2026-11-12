@@ -3,7 +3,6 @@ package com.example.fee.it
 import com.example.fee.contract.FeeRequest
 import com.example.fee.record.FeeRecordStatus
 import com.example.fee.workflow.FeeOutcome
-import com.example.fee.workflow.FeeWorkflow
 import com.example.fee.workflow.WorkflowStep
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.AfterEach
@@ -19,22 +18,22 @@ import java.util.concurrent.TimeUnit
 /**
  * Restate goes away and comes back. The outage is a frozen Restate container (SIGSTOP): connections are accepted,
  * nothing answers. A request that Restate never acknowledged gets a 503 and can be sent again safely; a workflow
- * that was already running when Restate froze completes once it thaws, with one charge.
+ * that was already running when Restate froze completes once it thaws, with one fee record.
  */
 class RestateOutageIT @Autowired constructor(
-    private val wallet: TestWalletGateway,
+    private val calculator: CountingFeeCalculator,
     @LocalServerPort apiPort: Int,
 ) : RestateIntegrationTest() {
 
     private val restate = RestateTestEnvironment
     private val api = FeeApi(apiPort)
-    private val blockedKeys = mutableListOf<String>()
+    private val blockedIds = mutableListOf<String>()
 
     @AfterEach
     fun restoreRestate() {
-        // a failed test must not leave Restate frozen or a wallet thread waiting for the other ITs
+        // a failed test must not leave Restate frozen or a thread waiting for the other ITs
         restate.thaw()
-        blockedKeys.forEach(wallet::releaseCharges)
+        blockedIds.forEach(calculator::release)
     }
 
     @Test
@@ -42,17 +41,16 @@ class RestateOutageIT @Autowired constructor(
         // given
         val transactionId = "it-outage-${UUID.randomUUID().toString().take(13)}"
         val request = validRequest(transactionId)
-        val chargeKey = FeeWorkflow.chargeKey(transactionId)
         restate.freeze()
         assertThat(restateIsUnreachable()).describedAs("Restate frozen").isTrue()
 
         // when
         val duringOutage = api.submit(bodyOf(request))
 
-        // then: Restate never acknowledged the submit within the attach timeout → 503, nothing charged
+        // then: Restate never acknowledged the submit within the attach timeout → 503, nothing calculated
         assertThat(duringOutage.status).describedAs("POST status, body %s", duringOutage.body).isEqualTo(503)
         assertThat(duringOutage.body["status"].asInt()).isEqualTo(503)
-        assertThat(wallet.callCount(chargeKey)).describedAs("wallet calls during the outage").isEqualTo(0)
+        assertThat(calculator.count(transactionId)).describedAs("calculations during the outage").isEqualTo(0)
 
         // when
         restate.thaw()
@@ -64,26 +62,24 @@ class RestateOutageIT @Autowired constructor(
         assertThat(resubmitted.body["fee"].decimalValue()).isEqualByComparingTo(BigDecimal("1.50"))
         assertThat(StoredWorkflows.outcome(request)).isInstanceOf(FeeOutcome.Charged::class.java)
         assertThat(StoredFeeRecords.of(transactionId)?.status).isEqualTo(FeeRecordStatus.COMPLETED)
-        assertThat(wallet.chargeCount(chargeKey)).describedAs("charges").isEqualTo(1)
-        assertThat(wallet.receipt(chargeKey)?.amount).isEqualByComparingTo(BigDecimal("1.50"))
+        assertThat(calculator.count(transactionId)).describedAs("CALCULATE executions").isEqualTo(1)
     }
 
     @Test
-    fun `a workflow running when Restate freezes completes with one charge once Restate thaws`() {
-        // given: the workflow is inside CHARGE, held by the wallet
+    fun `a workflow running when Restate freezes completes with one fee record once Restate thaws`() {
+        // given: the workflow is inside CALCULATE, held there
         val transactionId = "it-outage-${UUID.randomUUID().toString().take(13)}"
         val request = validRequest(transactionId)
-        val chargeKey = FeeWorkflow.chargeKey(transactionId)
-        wallet.blockCharges(chargeKey)
-        blockedKeys += chargeKey
+        calculator.block(transactionId)
+        blockedIds += transactionId
         val post = CompletableFuture.supplyAsync { api.submit(bodyOf(request)) }
-        awaitUntil("CHARGE has reached the wallet") { wallet.callCount(chargeKey) == 1 }
-        assertThat(StoredWorkflows.step(request)).isEqualTo(WorkflowStep.CHARGE)
+        awaitUntil("CALCULATE has started") { calculator.count(transactionId) == 1 }
+        assertThat(StoredWorkflows.step(request)).isEqualTo(WorkflowStep.CALCULATE)
 
-        // when: Restate freezes, and CHARGE finishes while it is frozen
+        // when: Restate freezes, and CALCULATE finishes while it is frozen
         restate.freeze()
-        wallet.releaseCharges(chargeKey)
-        awaitUntil("the wallet has charged") { wallet.chargeCount(chargeKey) == 1 }
+        calculator.release(transactionId)
+        awaitUntil("the calculation has finished") { calculator.finishedCount(transactionId) == 1 }
 
         // then: Restate can't have taken the result yet
         assertThat(restateIsUnreachable()).describedAs("Restate frozen").isTrue()
@@ -106,8 +102,7 @@ class RestateOutageIT @Autowired constructor(
             assertThat(response.body["fee"].decimalValue()).isEqualByComparingTo(BigDecimal("1.50"))
         }
 
-        // then: exactly one charge, and the record is completed with it
-        assertThat(wallet.chargeCount(chargeKey)).describedAs("charges").isEqualTo(1)
+        // then: the record is completed with the fee
         val record = StoredFeeRecords.of(transactionId)
         assertThat(record?.status).isEqualTo(FeeRecordStatus.COMPLETED)
         assertThat(record?.response?.fee).isEqualByComparingTo(BigDecimal("1.50"))

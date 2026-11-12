@@ -4,7 +4,6 @@ package com.example.fee.workflow
 
 import com.example.fee.contract.FeeRequest
 import com.example.fee.contract.FeeResponse
-import com.example.fee.domain.Asset
 import com.example.fee.domain.TransactionMapper
 import com.example.fee.record.ClaimResult
 import com.example.fee.record.FeeRecords.HASH
@@ -13,17 +12,12 @@ import com.example.fee.validation.TransactionValidator
 import com.example.fee.validation.ValidationError
 import com.example.fee.validation.allRulesCalculator
 import com.example.fee.validation.validRequest
-import com.example.fee.wallet.ChargeDeclinedException
-import com.example.fee.wallet.ChargeReceipt
-import com.example.fee.wallet.FakeWalletGateway
-import com.example.fee.wallet.WalletGateway
 import com.example.fee.workflow.FeeWorkflow.Companion.STEP
 import dev.restate.common.Request
 import dev.restate.common.Target
 import dev.restate.common.function.ThrowingSupplier
 import dev.restate.sdk.CallDurableFuture
 import dev.restate.sdk.WorkflowContext
-import dev.restate.sdk.common.TerminalException
 import dev.restate.sdk.endpoint.definition.HandlerType
 import dev.restate.sdk.endpoint.definition.ServiceType
 import org.assertj.core.api.Assertions.assertThat
@@ -45,7 +39,6 @@ import java.util.Optional
  */
 class FeeWorkflowTest {
 
-    private val wallet = FakeWalletGateway()
     private val hook = RecordingStepHook()
 
     private val expectedResponse = FeeResponse(
@@ -68,24 +61,6 @@ class FeeWorkflowTest {
 
         // then
         assertThat(outcome).isEqualTo(FeeOutcome.Charged(expectedResponse))
-        assertThat(wallet.chargeCount("fee-txn_001")).isEqualTo(1)
-    }
-
-    @Test
-    fun `charges the calculated fee in the transaction's asset under the transaction's idempotency key`() {
-        // given
-        val recordingWallet = RecordingWallet()
-        val ctx = FakeWorkflowContext(claim = ClaimResult.New)
-
-        // when
-        workflow(walletGateway = recordingWallet).run(ctx.ctx, input())
-
-        // then
-        assertThat(recordingWallet.charges).hasSize(1)
-        val (key, amount, asset) = recordingWallet.charges.single()
-        assertThat(key).isEqualTo("fee-txn_001")
-        assertThat(amount).isEqualByComparingTo(BigDecimal("1.5"))
-        assertThat(asset).isEqualTo(Asset.USD)
     }
 
     @Test
@@ -118,13 +93,12 @@ class FeeWorkflowTest {
             "before MAP $KEY", "after MAP $KEY",
             "before CLAIM $KEY", "after CLAIM $KEY",
             "before CALCULATE $KEY", "after CALCULATE $KEY",
-            "before CHARGE $KEY", "after CHARGE $KEY",
             "before RECORD $KEY", "after RECORD $KEY",
         )
     }
 
     @Test
-    fun `journals validation, calculation and the charge, and only those, with ctx run`() {
+    fun `journals validation and calculation, and only those, with ctx run`() {
         // given
         val ctx = FakeWorkflowContext(claim = ClaimResult.New)
 
@@ -132,7 +106,7 @@ class FeeWorkflowTest {
         workflow().run(ctx.ctx, input())
 
         // then
-        assertThat(ctx.runs).containsExactly("validate", "calculate", "charge")
+        assertThat(ctx.runs).containsExactly("validate", "calculate")
     }
 
     @Test
@@ -146,7 +120,7 @@ class FeeWorkflowTest {
         // then
         assertThat(ctx.stepWrites).containsExactly(
             WorkflowStep.VALIDATE, WorkflowStep.MAP, WorkflowStep.CLAIM, WorkflowStep.CALCULATE,
-            WorkflowStep.CHARGE, WorkflowStep.RECORD, WorkflowStep.DONE,
+            WorkflowStep.RECORD, WorkflowStep.DONE,
         )
         assertThat(workflow().status(ctx.ctx)).isEqualTo(WorkflowStep.DONE)
     }
@@ -163,7 +137,6 @@ class FeeWorkflowTest {
         // then
         assertThat(outcome).isEqualTo(FeeOutcome.Rejected(error))
         assertThat(ctx.calls).isEmpty()
-        assertThat(wallet.chargeCount("fee-txn_001")).isZero()
         assertThat(ctx.stepWrites).containsExactly(WorkflowStep.VALIDATE, WorkflowStep.DONE)
         assertThat(hook.events).containsExactly("before VALIDATE $KEY", "after VALIDATE $KEY")
     }
@@ -179,7 +152,7 @@ class FeeWorkflowTest {
 
         // then
         assertThat(outcome).isEqualTo(FeeOutcome.Charged(stored))
-        assertThat(wallet.chargeCount("fee-txn_001")).isZero()
+        assertThat(ctx.runs).containsExactly("validate")
         assertThat(ctx.calls.map { it.target.handler }).containsExactly("claim")
         assertThat(ctx.stepWrites).containsExactly(
             WorkflowStep.VALIDATE, WorkflowStep.MAP, WorkflowStep.CLAIM, WorkflowStep.DONE,
@@ -196,7 +169,6 @@ class FeeWorkflowTest {
 
         // then
         assertThat(outcome).isEqualTo(FeeOutcome.Conflict("txn_001"))
-        assertThat(wallet.chargeCount("fee-txn_001")).isZero()
         assertThat(ctx.calls.map { it.target.handler }).containsExactly("claim")
     }
 
@@ -210,17 +182,17 @@ class FeeWorkflowTest {
 
         // then
         assertThat(outcome).isEqualTo(FeeOutcome.Conflict("txn_001"))
-        assertThat(wallet.chargeCount("fee-txn_001")).isZero()
+        assertThat(ctx.calls.map { it.target.handler }).containsExactly("claim")
         assertThat(ctx.stepWrites.last()).isEqualTo(WorkflowStep.DONE)
     }
 
     @Test
-    fun `a crash injected before CHARGE stops the workflow before the wallet is called, with status CHARGE`() {
+    fun `a crash injected before RECORD stops the workflow before the fee is recorded, with status RECORD`() {
         // given
         val crash = IllegalStateException("injected crash")
         val crashingHook = object : StepHook {
             override fun before(step: WorkflowStep, workflowKey: String) {
-                if (step == WorkflowStep.CHARGE) throw crash
+                if (step == WorkflowStep.RECORD) throw crash
             }
 
             override fun after(step: WorkflowStep, workflowKey: String) = Unit
@@ -230,92 +202,22 @@ class FeeWorkflowTest {
 
         // when / then
         assertThatThrownBy { workflow.run(ctx.ctx, input()) }.isSameAs(crash)
-        assertThat(wallet.chargeCount("fee-txn_001")).isZero()
-        assertThat(workflow.status(ctx.ctx)).isEqualTo(WorkflowStep.CHARGE)
+        assertThat(ctx.calls.map { it.target.handler }).containsExactly("claim")
+        assertThat(workflow.status(ctx.ctx)).isEqualTo(WorkflowStep.RECORD)
     }
 
     @Test
-    fun `a declined charge is recorded as failed and returned as Failed with the wallet's reason`() {
+    fun `a failure inside CALCULATE propagates as a plain exception, so Restate retries it, and nothing is recorded`() {
         // given
+        val outage = IllegalStateException("configuration unreadable")
         val ctx = FakeWorkflowContext(claim = ClaimResult.New)
-
-        // when
-        val outcome = workflow(walletGateway = DecliningWallet("insufficient funds")).run(ctx.ctx, input())
-
-        // then
-        assertThat(outcome).isEqualTo(FeeOutcome.Failed("insufficient funds"))
-        assertThat(ctx.calls).containsExactly(
-            Call(Target.virtualObject("TransactionFeeRecord", "txn_001", "claim"), HASH),
-            Call(Target.virtualObject("TransactionFeeRecord", "txn_001", "fail"), "insufficient funds"),
-        )
-        assertThat(ctx.stepWrites).containsExactly(
-            WorkflowStep.VALIDATE, WorkflowStep.MAP, WorkflowStep.CLAIM, WorkflowStep.CALCULATE,
-            WorkflowStep.CHARGE, WorkflowStep.RECORD, WorkflowStep.DONE,
-        )
-        assertThat(hook.events.takeLast(4)).containsExactly(
-            "before CHARGE $KEY", "after CHARGE $KEY", "before RECORD $KEY", "after RECORD $KEY",
-        )
-    }
-
-    @Test
-    fun `a decline leaves the charge closure as a terminal exception with the decline code, so Restate doesn't retry it`() {
-        // given
-        val ctx = FakeWorkflowContext(claim = ClaimResult.New)
-
-        // when
-        workflow(walletGateway = DecliningWallet("card blocked")).run(ctx.ctx, input())
-
-        // then
-        val thrown = ctx.runFailures.getValue("charge")
-        assertThat(thrown).isInstanceOf(TerminalException::class.java).hasMessage("card blocked")
-        assertThat((thrown as TerminalException).code).isEqualTo(FeeWorkflow.CHARGE_DECLINED_CODE)
-    }
-
-    @Test
-    fun `a decline replayed from the journal as a terminal exception is recorded as failed without calling the wallet`() {
-        // given
-        val ctx = FakeWorkflowContext(claim = ClaimResult.New)
-        doThrow(TerminalException(FeeWorkflow.CHARGE_DECLINED_CODE, "insufficient funds"))
-            .`when`(ctx.ctx).run(eq("charge"), any<Class<Any>>(), any<ThrowingSupplier<Any>>())
-        val recordingWallet = RecordingWallet()
-
-        // when
-        val outcome = workflow(walletGateway = recordingWallet).run(ctx.ctx, input())
-
-        // then
-        assertThat(outcome).isEqualTo(FeeOutcome.Failed("insufficient funds"))
-        assertThat(recordingWallet.charges).isEmpty()
-        assertThat(ctx.calls.map { it.target.handler }).containsExactly("claim", "fail")
-    }
-
-    @Test
-    fun `a transient wallet failure propagates as a plain exception, so Restate retries it, and nothing is recorded`() {
-        // given
-        val outage = IllegalStateException("wallet unreachable")
-        val ctx = FakeWorkflowContext(claim = ClaimResult.New)
-        val failingWallet = object : WalletGateway {
-            override fun charge(idempotencyKey: String, amount: BigDecimal, asset: Asset): ChargeReceipt = throw outage
-        }
-        val workflow = workflow(walletGateway = failingWallet)
+        doThrow(outage).`when`(ctx.ctx).run(eq("calculate"), any<Class<Any>>(), any<ThrowingSupplier<Any>>())
+        val workflow = workflow()
 
         // when / then
         assertThatThrownBy { workflow.run(ctx.ctx, input()) }.isSameAs(outage)
-        assertThat(ctx.runFailures.getValue("charge")).isSameAs(outage)
         assertThat(ctx.calls.map { it.target.handler }).containsExactly("claim")
-        assertThat(workflow.status(ctx.ctx)).isEqualTo(WorkflowStep.CHARGE)
-    }
-
-    @Test
-    fun `a terminal failure of the charge that isn't a decline propagates and isn't recorded as failed`() {
-        // given
-        val cancelled = TerminalException(TerminalException.CANCELLED_CODE, "cancelled")
-        val ctx = FakeWorkflowContext(claim = ClaimResult.New)
-        doThrow(cancelled).`when`(ctx.ctx).run(eq("charge"), any<Class<Any>>(), any<ThrowingSupplier<Any>>())
-
-        // when / then
-        assertThatThrownBy { workflow().run(ctx.ctx, input()) }.isSameAs(cancelled)
-        assertThat(ctx.calls.map { it.target.handler }).containsExactly("claim")
-        assertThat(wallet.chargeCount("fee-txn_001")).isZero()
+        assertThat(workflow.status(ctx.ctx)).isEqualTo(WorkflowStep.CALCULATE)
     }
 
     @Test
@@ -375,9 +277,8 @@ class FeeWorkflowTest {
 
     private fun workflow(
         validator: RequestValidator = validatorReturning(null),
-        walletGateway: WalletGateway = wallet,
         stepHook: StepHook = hook,
-    ) = FeeWorkflow(validator, TransactionMapper(), allRulesCalculator(), walletGateway, stepHook)
+    ) = FeeWorkflow(validator, TransactionMapper(), allRulesCalculator(), stepHook)
 
     private fun input(request: FeeRequest = validRequest) = FeeWorkflowInput(request, HASH)
 
@@ -401,19 +302,6 @@ class FeeWorkflowTest {
         }
     }
 
-    private class RecordingWallet : WalletGateway {
-        val charges = mutableListOf<Triple<String, BigDecimal, Asset>>()
-
-        override fun charge(idempotencyKey: String, amount: BigDecimal, asset: Asset): ChargeReceipt {
-            charges += Triple(idempotencyKey, amount, asset)
-            return ChargeReceipt("charge-1", idempotencyKey, amount, asset)
-        }
-    }
-
-    private class DecliningWallet(private val reason: String) : WalletGateway {
-        override fun charge(idempotencyKey: String, amount: BigDecimal, asset: Asset): ChargeReceipt =
-            throw ChargeDeclinedException(idempotencyKey, reason)
-    }
 
     /** A call the workflow made to another handler: where to, and with which input. */
     private data class Call(val target: Target, val request: Any?)
@@ -424,9 +312,6 @@ class FeeWorkflowTest {
      */
     private class FakeWorkflowContext(claim: ClaimResult) {
         val runs = mutableListOf<String>()
-
-        /** What each failed `ctx.run` closure threw, by run name: what Restate would journal or retry. */
-        val runFailures = mutableMapOf<String, Throwable>()
         val calls = mutableListOf<Call>()
         val stepWrites = mutableListOf<WorkflowStep>()
 
@@ -439,14 +324,8 @@ class FeeWorkflowTest {
                 null
             }.`when`(ctx).set(any(), any<WorkflowStep>())
             `when`(ctx.run(anyString(), any<Class<Any>>(), any<ThrowingSupplier<Any>>())).thenAnswer { invocation ->
-                val name = invocation.getArgument<String>(0)
-                runs += name
-                try {
-                    invocation.getArgument<ThrowingSupplier<Any>>(2).get()
-                } catch (e: Throwable) {
-                    runFailures[name] = e
-                    throw e
-                }
+                runs += invocation.getArgument<String>(0)
+                invocation.getArgument<ThrowingSupplier<Any>>(2).get()
             }
             `when`(ctx.call(any<Request<Any, Any>>())).thenAnswer { invocation ->
                 val request = invocation.getArgument<Request<Any, Any>>(0)

@@ -21,7 +21,7 @@ class FeeRecordTest {
         val record = FeeRecord.inProgress(hash)
 
         // then
-        assertThat(record).isEqualTo(FeeRecord(FeeRecordStatus.IN_PROGRESS, HASH, response = null, failureReason = null))
+        assertThat(record).isEqualTo(FeeRecord(FeeRecordStatus.IN_PROGRESS, HASH, response = null))
     }
 
     @Test
@@ -36,19 +36,6 @@ class FeeRecordTest {
         assertThat(completed).isEqualTo(FeeRecord(FeeRecordStatus.COMPLETED, HASH, response = response))
     }
 
-    @Test
-    fun `failing keeps the payload hash and stores the reason`() {
-        // given
-        val record = FeeRecord.inProgress(HASH)
-
-        // when
-        val failed = record.fail("Charge declined: insufficient funds")
-
-        // then
-        assertThat(failed).isEqualTo(
-            FeeRecord(FeeRecordStatus.FAILED, HASH, failureReason = "Charge declined: insufficient funds"),
-        )
-    }
 
     @Test
     fun `rejects a completed record without a response`() {
@@ -66,16 +53,6 @@ class FeeRecordTest {
             .hasMessageContaining("IN_PROGRESS")
     }
 
-    @Test
-    fun `rejects a failed record without a reason and a reason on any other`() {
-        // when / then
-        assertThatThrownBy { FeeRecord(FeeRecordStatus.FAILED, HASH) }
-            .isInstanceOf(IllegalArgumentException::class.java)
-            .hasMessageContaining("FAILED")
-        assertThatThrownBy { FeeRecord(FeeRecordStatus.IN_PROGRESS, HASH, failureReason = "boom") }
-            .isInstanceOf(IllegalArgumentException::class.java)
-            .hasMessageContaining("boom")
-    }
 
     @Test
     fun `is stored by Restate's serde with snake_case names and read back unchanged`() {
@@ -88,7 +65,7 @@ class FeeRecordTest {
 
         // then
         assertThat(json).startsWith("""{"status":"COMPLETED","payload_hash":"hash-a","response":{"transaction_id":"txn_001",""")
-        assertThat(json).endsWith(""","failure_reason":null}""")
+        assertThat(json).doesNotContain("failure_reason")
         assertThat(restored).isEqualTo(record)
         assertThat(restored.response?.fee).isEqualByComparingTo("1.5")
     }
@@ -96,7 +73,7 @@ class FeeRecordTest {
     @Test
     fun `refuses stored state that breaks the status invariant`() {
         // given
-        val json = """{"status":"COMPLETED","payload_hash":"hash-a","response":null,"failure_reason":null}"""
+        val json = """{"status":"COMPLETED","payload_hash":"hash-a","response":null}"""
 
         // when / then
         assertThatThrownBy { serde.deserialize(Slice.wrap(json)) }
@@ -107,9 +84,9 @@ class FeeRecordTest {
 class FeeRecordStatusTest {
 
     @Test
-    fun `lists exactly the three stored statuses by name`() {
+    fun `lists exactly the two stored statuses by name`() {
         // given
-        val stored = listOf("IN_PROGRESS", "COMPLETED", "FAILED")
+        val stored = listOf("IN_PROGRESS", "COMPLETED")
 
         // when
         val names = FeeRecordStatus.entries.map { it.name }

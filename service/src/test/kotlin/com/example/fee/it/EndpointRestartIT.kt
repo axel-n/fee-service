@@ -4,7 +4,6 @@ import com.example.fee.contract.FeeRequest
 import com.example.fee.record.FeeRecordStatus
 import com.example.fee.restate.RestateEndpointLifecycle
 import com.example.fee.workflow.FeeOutcome
-import com.example.fee.workflow.FeeWorkflow
 import com.example.fee.workflow.WorkflowStep
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.AfterEach
@@ -17,53 +16,51 @@ import java.util.concurrent.CompletableFuture
 import java.util.concurrent.TimeUnit
 
 /**
- * The endpoint stops while a workflow is inside its CHARGE `ctx.run` and starts again on the same port. The
+ * The endpoint stops while a workflow is inside its CALCULATE `ctx.run` and starts again on the same port. The
  * step was not journaled, so Restate retries the invocation on the restarted endpoint and the closure runs again, while
- * the call from before the stop is still waiting in the wallet. Once released, both calls finish, the wallet's idempotency
- * key keeps it to one charge, and the workflow completes.
+ * the call from before the stop is still waiting. Once released, both calls finish, only the restarted run's result is
+ * journaled, and the workflow completes with one fee record.
  */
 class EndpointRestartIT @Autowired constructor(
-    private val wallet: TestWalletGateway,
+    private val calculator: CountingFeeCalculator,
     private val endpoint: RestateEndpointLifecycle,
     @LocalServerPort apiPort: Int,
 ) : RestateIntegrationTest() {
 
     private val api = FeeApi(apiPort)
-    private val blockedKeys = mutableListOf<String>()
+    private val blockedIds = mutableListOf<String>()
 
     @AfterEach
     fun restoreSharedEndpoint() {
-        // a failed test must not leave a wallet thread waiting or the shared endpoint down for the other ITs
-        blockedKeys.forEach(wallet::releaseCharges)
+        // a failed test must not leave a thread waiting or the shared endpoint down for the other ITs
+        blockedIds.forEach(calculator::release)
         endpoint.start()
     }
 
     @Test
-    fun `an endpoint restart in the middle of CHARGE completes the workflow with one charge`() {
-        // given: the wallet holds the charge of this transaction, and a request is on its way into it
+    fun `an endpoint restart in the middle of CALCULATE completes the workflow with one fee record`() {
+        // given: the calculation of this transaction is held, and a request is on its way into it
         val transactionId = "it-restart-${UUID.randomUUID().toString().take(13)}"
         val request = validRequest(transactionId)
-        val chargeKey = FeeWorkflow.chargeKey(transactionId)
-        wallet.blockCharges(chargeKey)
-        blockedKeys += chargeKey
+        calculator.block(transactionId)
+        blockedIds += transactionId
         val firstPost = CompletableFuture.supplyAsync { api.submit(bodyOf(request)) }
-        awaitUntil("CHARGE has reached the wallet") { wallet.callCount(chargeKey) == 1 }
-        assertThat(StoredWorkflows.step(request)).isEqualTo(WorkflowStep.CHARGE)
+        awaitUntil("CALCULATE has started") { calculator.count(transactionId) == 1 }
+        assertThat(StoredWorkflows.step(request)).isEqualTo(WorkflowStep.CALCULATE)
         assertThat(StoredFeeRecords.of(transactionId)?.status).isEqualTo(FeeRecordStatus.IN_PROGRESS)
-        assertThat(wallet.chargeCount(chargeKey)).describedAs("charges while blocked").isEqualTo(0)
 
-        // when: the endpoint restarts while CHARGE is blocked
+        // when: the endpoint restarts while CALCULATE is blocked
         endpoint.stop()
         assertThat(endpoint.isRunning).isFalse()
         endpoint.start()
         assertThat(endpoint.isRunning).isTrue()
 
-        // then: Restate retried the invocation on the restarted endpoint, and CHARGE (not journaled) runs again
-        awaitUntil("Restate runs CHARGE again on the restarted endpoint") { wallet.callCount(chargeKey) >= 2 }
-        assertThat(wallet.chargeCount(chargeKey)).describedAs("charges before the release").isEqualTo(0)
+        // then: Restate retried the invocation on the restarted endpoint, and CALCULATE (not journaled) runs again
+        awaitUntil("Restate runs CALCULATE again on the restarted endpoint") { calculator.count(transactionId) >= 2 }
+        assertThat(StoredFeeRecords.of(transactionId)?.status).isEqualTo(FeeRecordStatus.IN_PROGRESS)
 
-        // when: the wallet lets both calls go on
-        wallet.releaseCharges(chargeKey)
+        // when: both calls go on
+        calculator.release(transactionId)
 
         // then: the workflow completes as Charged
         val first = firstPost.get(2, TimeUnit.MINUTES)
@@ -79,21 +76,21 @@ class EndpointRestartIT @Autowired constructor(
             assertThat(first.body["fee"].decimalValue()).isEqualByComparingTo(BigDecimal("1.50"))
         }
 
-        // then: exactly one charge, and the record is completed with it
-        assertThat(wallet.chargeCount(chargeKey)).describedAs("charges").isEqualTo(1)
-        assertThat(wallet.receipt(chargeKey)?.amount).isEqualByComparingTo(BigDecimal("1.50"))
+        // then: the record is completed with the fee
         val record = StoredFeeRecords.of(transactionId)
         assertThat(record?.status).isEqualTo(FeeRecordStatus.COMPLETED)
         assertThat(record?.response?.fee).isEqualByComparingTo(BigDecimal("1.50"))
 
         // when: the same payload is sent again
+        val calculations = calculator.count(transactionId)
         val again = api.submit(bodyOf(request))
 
-        // then: the same response, still one charge
+        // then: the same response, and nothing was calculated again
         assertThat(again.status).describedAs("resubmission status, body %s", again.body).isEqualTo(200)
         assertThat(again.body["transaction_id"].asText()).isEqualTo(transactionId)
         assertThat(again.body["fee"].decimalValue()).isEqualByComparingTo(BigDecimal("1.50"))
-        assertThat(wallet.chargeCount(chargeKey)).describedAs("charges after the resubmission").isEqualTo(1)
+        assertThat(calculator.count(transactionId)).describedAs("CALCULATE executions after the resubmission")
+            .isEqualTo(calculations)
     }
 
     private fun bodyOf(request: FeeRequest): Map<String, Any?> = mapOf(

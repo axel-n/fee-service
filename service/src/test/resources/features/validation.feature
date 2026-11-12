@@ -13,7 +13,7 @@ Feature: Request validation
     When the transaction is submitted to "/transaction/fee"
     Then the response status is 400
     And the request is rejected on missing field "<field>" with message "Field '<field>' is required"
-    And the wallet was not charged
+    And the fee was not charged
     And no fee is recorded
 
     Examples: Every field of the contract is required
@@ -32,7 +32,7 @@ Feature: Request validation
     When the transaction is submitted to "/transaction/fee"
     Then the response status is 400
     And the request is rejected on field "<field>" with value "" and message "Field '<field>' is required but was blank: ''"
-    And the wallet was not charged
+    And the fee was not charged
     And no fee is recorded
 
     Examples: A blank text counts as missing
@@ -49,7 +49,7 @@ Feature: Request validation
     When the transaction is submitted to "/transaction/fee"
     Then the response status is 400
     And the request is rejected on field "type" with value "   " and message "Field 'type' is required but was blank: '   '"
-    And the wallet was not charged
+    And the fee was not charged
     And no fee is recorded
 
   Scenario Outline: A transaction_id that can't be a key is rejected with 400: "<transaction_id>"
@@ -58,7 +58,7 @@ Feature: Request validation
     When the transaction is submitted to "/transaction/fee"
     Then the response status is 400
     And the request is rejected on field "transaction_id" with value "<transaction_id>" and message "Invalid transaction_id '<transaction_id>'. Allowed: 1 to 64 characters, each a letter (A-Z, a-z), a digit, '_' or '-'"
-    And the wallet was not charged
+    And the fee was not charged
 
     Examples: Only ASCII letters, digits, '_' and '-'
       | transaction_id |
@@ -76,7 +76,7 @@ Feature: Request validation
     When the transaction is submitted to "/transaction/fee"
     Then the response status is 400
     And the request is rejected on field "transaction_id" with value "txn_0123456789012345678901234567890123456789012345678901234567890" and message "Invalid transaction_id 'txn_012345678901234567890123456789012345678901234567890123456789…'. Allowed: 1 to 64 characters, each a letter (A-Z, a-z), a digit, '_' or '-'"
-    And the wallet was not charged
+    And the fee was not charged
 
   Scenario Outline: An amount of <amount> is rejected with 400
     Given a "Mobile Top Up" transaction "<id>" of 1000 "USD" "FIAT" in state "SETTLED - PENDING FEE"
@@ -84,7 +84,7 @@ Feature: Request validation
     When the transaction is submitted to "/transaction/fee"
     Then the response status is 400
     And the request is rejected on field "amount" with value "<amount>" and message "Invalid amount '<amount>'. Allowed: a number greater than 0"
-    And the wallet was not charged
+    And the fee was not charged
     And no fee is recorded
 
     Examples: The amount must be greater than 0
@@ -101,7 +101,7 @@ Feature: Request validation
     When the transaction is submitted to "/transaction/fee"
     Then the response status is 400
     And the request is rejected on field "created_at" with value "<created_at>" and message "Invalid created_at '<created_at>'. Allowed: 'yyyy-MM-dd HH:mm:ss' with 0 to 9 fraction digits, e.g. '2023-08-30 15:42:17.610059'"
-    And the wallet was not charged
+    And the fee was not charged
     And no fee is recorded
 
     Examples: Only 'yyyy-MM-dd HH:mm:ss' with 0 to 9 fraction digits, no zone, a real date
@@ -124,7 +124,7 @@ Feature: Request validation
     When the transaction is submitted to "/transaction/fee"
     Then the response status is 400
     And the request is rejected on field "created_at" with value "<created_at>" and message "Invalid created_at '<created_at>': it is in the future. Allowed: up to now, 2030-01-01 12:00:00.000000 UTC"
-    And the wallet was not charged
+    And the fee was not charged
     And no fee is recorded
 
     Examples: created_at is UTC and may not be later than now
@@ -141,7 +141,7 @@ Feature: Request validation
     When the transaction is submitted to "/transaction/fee"
     Then the response status is 200
     And the fee is 1.5 with rate 0.0015 and description "Standard fee rate of 0.15%"
-    And the wallet was charged exactly once
+    And the fee was charged exactly once
     And the fee is recorded as completed
 
   Scenario Outline: An unsupported <field> "<value>" is rejected with 422
@@ -149,7 +149,7 @@ Feature: Request validation
     When the transaction is submitted to "/transaction/fee"
     Then the response status is 422
     And the request is rejected on field "<field>" with value "<value>" and message "<message>"
-    And the wallet was not charged
+    And the fee was not charged
     And no fee is recorded
 
     Examples: Only USD and EUR, matched exactly; the asset is checked before its type
@@ -180,7 +180,7 @@ Feature: Request validation
     When the transaction is submitted to "/transaction/fee"
     Then the response status is 200
     And the fee is 0.02 with rate 0.0015 and description "Standard fee rate of 0.15%"
-    And the wallet was charged exactly once
+    And the fee was charged exactly once
     And the fee is recorded as completed
 
   Scenario: A malformed request is rejected with 400 even when it is also unsupported
@@ -189,7 +189,7 @@ Feature: Request validation
     When the transaction is submitted to "/transaction/fee"
     Then the response status is 400
     And the request is rejected on field "amount" with value "-5" and message "Invalid amount '-5'. Allowed: a number greater than 0"
-    And the wallet was not charged
+    And the fee was not charged
     And no fee is recorded
 
   Scenario: Of several unsupported values, the first in validation order is reported
@@ -197,5 +197,5 @@ Feature: Request validation
     When the transaction is submitted to "/transaction/fee"
     Then the response status is 422
     And the request is rejected on field "asset" with value "GBP" and message "Unsupported asset 'GBP'. Supported: 'USD', 'EUR'"
-    And the wallet was not charged
+    And the fee was not charged
     And no fee is recorded

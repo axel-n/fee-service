@@ -159,7 +159,6 @@ class FeeOutcomeTest {
             Arguments.of(FeeOutcome.Charged(response), "CHARGED", listOf("response")),
             Arguments.of(FeeOutcome.Rejected(unsupportedState), "REJECTED", listOf("error")),
             Arguments.of(FeeOutcome.Conflict("txn_001"), "CONFLICT", listOf("transaction_id")),
-            Arguments.of(FeeOutcome.Failed("Charge declined: insufficient funds"), "FAILED", listOf("reason")),
         )
     }
 }
@@ -169,7 +168,7 @@ class WorkflowStepTest {
     @Test
     fun `lists the steps in the order the workflow runs them, ending with DONE`() {
         // given
-        val order = listOf("VALIDATE", "MAP", "CLAIM", "CALCULATE", "CHARGE", "RECORD", "DONE")
+        val order = listOf("VALIDATE", "MAP", "CLAIM", "CALCULATE", "RECORD", "DONE")
 
         // when
         val names = WorkflowStep.entries.map { it.name }

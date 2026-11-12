@@ -35,18 +35,12 @@ class TransactionFeeRecord(private val claimDecider: ClaimDecider) {
         ctx.set(RECORD, inProgress(ctx, "complete").complete(response))
     }
 
-    /** Records that the charge failed for [reason]: the record becomes `FAILED`, which frees the id for a new claim. */
-    @Handler
-    fun fail(ctx: ObjectContext, reason: String) {
-        ctx.set(RECORD, inProgress(ctx, "fail").fail(reason))
-    }
-
     /** The current record, or `null` if the id was never claimed. Shared, so it answers while a claim is running. */
     @Shared
     fun get(ctx: SharedObjectContext): FeeRecord? = ctx.get(RECORD).orElse(null)
 
-    // Only the workflow holding the claim calls complete or fail, so anything but IN_PROGRESS is a bug: a plain exception,
-    // retried until Restate pauses the invocation, which can be resumed once the bug is fixed (like a null from TransactionMapper or a type without a FeeRule).
+    // Only the workflow holding the claim calls complete, so anything but IN_PROGRESS is a bug: a plain exception,
+    // retried until Restate pauses the invocation, which can be resumed once the bug is fixed.
     private fun inProgress(ctx: ObjectContext, handler: String): FeeRecord {
         val record = ctx.get(RECORD).orElse(null)
         checkNotNull(record) { "$handler on transaction '${ctx.key()}' without a claim" }

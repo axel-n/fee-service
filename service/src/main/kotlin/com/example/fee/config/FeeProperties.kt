@@ -3,8 +3,8 @@ package com.example.fee.config
 import org.springframework.boot.context.properties.ConfigurationProperties
 import java.math.BigDecimal
 
-// Every @ConfigurationProperties class lives in this package, one file per top-level section of application.yml
-//. This file is the `fee:` section: one class per transaction type, so a new type adds a class here.
+// Every @ConfigurationProperties class lives in this package, one file per top-level section of application.yml.
+// This file is the `fee:` section: one class per transaction type, so a new type adds a class here.
 
 /** The numbers of `MobileTopUpFeeRule`, from `fee.mobile-top-up`. A missing or invalid value fails startup. */
 @ConfigurationProperties(MobileTopUpFeeProperties.PREFIX)

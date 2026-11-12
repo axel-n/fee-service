@@ -19,8 +19,6 @@ class ClaimDecider {
         return when (record.status) {
             FeeRecordStatus.IN_PROGRESS -> ClaimResult.InProgress
             FeeRecordStatus.COMPLETED -> completed(record, payloadHash)
-            // a declined charge doesn't use up the id, whichever payload it was for
-            FeeRecordStatus.FAILED -> ClaimResult.New
         }
     }
 
@@ -45,7 +43,7 @@ class ClaimDecider {
 )
 sealed interface ClaimResult {
 
-    /** The id is free (never claimed, or its charge failed): this payload owns it now and goes on to charge. */
+    /** The id was never claimed: this payload owns it now and goes on to charge it. */
     data object New : ClaimResult
 
     /** This payload was already charged: return the stored [response] without charging again. */

@@ -2,7 +2,6 @@ package com.example.fee.it
 
 import com.example.fee.contract.FeeRequest
 import com.example.fee.record.FeeRecordStatus
-import com.example.fee.workflow.FeeWorkflow
 import com.example.fee.workflow.WorkflowStep
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.AfterEach
@@ -10,73 +9,58 @@ import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.web.server.LocalServerPort
 import java.math.BigDecimal
-import java.net.URI
 import java.util.UUID
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.TimeUnit
 
 /**
- * `GET /transaction/fee/{id}` while a workflow is held inside its CHARGE `ctx.run`: the record claimed at CLAIM is
- * `IN_PROGRESS`, and the `POST` that outlasts `restate.attach-timeout` answers 202 with a `Location` pointing at that
- * status. Once the wallet lets the charge go, the same `GET` shows the `COMPLETED` fee, charged once.
+ * A `POST` that outlasts `restate.attach-timeout` while its workflow is held inside its CALCULATE `ctx.run`: it answers
+ * 202 with the `IN_PROGRESS` status, and the record claimed at CLAIM is `IN_PROGRESS`. Once the calculation is let go,
+ * resending the same payload returns the charged fee, calculated once.
  */
 class InFlightStatusIT @Autowired constructor(
-    private val wallet: TestWalletGateway,
+    private val calculator: CountingFeeCalculator,
     @LocalServerPort apiPort: Int,
 ) : RestateIntegrationTest() {
 
     private val api = FeeApi(apiPort)
-    private val blockedKeys = mutableListOf<String>()
+    private val blockedIds = mutableListOf<String>()
 
     @AfterEach
-    fun releaseBlockedCharges() {
-        // a failed test must not leave a wallet thread waiting for the other ITs
-        blockedKeys.forEach(wallet::releaseCharges)
+    fun releaseBlockedCalculations() {
+        // a failed test must not leave a thread waiting for the other ITs
+        blockedIds.forEach(calculator::release)
     }
 
     @Test
-    fun `status is IN_PROGRESS while CHARGE is blocked and COMPLETED after the release`() {
-        // given: the wallet holds the charge of this transaction, and a request is on its way into it
+    fun `a POST that outlasts the attach timeout is 202 IN_PROGRESS and the resent payload gets the fee`() {
+        // given: the calculation of this transaction is held, and a request is on its way into it
         val transactionId = "it-inflight-${UUID.randomUUID().toString().take(13)}"
         val request = validRequest(transactionId)
-        val chargeKey = FeeWorkflow.chargeKey(transactionId)
-        wallet.blockCharges(chargeKey)
-        blockedKeys += chargeKey
+        calculator.block(transactionId)
+        blockedIds += transactionId
         val post = CompletableFuture.supplyAsync { api.submit(bodyOf(request)) }
-        awaitUntil("CHARGE has reached the wallet") { wallet.callCount(chargeKey) == 1 }
-        assertThat(StoredWorkflows.step(request)).isEqualTo(WorkflowStep.CHARGE)
+        awaitUntil("CALCULATE has started") { calculator.count(transactionId) == 1 }
+        assertThat(StoredWorkflows.step(request)).isEqualTo(WorkflowStep.CALCULATE)
 
-        // when
-        val inFlight = api.status(transactionId)
-
-        // then: IN_PROGRESS, without any fee fields yet
-        assertThat(inFlight.status).describedAs("GET status, body %s", inFlight.body).isEqualTo(200)
-        assertThat(inFlight.body["transaction_id"].asText()).isEqualTo(transactionId)
-        assertThat(inFlight.body["status"].asText()).isEqualTo("IN_PROGRESS")
-        assertThat(inFlight.body.has("fee")).describedAs("fee present in %s", inFlight.body).isFalse()
-        assertThat(inFlight.body.has("failure_reason")).describedAs("failure_reason in %s", inFlight.body).isFalse()
-
-        // when: the POST outlasts the attach timeout while CHARGE is still blocked
+        // when: the POST outlasts the attach timeout while CALCULATE is still blocked
         val accepted = post.get(2, TimeUnit.MINUTES)
 
-        // then: 202 with the IN_PROGRESS status and a Location pointing at it
+        // then: 202 with the IN_PROGRESS status and no fee yet; the id is claimed
         assertThat(accepted.status).describedAs("POST status, body %s", accepted.body).isEqualTo(202)
         assertThat(accepted.body["transaction_id"].asText()).isEqualTo(transactionId)
         assertThat(accepted.body["status"].asText()).isEqualTo("IN_PROGRESS")
-        assertThat(accepted.location).describedAs("Location header").isNotNull()
-        assertThat(URI(accepted.location.orEmpty()).path).isEqualTo("/transaction/fee/$transactionId")
-        val stillInFlight = api.status(transactionId)
-        assertThat(stillInFlight.body["status"].asText()).describedAs("GET body %s", stillInFlight.body)
-            .isEqualTo("IN_PROGRESS")
-        assertThat(wallet.chargeCount(chargeKey)).describedAs("charges while blocked").isEqualTo(0)
+        assertThat(accepted.body.has("fee")).describedAs("fee present in %s", accepted.body).isFalse()
+        assertThat(StoredFeeRecords.of(transactionId)?.status).isEqualTo(FeeRecordStatus.IN_PROGRESS)
 
-        // when: the wallet lets the charge go
-        wallet.releaseCharges(chargeKey)
+        // when: the calculation is let go, the workflow finishes, and the same payload is sent again
+        calculator.release(transactionId)
+        awaitUntil("the workflow has returned") { StoredWorkflows.step(request) == WorkflowStep.DONE }
+        val completed = api.submit(bodyOf(request))
 
-        // then: the status turns COMPLETED with the charged fee
-        awaitUntil("the status is COMPLETED") { api.status(transactionId).body["status"].asText() == "COMPLETED" }
-        val completed = api.status(transactionId)
-        assertThat(completed.status).describedAs("GET status, body %s", completed.body).isEqualTo(200)
+        // then: the COMPLETED status with the charged fee
+        assertThat(completed.status).describedAs("POST status, body %s", completed.body).isEqualTo(200)
+        assertThat(completed.body["status"].asText()).isEqualTo("COMPLETED")
         assertThat(completed.body["transaction_id"].asText()).isEqualTo(transactionId)
         assertThat(completed.body["amount"].decimalValue()).isEqualByComparingTo(BigDecimal("1000"))
         assertThat(completed.body["asset"].asText()).isEqualTo("USD")
@@ -84,12 +68,9 @@ class InFlightStatusIT @Autowired constructor(
         assertThat(completed.body["fee"].decimalValue()).isEqualByComparingTo(BigDecimal("1.50"))
         assertThat(completed.body["rate"].decimalValue()).isEqualByComparingTo(BigDecimal("0.0015"))
         assertThat(completed.body["description"].asText()).isEqualTo("Standard fee rate of 0.15%")
-        assertThat(completed.body.has("failure_reason")).describedAs("failure_reason in %s", completed.body).isFalse()
 
-        // then: exactly one charge, and the workflow and the record agree
-        assertThat(wallet.chargeCount(chargeKey)).describedAs("charges").isEqualTo(1)
-        assertThat(wallet.callCount(chargeKey)).describedAs("CHARGE executions").isEqualTo(1)
-        awaitUntil("the workflow has returned") { StoredWorkflows.step(request) == WorkflowStep.DONE }
+        // then: calculated once, and the record agrees
+        assertThat(calculator.count(transactionId)).describedAs("CALCULATE executions").isEqualTo(1)
         assertThat(StoredFeeRecords.of(transactionId)?.status).isEqualTo(FeeRecordStatus.COMPLETED)
     }
 

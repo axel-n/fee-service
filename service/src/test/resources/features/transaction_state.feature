@@ -9,13 +9,13 @@ Feature: Transaction state
     When the transaction is submitted to "/transaction/fee"
     Then the response status is 422
     And the request is rejected on field "state" with value "<state>" and message "<message>"
-    And the wallet was not charged
+    And the fee was not charged
     And no fee is recorded
     When the transaction's "state" is changed to "SETTLED - PENDING FEE"
     And the transaction is submitted to "/transaction/fee"
     Then the response status is 200
     And the fee is 1.5 with rate 0.0015 and description "Standard fee rate of 0.15%"
-    And the wallet was charged exactly once
+    And the fee was charged exactly once
     And the fee is recorded as completed
 
     Examples: States of a transaction that is not ready for its fee

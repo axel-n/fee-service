@@ -1,8 +1,6 @@
 package com.example.fee.bdd
 
 import com.example.fee.it.FeeApi
-import com.example.fee.it.TestWalletGateway
-import com.example.fee.workflow.FeeWorkflow
 import io.cucumber.java.en.Then
 import io.cucumber.java.en.When
 import org.assertj.core.api.Assertions.assertThat
@@ -16,11 +14,11 @@ import java.util.concurrent.TimeUnit
 /**
  * The steps of duplicate submissions: the same transaction sent again, sent by several callers at once, and the
  * conflict a changed payload meets. The scenario's request and its submissions live in [FeeSteps] (injected, the same
- * instance as the scenario's), so the fee, wallet and record steps there check these submissions too.
+ * instance as the scenario's), so the fee, charge and record steps there check these submissions too.
  */
 class IdempotencySteps(
     private val fee: FeeSteps,
-    private val wallet: TestWalletGateway,
+
     @LocalServerPort apiPort: Int,
 ) {
 
@@ -92,18 +90,6 @@ class IdempotencySteps(
         val response = fee.response()
         assertThat(response.status).describedAs("response status, body %s", response.body).isEqualTo(409)
         assertConflictOfThisTransaction(response)
-    }
-
-    /**
-     * The workflow's CHARGE closure ran once: Restate ran one workflow and the others attached to it or were stopped
-     * at the claim, rather than the wallet's idempotency key absorbing a second charge.
-     */
-    @Then("the charge was attempted only once")
-    fun theChargeWasAttemptedOnlyOnce() {
-        fee.responses()
-        assertThat(wallet.callCount(FeeWorkflow.chargeKey(fee.submittedTransactionId())))
-            .describedAs("CHARGE executions")
-            .isEqualTo(1)
     }
 
     private fun assertConflictOfThisTransaction(response: FeeApi.Response) {

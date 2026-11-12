@@ -4,7 +4,6 @@ import com.example.fee.contract.FeeRequest
 import com.example.fee.record.FeeRecordStatus
 import com.example.fee.validation.ValidationError
 import com.example.fee.workflow.FeeOutcome
-import com.example.fee.workflow.FeeWorkflow
 import com.example.fee.workflow.WorkflowStep
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.AfterEach
@@ -27,7 +26,7 @@ import java.util.UUID
  * before the retry. A second payload checked at the moved clock shows that a re-run would have decided differently.
  */
 class DeterminismIT @Autowired constructor(
-    private val wallet: TestWalletGateway,
+    private val calculator: CountingFeeCalculator,
     private val hook: FaultInjectingStepHook,
     private val validator: CountingValidator,
     private val clock: TestClock,
@@ -76,12 +75,10 @@ class DeterminismIT @Autowired constructor(
         )
         assertThat(StoredWorkflows.step(request)).isEqualTo(WorkflowStep.DONE)
 
-        // then: nothing recorded or charged
+        // then: nothing calculated or recorded
         assertThat(StoredFeeRecords.of(transactionId)).isNull()
         assertThat(validator.count(transactionId)).describedAs("VALIDATE executions that passed").isZero()
-        val chargeKey = FeeWorkflow.chargeKey(transactionId)
-        assertThat(wallet.callCount(chargeKey)).isZero()
-        assertThat(wallet.chargeCount(chargeKey)).isZero()
+        assertThat(calculator.count(transactionId)).isZero()
 
         // when: another payload with the same created_at, validated at the advanced clock
         val reValidated = request.copy(amount = BigDecimal("2000"))
@@ -90,7 +87,7 @@ class DeterminismIT @Autowired constructor(
         // then: it passes, so only the journal kept the first payload rejected
         assertThat(charged.status).describedAs("POST status, body %s", charged.body).isEqualTo(200)
         assertThat(charged.body["fee"].decimalValue()).isEqualByComparingTo(BigDecimal("3.00"))
-        assertThat(wallet.chargeCount(chargeKey)).isEqualTo(1)
+        assertThat(calculator.count(transactionId)).isEqualTo(1)
         assertThat(StoredWorkflows.outcome(request)).isEqualTo(outcome)
     }
 
@@ -115,13 +112,11 @@ class DeterminismIT @Autowired constructor(
             .describedAs("handler runs (hook calls before VALIDATE)").isEqualTo(2)
         assertThat(clock.instant()).isBefore(validatedAt)
 
-        // then: the journaled pass held: VALIDATE ran once, and the payload was charged once and recorded
+        // then: the journaled pass held: VALIDATE ran once, and the payload was calculated once and recorded
         assertThat(response.status).describedAs("POST status, body %s", response.body).isEqualTo(200)
         assertThat(response.body["fee"].decimalValue()).isEqualByComparingTo(BigDecimal("1.50"))
         assertThat(validator.count(transactionId)).describedAs("VALIDATE executions").isEqualTo(1)
-        val chargeKey = FeeWorkflow.chargeKey(transactionId)
-        assertThat(wallet.callCount(chargeKey)).describedAs("CHARGE executions").isEqualTo(1)
-        assertThat(wallet.chargeCount(chargeKey)).describedAs("charges").isEqualTo(1)
+        assertThat(calculator.count(transactionId)).describedAs("CALCULATE executions").isEqualTo(1)
         assertThat(StoredFeeRecords.of(transactionId)?.status).isEqualTo(FeeRecordStatus.COMPLETED)
 
         // when: another payload with the same created_at, validated at the clock that moved back
@@ -132,7 +127,7 @@ class DeterminismIT @Autowired constructor(
         assertThat(rejected.status).describedAs("POST status, body %s", rejected.body).isEqualTo(400)
         assertThat(rejected.body["field"].asText()).isEqualTo("created_at")
         assertThat(rejected.body["message"].asText()).contains("it is in the future")
-        assertThat(wallet.chargeCount(chargeKey)).isEqualTo(1)
+        assertThat(calculator.count(transactionId)).isEqualTo(1)
     }
 
     private fun newTransactionId() = "it-determinism-${UUID.randomUUID().toString().take(13)}"

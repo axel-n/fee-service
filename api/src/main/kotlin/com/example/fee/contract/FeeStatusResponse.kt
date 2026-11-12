@@ -6,11 +6,10 @@ import com.fasterxml.jackson.databind.annotation.JsonSerialize
 import java.math.BigDecimal
 
 /**
- * Where the fee for a transaction stands: the body of `GET /transaction/fee/{id}` and of every `POST /transaction/fee`
- * that isn't an error (200 `COMPLETED`, 202 `IN_PROGRESS`).
+ * Where the fee for a transaction stands: the body of every `POST /transaction/fee` that isn't an error (200
+ * `COMPLETED`, 202 `IN_PROGRESS`).
  *
- * The [FeeResponse] fields are present once [Status.COMPLETED], [failureReason] once [Status.FAILED]; absent fields are
- * left out of the JSON. HTTP only and never stored, so its shape may change freely.
+ * The [FeeResponse] fields are present once [Status.COMPLETED]; absent fields are left out of the JSON. HTTP only and never stored, so its shape may change freely.
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 data class FeeStatusResponse(
@@ -22,10 +21,9 @@ data class FeeStatusResponse(
     @JsonProperty("fee") @JsonSerialize(using = PlainBigDecimalSerializer::class) val fee: BigDecimal? = null,
     @JsonProperty("rate") @JsonSerialize(using = PlainBigDecimalSerializer::class) val rate: BigDecimal? = null,
     @JsonProperty("description") val description: String? = null,
-    @JsonProperty("failure_reason") val failureReason: String? = null,
 ) {
 
-    enum class Status { IN_PROGRESS, COMPLETED, FAILED }
+    enum class Status { IN_PROGRESS, COMPLETED }
 
     companion object {
         fun inProgress(transactionId: String) = FeeStatusResponse(transactionId, Status.IN_PROGRESS)
@@ -40,8 +38,5 @@ data class FeeStatusResponse(
             rate = response.rate,
             description = response.description,
         )
-
-        fun failed(transactionId: String, reason: String) =
-            FeeStatusResponse(transactionId, Status.FAILED, failureReason = reason)
     }
 }

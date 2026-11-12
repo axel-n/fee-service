@@ -3,11 +3,9 @@ package com.example.fee.api
 import com.example.fee.application.FeeInProgressException
 import com.example.fee.application.FeeService
 import com.example.fee.contract.FeeRequest
-import com.example.fee.contract.error.ChargeFailedException
 import com.example.fee.contract.error.DuplicateTransactionException
 import com.example.fee.contract.error.FeeException
 import com.example.fee.contract.error.FeeProblem
-import com.example.fee.contract.error.TransactionNotFoundException
 import com.example.fee.contract.error.ValidationException
 import com.example.fee.contract.error.WorkflowUnavailableException
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
@@ -25,7 +23,6 @@ import org.springframework.http.MediaType
 import org.springframework.test.context.bean.override.mockito.MockitoBean
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.ResultActions
-import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.content
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.header
@@ -143,25 +140,6 @@ class ApiExceptionHandlerTest(@Autowired private val mockMvc: MockMvc) {
     }
 
     @Test
-    fun `a declined charge is 422 with the transaction id and the wallet's reason`() {
-        // given
-        submitThrows(ChargeFailedException("txn_001", "insufficient funds"))
-
-        // when
-        val result = postFee()
-
-        // then
-        result
-            .andExpect(status().isUnprocessableEntity)
-            .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
-            .andExpect(jsonPath("$.status").value(422))
-            .andExpect(jsonPath("$.code").value("CHARGE_FAILED"))
-            .andExpect(jsonPath("$.transaction_id").value("txn_001"))
-            .andExpect(jsonPath("$.reason").value("insufficient funds"))
-            .andExpect(jsonPath("$.detail").value("The fee for transaction 'txn_001' could not be charged: insufficient funds"))
-    }
-
-    @Test
     fun `an unavailable Restate is 503 asking for a retry without leaking the cause`() {
         // given
         submitThrows(WorkflowUnavailableException(ConnectException("Connection refused: restate:8080")))
@@ -181,7 +159,7 @@ class ApiExceptionHandlerTest(@Autowired private val mockMvc: MockMvc) {
     }
 
     @Test
-    fun `a fee still processing is 202 with the status location and an in progress body, not a problem`() {
+    fun `a fee still processing is 202 with an in progress body, not a problem`() {
         // given
         submitThrows(FeeInProgressException("txn_001"))
 
@@ -192,44 +170,11 @@ class ApiExceptionHandlerTest(@Autowired private val mockMvc: MockMvc) {
         result
             .andExpect(status().isAccepted)
             .andExpect(content().contentType(MediaType.APPLICATION_JSON))
-            .andExpect(header().string(HttpHeaders.LOCATION, "/transaction/fee/txn_001"))
+            .andExpect(header().doesNotExist(HttpHeaders.LOCATION))
             .andExpect(jsonPath("$.transaction_id").value("txn_001"))
             .andExpect(jsonPath("$.status").value("IN_PROGRESS"))
             .andExpect(jsonPath("$.fee").doesNotExist())
             .andExpect(jsonPath("$.code").doesNotExist())
-    }
-
-    @Test
-    fun `the status location of a fee still processing encodes the transaction id`() {
-        // given
-        submitThrows(FeeInProgressException("txn 001"))
-
-        // when
-        val result = postFee()
-
-        // then
-        result
-            .andExpect(status().isAccepted)
-            .andExpect(header().string(HttpHeaders.LOCATION, "/transaction/fee/txn%20001"))
-    }
-
-    @Test
-    fun `an unknown transaction on get is 404 with the transaction id`() {
-        // given
-        `when`(feeService.status("txn_404")).thenThrow(TransactionNotFoundException("txn_404"))
-
-        // when
-        val result = mockMvc.perform(get("/transaction/fee/txn_404"))
-
-        // then
-        result
-            .andExpect(status().isNotFound)
-            .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
-            .andExpect(jsonPath("$.status").value(404))
-            .andExpect(jsonPath("$.code").value("TRANSACTION_NOT_FOUND"))
-            .andExpect(jsonPath("$.transaction_id").value("txn_404"))
-            .andExpect(jsonPath("$.detail").value("No fee record for transaction 'txn_404'"))
-            .andExpect(jsonPath("$.instance").value("/transaction/fee/txn_404"))
     }
 
     @Test
@@ -326,7 +271,6 @@ class ApiExceptionHandlerTest(@Autowired private val mockMvc: MockMvc) {
             ValidationException("asset", null, "Field 'asset' is required", ValidationException.Kind.INVALID),
             ValidationException("state", "PENDING", "Unsupported state 'PENDING'", ValidationException.Kind.UNSUPPORTED),
             DuplicateTransactionException("txn_001"),
-            ChargeFailedException("txn_001", "insufficient funds"),
             WorkflowUnavailableException(ConnectException("Connection refused")),
         )
         val mapper = jacksonObjectMapper()
@@ -351,24 +295,7 @@ class ApiExceptionHandlerTest(@Autowired private val mockMvc: MockMvc) {
     private fun properties(exception: FeeException): List<Any?> = when (exception) {
         is ValidationException -> listOf(exception.field, exception.value, exception.kind)
         is DuplicateTransactionException -> listOf(exception.transactionId)
-        is ChargeFailedException -> listOf(exception.transactionId, exception.reason)
-        is TransactionNotFoundException -> listOf(exception.transactionId)
+
         is WorkflowUnavailableException -> emptyList()
-    }
-
-    @Test
-    fun `a client reading a get 404 as FeeProblem gets back the not found exception`() {
-        // given
-        `when`(feeService.status("txn_404")).thenThrow(TransactionNotFoundException("txn_404"))
-
-        // when
-        val body = mockMvc.perform(get("/transaction/fee/txn_404")).andReturn().response.contentAsString
-        val problem = jacksonObjectMapper().readValue(body, FeeProblem::class.java)
-
-        // then
-        assertThat(problem.instance).isEqualTo("/transaction/fee/txn_404")
-        assertThat(problem.toException()).isInstanceOfSatisfying(TransactionNotFoundException::class.java) {
-            assertThat(it.transactionId).isEqualTo("txn_404")
-        }
     }
 }

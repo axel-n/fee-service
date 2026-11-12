@@ -5,16 +5,12 @@ package com.example.fee.application
 import com.example.fee.config.RestateProperties
 import com.example.fee.contract.FeeRequest
 import com.example.fee.contract.FeeStatusResponse
-import com.example.fee.contract.error.ChargeFailedException
 import com.example.fee.contract.error.DuplicateTransactionException
 import com.example.fee.contract.error.FeeException
-import com.example.fee.contract.error.TransactionNotFoundException
+
 import com.example.fee.contract.error.ValidationException
 import com.example.fee.contract.error.WorkflowUnavailableException
-import com.example.fee.record.FeeRecord
-import com.example.fee.record.FeeRecordStatus
 import com.example.fee.restate.FeeWorkflowClients
-import com.example.fee.restate.TransactionFeeRecordClients
 import com.example.fee.validation.ValidationError
 import com.example.fee.validation.rule.TransactionIdValidator
 import com.example.fee.workflow.FeeOutcome
@@ -36,14 +32,12 @@ import java.util.concurrent.TimeoutException
  * at most `restate.attach-timeout`. A run still going by then is a [FeeInProgressException]; a submit Restate didn't
  * acknowledge by then, or a Restate call that failed, is a [WorkflowUnavailableException], because resending the same
  * payload is safe.
- *
- * [status] reads the permanent fee record of a `transaction_id` for `GET /transaction/fee/{id}`.
  */
 @Service
 class FeeService(
     private val transactionIdValidator: TransactionIdValidator,
     private val feeWorkflowClients: FeeWorkflowClients,
-    private val transactionFeeRecordClients: TransactionFeeRecordClients,
+
     private val restateProperties: RestateProperties,
 ) {
 
@@ -73,50 +67,13 @@ class FeeService(
             Thread.currentThread().interrupt()
             throw unavailable("workflow $key", e)
         }
-        return toResponse(transactionId, checkNotNull(result) { "Workflow $key returned no outcome" })
+        return toResponse(checkNotNull(result) { "Workflow $key returned no outcome" })
     }
 
-    /**
-     * Where the fee for [transactionId] stands, read from `TransactionFeeRecord/{transactionId}` within
-     * `restate.attach-timeout`. A malformed id is a 400 before Restate is called, an id without a record a
-     * [TransactionNotFoundException], and a lookup that failed or got no answer in time a [WorkflowUnavailableException].
-     */
-    fun status(transactionId: String): FeeStatusResponse {
-        transactionIdValidator.validate(FeeRequest(transactionId = transactionId))?.let { throw rejected(it) }
-        val target = "fee record $transactionId"
-        val record = try {
-            transactionFeeRecordClients.forKey(transactionId).getAsync()
-                .get(restateProperties.attachTimeout.toMillis(), TimeUnit.MILLISECONDS)
-        } catch (e: TimeoutException) {
-            throw unavailable(target, e)
-        } catch (e: ExecutionException) {
-            throw unavailable(target, e.cause ?: e)
-        } catch (e: InterruptedException) {
-            Thread.currentThread().interrupt()
-            throw unavailable(target, e)
-        } catch (e: RuntimeException) {
-            throw unavailable(target, e)
-        }
-        return toStatus(transactionId, record ?: throw TransactionNotFoundException(transactionId))
-    }
-
-    private fun toResponse(transactionId: String, outcome: FeeOutcome): FeeStatusResponse = when (outcome) {
+    private fun toResponse(outcome: FeeOutcome): FeeStatusResponse = when (outcome) {
         is FeeOutcome.Charged -> FeeStatusResponse.completed(outcome.response)
         is FeeOutcome.Rejected -> throw rejected(outcome.error)
         is FeeOutcome.Conflict -> throw DuplicateTransactionException(outcome.transactionId)
-        is FeeOutcome.Failed -> throw ChargeFailedException(transactionId, outcome.reason)
-    }
-
-    // FeeRecord guarantees the response exactly when COMPLETED and the reason exactly when FAILED.
-    private fun toStatus(transactionId: String, record: FeeRecord): FeeStatusResponse = when (record.status) {
-        FeeRecordStatus.IN_PROGRESS -> FeeStatusResponse.inProgress(transactionId)
-        FeeRecordStatus.COMPLETED -> FeeStatusResponse.completed(
-            checkNotNull(record.response) { "COMPLETED fee record of $transactionId has no response" },
-        )
-        FeeRecordStatus.FAILED -> FeeStatusResponse.failed(
-            transactionId,
-            checkNotNull(record.failureReason) { "FAILED fee record of $transactionId has no reason" },
-        )
     }
 
     // ValidationError is the workflow's durable type, ValidationException the published contract: same fields.
@@ -143,9 +100,8 @@ class FeeService(
 
 /**
  * Thrown by [FeeService.submit] when the workflow is still running after `restate.attach-timeout`. It isn't a failure, so
- * it isn't a [FeeException]: `ApiExceptionHandler` answers 202 with `Location: /transaction/fee/{transactionId}`, where
- * the caller polls the status, and the `IN_PROGRESS` status as body. Resubmitting the same payload attaches to
- * the same run, so it charges once. HTTP only, never stored.
+ * it isn't a [FeeException]: `ApiExceptionHandler` answers 202 with the `IN_PROGRESS` status as body. Resubmitting the
+ * same payload attaches to the same run, so it charges once. HTTP only, never stored.
  */
 class FeeInProgressException(val transactionId: String) :
     // No stack trace: an expected outcome of every slow run, not a bug to locate.

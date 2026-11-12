@@ -9,8 +9,8 @@ import com.fasterxml.jackson.annotation.JsonProperty
  *
  * [type], [title], [status], [detail] and [instance] are always there. The service's own failures add [code] (a
  * [FeeErrorCode] name) and the properties of their [FeeException]: a rejected request [field], [value] and [message];
- * a failure about one transaction [transactionId], a declined charge also [reason]. Spring MVC's own errors (415, 405,
- * an unknown path, a body that isn't JSON) have no [code].
+ * a failure about one transaction [transactionId]. Spring MVC's own errors (415, 405, an unknown path, a body that
+ * isn't JSON) have no [code].
  *
  * Unknown properties are ignored, so a client keeps reading the body when a later version adds one.
  */
@@ -27,7 +27,6 @@ data class FeeProblem(
     @JsonProperty("value") val value: String? = null,
     @JsonProperty("message") val message: String? = null,
     @JsonProperty("transaction_id") val transactionId: String? = null,
-    @JsonProperty("reason") val reason: String? = null,
 ) {
 
     /** The [FeeErrorCode] named by [code], or `null` when it is missing or unknown to this version of the contract. */
@@ -41,8 +40,7 @@ data class FeeProblem(
         FeeErrorCode.INVALID_REQUEST -> validation(ValidationException.Kind.INVALID)
         FeeErrorCode.UNSUPPORTED_REQUEST -> validation(ValidationException.Kind.UNSUPPORTED)
         FeeErrorCode.DUPLICATE_TRANSACTION -> transactionId?.let { DuplicateTransactionException(it) }
-        FeeErrorCode.CHARGE_FAILED -> transactionId?.let { id -> reason?.let { ChargeFailedException(id, it) } }
-        FeeErrorCode.TRANSACTION_NOT_FOUND -> transactionId?.let { TransactionNotFoundException(it) }
+
         FeeErrorCode.WORKFLOW_UNAVAILABLE -> WorkflowUnavailableException()
         null -> null
     }

@@ -2,10 +2,9 @@ package com.example.fee.api
 
 import com.example.fee.application.FeeInProgressException
 import com.example.fee.contract.FeeStatusResponse
-import com.example.fee.contract.error.ChargeFailedException
 import com.example.fee.contract.error.DuplicateTransactionException
 import com.example.fee.contract.error.FeeException
-import com.example.fee.contract.error.TransactionNotFoundException
+
 import com.example.fee.contract.error.ValidationException
 import com.example.fee.validation.ValueDisplay
 import com.fasterxml.jackson.core.JsonProcessingException
@@ -20,7 +19,6 @@ import org.springframework.web.bind.annotation.ExceptionHandler
 import org.springframework.web.bind.annotation.RestControllerAdvice
 import org.springframework.web.context.request.WebRequest
 import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExceptionHandler
-import org.springframework.web.util.UriComponentsBuilder
 
 /**
  * Turns every failure of the API into an RFC 7807 `ProblemDetail`: a [FeeException] answers with its own
@@ -28,21 +26,17 @@ import org.springframework.web.util.UriComponentsBuilder
  * [ResponseEntityExceptionHandler], so clients see one error shape. Clients read it as the api module's `FeeProblem`.
  *
  * A [FeeException] adds its `code`. A rejected field adds `field`, `value` (as sent, `null` when missing) and
- * `message`, which names the allowed values for a 422. A failure about one transaction adds `transaction_id`, a
- * declined charge also `reason`.
+ * `message`, which names the allowed values for a 422. A failure about one transaction adds `transaction_id`.
  *
  * The one exception that isn't a failure, [FeeInProgressException], is answered with the fee's status instead.
  */
 @RestControllerAdvice
 class ApiExceptionHandler : ResponseEntityExceptionHandler() {
 
-    /** A run still going after `restate.attach-timeout`: 202, where to poll, and the `IN_PROGRESS` status. */
+    /** A run still going after `restate.attach-timeout`: 202 and the `IN_PROGRESS` status. */
     @ExceptionHandler(FeeInProgressException::class)
     fun handleInProgress(exception: FeeInProgressException): ResponseEntity<FeeStatusResponse> =
-        ResponseEntity
-            .accepted()
-            .location(statusLocation(exception.transactionId))
-            .body(FeeStatusResponse.inProgress(exception.transactionId))
+        ResponseEntity.accepted().body(FeeStatusResponse.inProgress(exception.transactionId))
 
     @ExceptionHandler(ValidationException::class)
     fun handleValidation(exception: ValidationException): ProblemDetail =
@@ -54,17 +48,6 @@ class ApiExceptionHandler : ResponseEntityExceptionHandler() {
 
     @ExceptionHandler(DuplicateTransactionException::class)
     fun handleDuplicate(exception: DuplicateTransactionException): ProblemDetail =
-        problem(exception).apply { setProperty(TRANSACTION_ID, exception.transactionId) }
-
-    @ExceptionHandler(ChargeFailedException::class)
-    fun handleChargeFailed(exception: ChargeFailedException): ProblemDetail =
-        problem(exception).apply {
-            setProperty(TRANSACTION_ID, exception.transactionId)
-            setProperty(REASON, exception.reason)
-        }
-
-    @ExceptionHandler(TransactionNotFoundException::class)
-    fun handleNotFound(exception: TransactionNotFoundException): ProblemDetail =
         problem(exception).apply { setProperty(TRANSACTION_ID, exception.transactionId) }
 
     // Any other FeeException, e.g. WorkflowUnavailableException: its cause is logged by FeeService and never shown.
@@ -84,9 +67,6 @@ class ApiExceptionHandler : ResponseEntityExceptionHandler() {
         val body = unreadableBodyProblem(status, ex.cause)
         return handleExceptionInternal(ex, body, headers, status, request)
     }
-
-    private fun statusLocation(transactionId: String) =
-        UriComponentsBuilder.fromPath("${TransactionFeeController.PATH}/{id}").buildAndExpand(transactionId).encode().toUri()
 
     private fun problem(exception: FeeException): ProblemDetail =
         ProblemDetail.forStatusAndDetail(HttpStatusCode.valueOf(exception.status), exception.message).apply {
@@ -130,6 +110,5 @@ class ApiExceptionHandler : ResponseEntityExceptionHandler() {
         const val VALUE = "value"
         const val MESSAGE = "message"
         const val TRANSACTION_ID = "transaction_id"
-        const val REASON = "reason"
     }
 }

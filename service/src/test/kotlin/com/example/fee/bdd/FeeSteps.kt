@@ -1,12 +1,11 @@
 package com.example.fee.bdd
 
 import com.example.fee.domain.CreatedAtFormat
+import com.example.fee.it.CountingFeeCalculator
 import com.example.fee.it.FeeApi
 import com.example.fee.it.StoredFeeRecords
 import com.example.fee.it.TestClock
-import com.example.fee.it.TestWalletGateway
 import com.example.fee.record.FeeRecordStatus
-import com.example.fee.workflow.FeeWorkflow
 import io.cucumber.datatable.DataTable
 import io.cucumber.java.After
 import io.cucumber.java.en.Given
@@ -21,21 +20,21 @@ import java.util.concurrent.CompletableFuture
 import java.util.concurrent.TimeUnit
 
 /**
- * The steps of a fee request: build it, submit it to the app, check the response, the wallet and the record in Restate.
+ * The steps of a fee request: build it, submit it to the app, check the response, the charge and the record in Restate.
  *
  * A new instance per scenario (Cucumber's glue scope), so its fields are the scenario's state. Transaction ids written in
  * a feature are scoped to the scenario: `txn_001` is sent as `txn_001-<suffix>`, one random suffix per scenario, so
- * scenarios never share a fee record or a wallet charge, and every mention of `txn_001` in the scenario means the same
+ * scenarios never share a fee record, and every mention of `txn_001` in the scenario means the same
  * transaction.
  *
  * A submission runs in the background and the `Then` steps wait for its response, so a scenario can act while the
  * request is still in flight (a restart, a concurrent submission). Every submission of the scenario is kept: the
- * response steps check the latest one, the wallet and record steps the one that was charged ([chargedResponse]).
+ * response steps check the latest one, the charge and record steps the one that was charged ([chargedResponse]).
  *
  * A scenario may pin the app's clock ([itIs]); it is back on the system clock after every scenario.
  */
 class FeeSteps(
-    private val wallet: TestWalletGateway,
+    private val calculator: CountingFeeCalculator,
     private val clock: TestClock,
     @LocalServerPort apiPort: Int,
 ) {
@@ -192,21 +191,22 @@ class FeeSteps(
         assertThat(response.body["fee"].decimalValue()).isEqualByComparingTo(fee)
     }
 
-    /** Counted at the wallet, not read from the response, and charged with the fee of the charged response. */
-    @Then("the wallet was charged exactly once")
-    fun theWalletWasChargedExactlyOnce() {
-        val chargeKey = FeeWorkflow.chargeKey(submittedTransactionId())
-        assertThat(wallet.chargeCount(chargeKey)).isEqualTo(1)
-        assertThat(wallet.receipt(chargeKey)?.amount)
+    /**
+     * Counted at CALCULATE, not read from the response: one workflow calculated the fee, and the fee recorded in Restate
+     * is the fee of the charged response.
+     */
+    @Then("the fee was charged exactly once")
+    fun theFeeWasChargedExactlyOnce() {
+        val transactionId = submittedTransactionId()
+        assertThat(calculator.count(transactionId)).describedAs("CALCULATE executions").isEqualTo(1)
+        assertThat(StoredFeeRecords.of(transactionId)?.response?.fee)
             .isEqualByComparingTo(chargedResponse().body["fee"].decimalValue())
     }
 
-    /** Neither charged nor even attempted: the wallet never saw the transaction's charge key. */
-    @Then("the wallet was not charged")
-    fun theWalletWasNotCharged() {
-        val chargeKey = FeeWorkflow.chargeKey(submittedTransactionId())
-        assertThat(wallet.callCount(chargeKey)).isZero()
-        assertThat(wallet.chargeCount(chargeKey)).isZero()
+    /** Not even calculated: no workflow of the transaction got past validation. */
+    @Then("the fee was not charged")
+    fun theFeeWasNotCharged() {
+        assertThat(calculator.count(submittedTransactionId())).describedAs("CALCULATE executions").isZero()
     }
 
     /** Read from Restate itself, once the response is in: no fee record, so the `transaction_id` is not used up. */

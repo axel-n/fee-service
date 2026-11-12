@@ -3,7 +3,6 @@ package com.example.fee.it
 import com.example.fee.contract.FeeRequest
 import com.example.fee.record.FeeRecordStatus
 import com.example.fee.workflow.FeeOutcome
-import com.example.fee.workflow.FeeWorkflow
 import com.example.fee.workflow.WorkflowStep
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.params.ParameterizedTest
@@ -17,15 +16,14 @@ import java.util.stream.Stream
 
 /**
  * A crash at every step boundary: [FaultInjectingStepHook] throws once before or after a step, Restate retries
- * the invocation from the top, replays the journaled steps and runs the rest. The caller still gets `Charged`, the wallet
- * is charged exactly once and the record is `COMPLETED`.
+ * the invocation from the top, replays the journaled steps and runs the rest. The caller still gets `Charged`, and the
+ * record is `COMPLETED`.
  *
- * "Not re-executed" is asserted by counting the `ctx.run` closures (validator, calculator, wallet), never hook calls: the
+ * "Not re-executed" is asserted by counting the `ctx.run` closures (validator, calculator), never hook calls: the
  * handler, hooks included, runs again on every replay. Each closure runs exactly once whichever boundary crashed: a step
  * journaled before the crash is replayed, and a step after it runs only on the retry.
  */
 class CrashRecoveryIT @Autowired constructor(
-    private val wallet: TestWalletGateway,
     private val hook: FaultInjectingStepHook,
     private val validator: CountingValidator,
     private val calculator: CountingFeeCalculator,
@@ -36,7 +34,7 @@ class CrashRecoveryIT @Autowired constructor(
 
     @ParameterizedTest(name = "crash {1} {0}")
     @MethodSource("boundaries")
-    fun `a crash at a step boundary is retried to one charge without re-running journaled steps`(
+    fun `a crash at a step boundary is retried to one fee record without re-running journaled steps`(
         step: WorkflowStep,
         phase: FaultInjectingStepHook.Phase,
     ) {
@@ -63,10 +61,6 @@ class CrashRecoveryIT @Autowired constructor(
         // then: every ctx.run closure ran exactly once, so nothing journaled before the crash ran again
         assertThat(validator.count(transactionId)).describedAs("VALIDATE executions").isEqualTo(1)
         assertThat(calculator.count(transactionId)).describedAs("CALCULATE executions").isEqualTo(1)
-        val chargeKey = FeeWorkflow.chargeKey(transactionId)
-        assertThat(wallet.callCount(chargeKey)).describedAs("CHARGE executions").isEqualTo(1)
-        assertThat(wallet.chargeCount(chargeKey)).describedAs("charges").isEqualTo(1)
-        assertThat(wallet.receipt(chargeKey)?.amount).isEqualByComparingTo(BigDecimal("1.50"))
 
         // then: the record is completed with the charged response
         val record = StoredFeeRecords.of(transactionId)

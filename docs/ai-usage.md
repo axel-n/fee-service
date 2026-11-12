@@ -91,10 +91,9 @@ These guards are written for the ways an AI agent tends to go wrong:
 | A production class without a test | `TestCoverageAuditTest` fails for any file in `api/src/main/kotlin` or `service/src/main/kotlin` without its own test or a justified entry |
 | Quietly adding a library | Hard rule 1, enforced by the runner's dependency guard |
 | Changing the rules or the plan to suit the code | Protected files; a change to the design must update `docs/` in the same change, and the runner stops for review |
-| Docs that drift from the code | `HttpRequestsFileIT` runs `http/requests.http` and checks its `# Expect:` lines |
-| Plausible but untested claims about recovery | Crash at every step boundary, endpoint restart, Restate outage, transient and declined wallet calls, each asserting the **charge count** (README, "Tests") |
+| Plausible but untested claims about recovery | Crash at every step boundary, endpoint restart, Restate outage, each counting the **CALCULATE executions** (README, "Tests") |
 | Tests that depend on the machine | Only random ports; every `restate.*` setting from `@DynamicPropertySource` |
-| Non-deterministic workflow code | AGENTS.md's Restate rules (clock, wallet, configuration only inside `ctx.run`), checked by `DeterminismIT` and the crash tests |
+| Non-deterministic workflow code | AGENTS.md's Restate rules (clock and configuration only inside `ctx.run`), checked by `DeterminismIT` and the crash tests |
 
 ## 5. What a person decides and reviews
 

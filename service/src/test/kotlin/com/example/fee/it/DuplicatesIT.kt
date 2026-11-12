@@ -3,7 +3,6 @@ package com.example.fee.it
 import com.example.fee.contract.FeeRequest
 import com.example.fee.record.FeeRecordStatus
 import com.example.fee.workflow.FeeOutcome
-import com.example.fee.workflow.FeeWorkflow
 import com.example.fee.workflow.WorkflowStep
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
@@ -19,10 +18,11 @@ import java.util.concurrent.TimeUnit
 /**
  * Duplicates end to end. The same payload is the same workflow key, so Restate runs it once and every caller attaches to
  * that run. A different payload for the same `transaction_id` is a new workflow, and the CLAIM on
- * `TransactionFeeRecord/{transaction_id}` stops it: `Conflict` → 409. Idempotency is asserted by charge count.
+ * `TransactionFeeRecord/{transaction_id}` stops it: `Conflict` → 409. Idempotency is asserted by the number of
+ * CALCULATE executions, not just by the response.
  */
 class DuplicatesIT @Autowired constructor(
-    private val wallet: TestWalletGateway,
+    private val calculator: CountingFeeCalculator,
     @LocalServerPort apiPort: Int,
 ) : RestateIntegrationTest() {
 
@@ -43,7 +43,7 @@ class DuplicatesIT @Autowired constructor(
         assertThat(second.body).isEqualTo(first.body)
         assertThat(second.body["fee"].decimalValue()).isEqualByComparingTo(BigDecimal("1.50"))
 
-        // then: one charge, one CHARGE execution, one completed record
+        // then: one CALCULATE execution, one completed record
         assertChargedOnce(request)
     }
 
@@ -63,7 +63,7 @@ class DuplicatesIT @Autowired constructor(
         assertThat(responses.first().body["transaction_id"].asText()).isEqualTo(request.transactionId)
         assertThat(responses.first().body["fee"].decimalValue()).isEqualByComparingTo(BigDecimal("1.50"))
 
-        // then: one charge, one CHARGE execution, one completed record
+        // then: one CALCULATE execution, one completed record
         assertChargedOnce(request)
     }
 
@@ -90,7 +90,7 @@ class DuplicatesIT @Autowired constructor(
 
         // then: the original charge and record stand, and the changed payload was not charged
         assertChargedOnce(original)
-        assertThat(api.status(transactionId).body["amount"].decimalValue()).isEqualByComparingTo(BigDecimal("1000"))
+        assertThat(StoredFeeRecords.of(transactionId)?.response?.amount).isEqualByComparingTo(BigDecimal("1000"))
     }
 
     @Test
@@ -125,16 +125,13 @@ class DuplicatesIT @Autowired constructor(
             }
         }
 
-        // then: one charge, for the winner, recorded as completed
+        // then: one fee, for the winner, recorded as completed
         assertChargedOnce(winner)
     }
 
     private fun assertChargedOnce(request: FeeRequest) {
         val transactionId = checkNotNull(request.transactionId)
-        val chargeKey = FeeWorkflow.chargeKey(transactionId)
-        assertThat(wallet.chargeCount(chargeKey)).isEqualTo(1)
-        assertThat(wallet.callCount(chargeKey)).describedAs("CHARGE executions").isEqualTo(1)
-        assertThat(wallet.receipt(chargeKey)?.amount).isEqualByComparingTo(expectedFee(request))
+        assertThat(calculator.count(transactionId)).describedAs("CALCULATE executions").isEqualTo(1)
 
         val record = StoredFeeRecords.of(transactionId)
         assertThat(record?.status).isEqualTo(FeeRecordStatus.COMPLETED)

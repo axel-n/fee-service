@@ -6,16 +6,11 @@ import com.example.fee.config.RestateProperties
 import com.example.fee.contract.FeeRequest
 import com.example.fee.contract.FeeResponse
 import com.example.fee.contract.FeeStatusResponse
-import com.example.fee.contract.error.ChargeFailedException
 import com.example.fee.contract.error.DuplicateTransactionException
 import com.example.fee.contract.error.FeeException
-import com.example.fee.contract.error.TransactionNotFoundException
 import com.example.fee.contract.error.ValidationException
 import com.example.fee.contract.error.WorkflowUnavailableException
-import com.example.fee.record.FeeRecord
-import com.example.fee.record.TransactionFeeRecordClient
 import com.example.fee.restate.FeeWorkflowClients
-import com.example.fee.restate.TransactionFeeRecordClients
 import com.example.fee.validation.ValidationError
 import com.example.fee.validation.rule.TransactionIdValidator
 import com.example.fee.workflow.FeeOutcome
@@ -74,15 +69,10 @@ class FeeServiceTest {
         `when`(it.forKey(ArgumentMatchers.anyString())).thenReturn(workflowClient)
     }
 
-    private val recordClient = mock(TransactionFeeRecordClient.IngressClient::class.java)
-    private val recordClients = mock(TransactionFeeRecordClients::class.java).also {
-        `when`(it.forKey(ArgumentMatchers.anyString())).thenReturn(recordClient)
-    }
 
     private fun service(attachTimeout: Duration = Duration.ofSeconds(5)) = FeeService(
         TransactionIdValidator(),
         clients,
-        recordClients,
         RestateProperties(
             ingressUrl = "http://localhost:8080",
             endpointPort = 9080,
@@ -223,20 +213,6 @@ class FeeServiceTest {
     }
 
     @Test
-    fun `a declined charge is a 422 charge failed exception with the wallet's reason`() {
-        // given
-        workflowAnswers(FeeOutcome.Failed("insufficient funds"))
-
-        // when / then
-        assertThatThrownBy { service().submit(request) }
-            .isInstanceOfSatisfying(ChargeFailedException::class.java) {
-                assertThat(it.transactionId).isEqualTo("txn_001")
-                assertThat(it.reason).isEqualTo("insufficient funds")
-                assertThat(it.status).isEqualTo(HttpStatus.UNPROCESSABLE_ENTITY.value())
-            }
-    }
-
-    @Test
     fun `a missing transaction id is a 400 before Restate is called`() {
         // when / then
         assertThatThrownBy { service().submit(request.copy(transactionId = null)) }
@@ -344,115 +320,13 @@ class FeeServiceTest {
         }
     }
 
-    private fun recordReturns(future: CompletableFuture<FeeRecord?>) {
-        `when`(recordClient.getAsync()).thenReturn(future)
-    }
 
-    @Test
-    fun `status of a completed record is the stored fee`() {
-        // given
-        recordReturns(CompletableFuture.completedFuture(FeeRecord.inProgress("hash").complete(response)))
-
-        // when
-        val status = service().status("txn_001")
-
-        // then
-        assertThat(status).isEqualTo(FeeStatusResponse.completed(response))
-        verify(recordClients).forKey("txn_001")
-    }
-
-    @Test
-    fun `status of a claimed record is in progress`() {
-        // given
-        recordReturns(CompletableFuture.completedFuture(FeeRecord.inProgress("hash")))
-
-        // when
-        val status = service().status("txn_001")
-
-        // then
-        assertThat(status).isEqualTo(FeeStatusResponse.inProgress("txn_001"))
-    }
-
-    @Test
-    fun `status of a declined record is failed with the wallet's reason`() {
-        // given
-        recordReturns(CompletableFuture.completedFuture(FeeRecord.inProgress("hash").fail("insufficient funds")))
-
-        // when
-        val status = service().status("txn_001")
-
-        // then
-        assertThat(status).isEqualTo(FeeStatusResponse.failed("txn_001", "insufficient funds"))
-    }
-
-    @Test
-    fun `status of an id without a record is a 404 not found exception`() {
-        // given
-        recordReturns(CompletableFuture.completedFuture(null))
-
-        // when / then
-        assertThatThrownBy { service().status("txn_404") }
-            .isInstanceOfSatisfying(TransactionNotFoundException::class.java) {
-                assertThat(it.transactionId).isEqualTo("txn_404")
-                assertThat(it.status).isEqualTo(HttpStatus.NOT_FOUND.value())
-            }
-    }
-
-    @Test
-    fun `status of a malformed id is a 400 before Restate is called`() {
-        // when / then
-        assertThatThrownBy { service().status("txn:001") }
-            .isInstanceOfSatisfying(ValidationException::class.java) {
-                assertThat(it.field).isEqualTo("transaction_id")
-                assertThat(it.value).isEqualTo("txn:001")
-                assertThat(it.status).isEqualTo(HttpStatus.BAD_REQUEST.value())
-            }
-        verifyNoInteractions(recordClients)
-    }
-
-    @Test
-    fun `status with an unreachable ingress is a 503`() {
-        // given
-        val down = ingressDown()
-        recordReturns(CompletableFuture.failedFuture(down))
-
-        // when / then
-        assertThatThrownBy { service().status("txn_001") }
-            .isInstanceOfSatisfying(WorkflowUnavailableException::class.java) {
-                assertThat(it.cause).isSameAs(down)
-            }
-    }
-
-    @Test
-    fun `status lookup that throws right away is a 503`() {
-        // given
-        val down = ingressDown()
-        `when`(recordClient.getAsync()).thenThrow(down)
-
-        // when / then
-        assertThatThrownBy { service().status("txn_001") }
-            .isInstanceOfSatisfying(WorkflowUnavailableException::class.java) {
-                assertThat(it.cause).isSameAs(down)
-            }
-    }
-
-    @Test
-    fun `status without an answer within the attach timeout is a 503`() {
-        // given: a frozen Restate accepts the connection but never answers
-        recordReturns(CompletableFuture())
-
-        // when / then
-        assertThatThrownBy { service(attachTimeout = Duration.ofMillis(50)).status("txn_001") }
-            .isInstanceOfSatisfying(WorkflowUnavailableException::class.java) {
-                assertThat(it.cause).isInstanceOf(TimeoutException::class.java)
-            }
-    }
 }
 
 class FeeInProgressExceptionTest {
 
     @Test
-    fun `carries the transaction id the caller polls`() {
+    fun `carries the transaction id of the run still in progress`() {
         // given
         val exception = FeeInProgressException("txn_001")
 
