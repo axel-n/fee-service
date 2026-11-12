@@ -2,7 +2,9 @@
 # Implements tasks.md one task at a time, so that the system is stable again after every task.
 #
 #  - Clean context: every task runs in a fresh, non-interactive Claude Code session (no earlier conversation, no
-#    auto-memory, no MCP servers). Its prompt is the task's text from tasks.md plus .claude/skills/implement-task/SKILL.md.
+#    auto-memory, no MCP servers). Its prompt is the task's section of tasks.md, .claude/skills/implement-task/SKILL.md,
+#    and the context every session needs (docs/design.md, docs/decisions.md, the file list, the approved dependencies,
+#    the environment), so that no session spends tokens reading or exploring it again.
 #  - Order: tasks.md is in dependency order; the runner goes top to bottom.
 #  - Checkpoint: the tree is snapshotted before each task. git isn't available in the dev container, so it's a tar.
 #  - Gate: a result is accepted only if the guards hold (protected files untouched, no dependency outside the approved
@@ -78,11 +80,14 @@ REVIEW=(./docs/)
 # The stack AGENTS.md fixes (Spring Boot web, Kotlin, Jackson, the Restate SDK, JUnit 5, Mockito, Testcontainers, Cucumber):
 # its modules are approved. Anything else needs the user's approval (hard rule 1). check.sh rejects the ones ruled out.
 STACK_DEPS='^(org\.springframework\.boot:spring-boot-(starter|starter-web|starter-json|starter-test|testcontainers)|org\.jetbrains\.kotlin:.+|com\.fasterxml\.jackson(\.[a-z.]+)?:.+|dev\.restate:.+|org\.junit(\.[a-z.]+)?:.+|org\.mockito:.+|org\.testcontainers:.+|io\.cucumber:.+)$'
+# The same list for the sessions' prompt (keep both in sync)
+STACK_DEPS_TEXT='org.springframework.boot:spring-boot-starter, -starter-web, -starter-json, -starter-test, -testcontainers;
+org.jetbrains.kotlin:*; com.fasterxml.jackson*:*; dev.restate:*; org.junit*:*; org.mockito:*; org.testcontainers:*; io.cucumber:*'
 # Defense in depth for the sessions; the runner checks the result itself anyway.
 DENY='Bash(git *),Bash(podman *),Bash(docker *),Bash(claude *),Bash(scripts/task-runner.sh *),Bash(scripts/autopilot.sh *),'\
 'Edit(tasks.md),Write(tasks.md),Edit(AGENTS.md),Write(AGENTS.md),Edit(requirements.md),Write(requirements.md),'\
 'Edit(scripts/**),Write(scripts/**),Edit(.claude/**),Write(.claude/**),Edit(dev-setup/**),Write(dev-setup/**),'\
-'Edit(.task-runs/**),Write(.task-runs/**)'
+'Edit(.task-runs/**),Write(.task-runs/**),Read(.task-runs/**)'
 RESULT_SCHEMA='{"type":"object","additionalProperties":false,"required":["status","summary","commit_subject"],"properties":{
 "status":{"type":"string","enum":["done","blocked"],"description":"done: the task is implemented and scripts/check.sh passes. blocked: a human decision or approval is needed first"},
 "summary":{"type":"string","description":"Short bullet lines: what changed and why, the tests added, the scripts/check.sh result with test counts"},
@@ -185,29 +190,84 @@ scope_note() {
   fi
 }
 
-# The task's line and its indented continuation lines.
-task_block() {
-  awk -v id="$1" '
-    started && (/^- \[/ || /^## / || /^[^ \t]/) { exit }
-    started { print; next }
-    index($0, "- [ ] " id " ") == 1 || index($0, "- [x] " id " ") == 1 { started = 1; print }
-  ' tasks.md
-}
-
-# The heading of the task's section and the text between it and the first checkbox.
-section_intro() {
-  awk -v id="$1" '
-    /^## / { title = substr($0, 4); body = ""; collecting = 1; next }
-    /^- \[[ x]\] / {
-      collecting = 0
-      if (index($0, "- [ ] " id " ") == 1 || index($0, "- [x] " id " ") == 1) { print "Section: " title; printf "%s", body; exit }
-      next
-    }
-    collecting { body = body $0 "\n" }
-  ' tasks.md
-}
-
 skill_body() { awk 'NR == 1 && /^---$/ { fm = 1; next } fm && /^---$/ { fm = 0; next } !fm' "$SKILL"; }
+
+# The task's whole section of tasks.md (heading, intro, every task), the task itself marked.
+section_text() {
+  awk -v id="$1" '
+    /^## / { if (found) exit; sec = "" }
+    {
+      line = $0
+      if (index($0, "- [ ] " id " ") == 1 || index($0, "- [x] " id " ") == 1) { found = 1; line = line "   ◀ YOUR TASK" }
+      sec = sec line "\n"
+    }
+    END { if (found) printf "%s", sec }
+  ' tasks.md
+}
+
+# The files of the tree the runner snapshots (the same pruning), one path per line
+project_files() {
+  local args
+  mapfile -d '' -t args < <(prune_args)
+  find . \( "${args[@]}" \) -prune -o -type f -print | sed 's|^\./||' | LC_ALL=C sort
+}
+
+environment_facts() {
+  local java mvn_v
+  java=$(java -version 2>&1 | head -n 1 || true)
+  mvn_v=$(mvn -v 2>/dev/null | head -n 1 | sed 's/\x1b\[[0-9;]*m//g' || true)
+  echo "- JDK: ${java:-not found}; Maven: ${mvn_v:-not found}"
+  if ((UNIT_ONLY)); then
+    echo "- The gate runs with --unit-only: no container engine for the ITs. Use scripts/check.sh --unit and say so."
+  elif engine_ok; then
+    echo "- A container engine is reachable (DOCKER_HOST=${DOCKER_HOST:-unset}): Testcontainers ITs run, scripts/check.sh is the gate."
+  else
+    echo "- No container engine is reachable (DOCKER_HOST=${DOCKER_HOST:-unset}): use scripts/check.sh --unit and say the ITs didn't run."
+  fi
+  if env | grep -q '^RESTATE_'; then
+    echo "- The external dev Restate: $(env | grep '^RESTATE_' | LC_ALL=C sort | paste -sd ' ' -)"
+  fi
+}
+
+# What the sessions would otherwise read or work out themselves, every task again. Every token read stays in the
+# context and is paid for again on every later turn of the session, so the runner hands it over once, up front.
+runner_context() {
+  local f
+  cat <<EOF
+## Context the runner gathered for you
+
+This prompt already contains your task's whole section of tasks.md (above), docs/design.md and docs/decisions.md (below,
+as they are now), the project's file list, the approved dependencies, the environment and the usage of scripts/check.sh.
+Don't read those files again, and don't explore the tree with find/ls: the list below is complete. Read the code your task
+builds on or changes (pom.xml, the src/ files it touches or uses), and nothing beyond that.
+
+Not your context, don't open them:
+- \`.task-runs/\`: the runner's logs, snapshots and the copy of this prompt. What earlier tasks did is in the code and docs/.
+- \`scripts/\`: run scripts/check.sh, don't read it. Its usage is below, and a failure names the rule that failed.
+- \`dev-setup/\`, \`.claude/\`, \`.idea/\`: the environment, summarised below.
+- The rest of tasks.md. \`requirements.md\`: design.md covers it; read it only if your task is about it (README, presentation).
+
+### Environment
+$(environment_facts)
+
+### Approved dependencies (hard rule 1)
+EOF
+  if ((ALLOW_NEW_DEPS)); then
+    echo "This run has --allow-new-deps: a new dependency is accepted, but name it and say why in your summary."
+  else
+    echo "Only modules of the fixed stack: $STACK_DEPS_TEXT. Anything else is rejected by the runner."
+  fi
+  printf '\n### scripts/check.sh\n'
+  scripts/check.sh --help 2>&1 | sed -n '/^  scripts\/check.sh/,$p' || true
+  printf '\n### Project files (excluding target/, .git/, .task-runs/, .idea/)\n```\n'
+  project_files
+  printf '```\n'
+  for f in docs/design.md docs/decisions.md; do
+    printf '\n<file path="%s">\n' "$f"
+    cat "$f"
+    printf '</file>\n'
+  done
+}
 
 AUTONOMOUS_RULES='AUTONOMOUS RUN: the user is away for hours, and nobody will answer. This overrides "Stop and ask" below: never
 return status "blocked". Where you would ask, decide yourself:
@@ -220,7 +280,8 @@ return status "blocked". Where you would ask, decide yourself:
   written steps) and say what is left for a person.
 - If the external dev Restate isn'"'"'t reachable, use a throwaway Testcontainers Restate instead.
 - If a check can'"'"'t pass without breaking a rule, choose the closest solution within the rules, record the trade-off as
-  above, and finish. Never weaken the check or the tests.'
+  above, and finish. Never weaken the check or the tests.
+- Keep each D row short (see "Implement" below): every later session reads docs/decisions.md in full.'
 
 build_prompt() { # <id> <note>
   local decide='When you need a decision or an approval, return status "blocked" (see "Stop and ask" below).'
@@ -236,14 +297,17 @@ EOF
 
 ## The task
 
-$(section_intro "$1")
-$(task_block "$1")
+Task $1, marked ◀ in its section of tasks.md:
+
+$(section_text "$1")
 
 $(scope_note "$1")
 EOF
   if [[ -n $2 ]]; then printf '\n## Note for this task\n\n%s\n' "$2"; fi
   printf '\n'
   skill_body | sed "s/\\\$ARGUMENTS/$1/g"
+  printf '\n'
+  runner_context
 }
 
 # ---------------------------------------------------------------- tree: manifest, snapshot, restore
