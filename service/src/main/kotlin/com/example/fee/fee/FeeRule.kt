@@ -13,7 +13,7 @@ import java.math.BigDecimal
  * numbers from its own `@ConfigurationProperties` class in `config`. Rule beans live in `fee.rule`. A new fee
  * formula is a new building block implementing this interface.
  *
- * Implementations must be pure and deterministic: they run inside the workflow's CALCULATE `ctx.run`, and money is
+ * Implementations must be pure and deterministic: they run inside the workflow's CALCULATE journaled step, and money is
  * `BigDecimal`, rounded `HALF_EVEN` to the transaction asset's decimals.
  */
 interface FeeRule {
@@ -34,7 +34,7 @@ interface FeeRule {
  * [fee] is already rounded `HALF_EVEN` to the asset's decimals, so its scale is the asset's decimals (`1.50` for
  * USD). [rate] is the configured percentage as a fraction (`0.0015`), `0` for a flat fee.
  *
- * The workflow's CALCULATE step returns it from `ctx.run`, so it is journaled: renaming or removing a field is a
+ * The workflow's CALCULATE step journals it: renaming or removing a field is a
  * breaking change for in-flight workflows.
  */
 data class FeeQuote(

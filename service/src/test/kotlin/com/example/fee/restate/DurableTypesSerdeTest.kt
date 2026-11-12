@@ -6,31 +6,31 @@ import com.example.fee.fee.FeeQuote
 import com.example.fee.record.ClaimResult
 import com.example.fee.record.FeeRecord
 import com.example.fee.record.FeeRecords.response
+import com.example.fee.restate.serde.KotlinJacksonSerdeFactory
 import com.example.fee.validation.ValidationError
-
 import com.example.fee.workflow.FeeOutcome
 import com.example.fee.workflow.WorkflowStep
-import dev.restate.serde.jackson.JacksonSerdeFactory
+import dev.restate.serde.kotlinx.KotlinSerializationSerdeFactory.KtTypeTag
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.Arguments
 import org.junit.jupiter.params.provider.MethodSource
 import java.math.BigDecimal
+import kotlin.reflect.full.createType
 
 /**
- * Every type that crosses Restate's serde (handler input and output, `ctx.run` results, VO state), round-tripped through
- * the serde the generated code uses, declared as the handlers declare it. Equality covers `BigDecimal` scale too.
+ * Every type that crosses Restate's serde (handler input and output, journaled results, state), round-tripped through
+ * the serde the handlers declare, with the type tags the Kotlin SDK uses. Equality covers `BigDecimal` scale too.
  */
 class DurableTypesSerdeTest {
 
-    private val factory = JacksonSerdeFactory()
+    private val factory = KotlinJacksonSerdeFactory()
 
     @ParameterizedTest(name = "{0}")
     @MethodSource("durableValues")
     fun `reads back what it journaled, unchanged`(label: String, value: Any, declaredType: Class<*>) {
         // given
-        @Suppress("UNCHECKED_CAST")
-        val serde = factory.create(declaredType as Class<Any>)
+        val serde = factory.create(KtTypeTag<Any>(declaredType.kotlin, declaredType.kotlin.createType()))
 
         // when
         val restored = serde.deserialize(serde.serialize(value))

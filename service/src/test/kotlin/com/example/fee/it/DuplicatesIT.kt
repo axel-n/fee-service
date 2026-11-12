@@ -1,11 +1,8 @@
-@file:Suppress("DEPRECATION") // the generated client of the ctx-based codegen API of SDK 2.9.3
-
 package com.example.fee.it
 
 import com.example.fee.contract.FeeRequest
 import com.example.fee.record.ClaimResult
 import com.example.fee.record.FeeRecordStatus
-import com.example.fee.record.TransactionFeeRecordClient
 import com.example.fee.workflow.FeeOutcome
 import com.example.fee.workflow.WorkflowStep
 import org.assertj.core.api.Assertions.assertThat
@@ -122,7 +119,7 @@ class DuplicatesIT @Autowired constructor(
         // given: the record claimed as a run killed after CLAIM leaves it, and no workflow for the id
         val request = validRequest(newTransactionId())
         val transactionId = checkNotNull(request.transactionId)
-        val claim = TransactionFeeRecordClient.fromClient(TestIngress.client, transactionId).claim()
+        val claim = StoredFeeRecords.claim(transactionId)
         assertThat(claim).isEqualTo(ClaimResult.New)
 
         // when

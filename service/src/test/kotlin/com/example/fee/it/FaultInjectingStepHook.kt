@@ -11,7 +11,7 @@ import java.util.concurrent.atomic.AtomicInteger
  * [SimulatedCrash], a plain exception, so Restate retries the invocation from the top and replays the journal.
  *
  * It also counts its calls, so a test can see that the handler ran again. Hook calls are not step executions: the hooks
- * run on every replay, the `ctx.run` closures only once. Unarmed, it does nothing, so other ITs are unaffected.
+ * run on every replay, the journaled closures only once. Unarmed, it does nothing, so other ITs are unaffected.
  */
 class FaultInjectingStepHook : StepHook {
 

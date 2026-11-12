@@ -14,11 +14,9 @@ The purpose of this coding challenge is:
 
 ## 2. Challenge Overview
 
-Your challenge is to build a RESTful API for a fees workflow that uses Kotlin services to calculate, charge, and record
-the fees for a transaction submitted to the public API endpoint. The workflow will be implemented using Restate.
+Your challenge is to build a RESTful API for a fees workflow that uses Kotlin services to calculate, charge, and record the fees for a transaction submitted to the public API endpoint. The workflow will be implemented using Restate.
 
-Your workflow should persist the result of the fee calculations and charges. If you have time, introduce other
-transaction types and implement fees for them.
+Your workflow should persist the result of the fee calculations and charges. If you have time, introduce other transaction types and implement fees for them.
 
 ## 3. Test Case & API Specification
 

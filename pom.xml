@@ -28,11 +28,16 @@
 
     <properties>
         <java.version>25</java.version>
-        <restate.version>2.9.3</restate.version>
+        <restate.version>2.11.0</restate.version>
         <cucumber.version>7.34.9</cucumber.version>
-        <!-- Overrides of Boot's managed versions, aligned with what Restate SDK 2.9.3 is built against.
-             Kotlin: the compiler must read the SDK's Kotlin 2.3 metadata, and Boot 3.5 would pin 1.9 -->
-        <kotlin.version>2.3.21</kotlin.version>
+        <!-- Overrides of Boot's managed versions, aligned with what Restate SDK 2.11.0 is built against.
+             Kotlin: the compiler must read the SDK's Kotlin 2.4 metadata, and Boot 3.5 would pin 1.9.
+             Coroutines, kotlinx-serialization and Byte Buddy (the SDK's handler proxies): Boot 3.5 would pin older
+             versions than the Kotlin SDK needs at runtime -->
+        <kotlin.version>2.4.21</kotlin.version>
+        <kotlin-coroutines.version>1.11.0</kotlin-coroutines.version>
+        <kotlin-serialization.version>1.11.0</kotlin-serialization.version>
+        <byte-buddy.version>1.18.3</byte-buddy.version>
         <jackson-bom.version>2.22.4</jackson-bom.version>
         <opentelemetry.version>1.58.0</opentelemetry.version>
         <!-- Cucumber 7.34 is built against JUnit 5.14 (Cucumber 8 needs JUnit 6 and Spring 7) -->

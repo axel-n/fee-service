@@ -1,14 +1,10 @@
-@file:Suppress("DEPRECATION") // the generated clients of the ctx-based codegen API of SDK 2.9.3
-
 package com.example.fee.it
 
 import com.example.fee.contract.FeeRequest
 import com.example.fee.record.ClaimResult
 import com.example.fee.record.FeeRecord
 import com.example.fee.record.FeeRecordStatus
-import com.example.fee.record.TransactionFeeRecordClient
 import com.example.fee.workflow.FeeOutcome
-import com.example.fee.workflow.FeeWorkflowClient
 import com.example.fee.workflow.WorkflowStep
 import dev.restate.client.SendResponse
 import org.assertj.core.api.Assertions.assertThat
@@ -39,7 +35,7 @@ class RetentionExpiredIT @Autowired constructor(
         val recorded = completedRecord(request)
 
         // when
-        val claim = TransactionFeeRecordClient.fromClient(TestIngress.client, transactionIdOf(request)).claim()
+        val claim = StoredFeeRecords.claim(transactionIdOf(request))
 
         // then: the stored response, and the record is untouched
         assertThat(claim).isEqualTo(ClaimResult.AlreadyCompleted(checkNotNull(recorded.response)))
@@ -117,7 +113,7 @@ class RetentionExpiredIT @Autowired constructor(
 
     // Resubmitting a known key is PREVIOUSLY_ACCEPTED with the run's id, its input ignored, so this starts nothing
     private fun invocationIdOf(request: FeeRequest): String {
-        val sent = FeeWorkflowClient.fromClient(TestIngress.client, StoredWorkflows.keyOf(request)).submit(request)
+        val sent = StoredWorkflows.submit(request)
         assertThat(sent.sendStatus()).isEqualTo(SendResponse.SendStatus.PREVIOUSLY_ACCEPTED)
         return sent.invocationId()
     }

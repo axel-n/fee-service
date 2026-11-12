@@ -4,6 +4,7 @@ import com.example.fee.application.FeeService
 import com.example.fee.contract.FeeRequest
 import com.example.fee.contract.FeeResponse
 import com.example.fee.contract.FeeStatusResponse
+import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.mockito.Mockito.verify
@@ -62,10 +63,10 @@ class TransactionFeeControllerTest(@Autowired private val mockMvc: MockMvc) {
     @Test
     fun `a charged fee is 200 with the completed status and the fee in snake case`() {
         // given
-        `when`(feeService.submit(request)).thenReturn(FeeStatusResponse.completed(response))
+        runBlocking { `when`(feeService.submit(request)).thenReturn(FeeStatusResponse.completed(response)) }
 
         // when
-        val result = mockMvc.perform(
+        val result = mockMvc.performToCompletion(
             post("/transaction/fee").contentType(MediaType.APPLICATION_JSON).content(requestJson),
         )
 
@@ -86,12 +87,12 @@ class TransactionFeeControllerTest(@Autowired private val mockMvc: MockMvc) {
     @Test
     fun `the request body reaches the service with every snake case field`() {
         // given
-        `when`(feeService.submit(request)).thenReturn(FeeStatusResponse.completed(response))
+        runBlocking { `when`(feeService.submit(request)).thenReturn(FeeStatusResponse.completed(response)) }
 
         // when
-        mockMvc.perform(post("/transaction/fee").contentType(MediaType.APPLICATION_JSON).content(requestJson))
+        mockMvc.performToCompletion(post("/transaction/fee").contentType(MediaType.APPLICATION_JSON).content(requestJson))
 
         // then
-        verify(feeService).submit(request)
+        runBlocking { verify(feeService).submit(request) }
     }
 }

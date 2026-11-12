@@ -19,7 +19,7 @@ import java.time.temporal.ChronoUnit
 import java.util.UUID
 
 /**
- * VALIDATE reads the `Clock` inside `ctx.run`, so its result is journaled: when the clock moves between a crash
+ * VALIDATE reads the `Clock` inside a journaled step, so its result is journaled: when the clock moves between a crash
  * and Restate's retry, the replay returns the journaled result instead of judging `created_at` again.
  *
  * The clock is moved by the crash itself ([FaultInjectingStepHook.crashOnce]'s `onCrash`), so it has certainly moved

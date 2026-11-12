@@ -1,11 +1,14 @@
-@file:Suppress("DEPRECATION") // the generated client of the ctx-based codegen API of SDK 2.9.3
-
 package com.example.fee.it
 
 import com.example.fee.contract.FeeRequest
 import com.example.fee.workflow.FeeOutcome
-import com.example.fee.workflow.FeeWorkflowClient
+import com.example.fee.workflow.FeeWorkflow
 import com.example.fee.workflow.WorkflowStep
+import dev.restate.client.SendResponse
+import dev.restate.client.kotlin.toWorkflow
+import dev.restate.client.kotlin.workflow
+import dev.restate.client.kotlin.workflowHandle
+import kotlinx.coroutines.runBlocking
 
 /**
  * Reads `FeeWorkflow` runs straight from the shared Restate's ingress, by the key the app derives from a request (its
@@ -17,11 +20,16 @@ object StoredWorkflows {
     fun keyOf(request: FeeRequest): String = checkNotNull(request.transactionId)
 
     /** The step the workflow of [request] is at, `DONE` once it returned, `null` if it never started. */
-    fun step(request: FeeRequest): WorkflowStep? = FeeWorkflowClient.fromClient(TestIngress.client, keyOf(request)).status()
+    fun step(request: FeeRequest): WorkflowStep? =
+        runBlocking { TestIngress.client.workflow<FeeWorkflow>(keyOf(request)).status() }
 
     /** The outcome the workflow of [request] returned, or `null` while it has none yet. */
     fun outcome(request: FeeRequest): FeeOutcome? {
-        val output = FeeWorkflowClient.fromClient(TestIngress.client, keyOf(request)).workflowHandle().getOutput().response()
+        val output = TestIngress.client.workflowHandle<FeeOutcome>("FeeWorkflow", keyOf(request)).getOutput().response()
         return if (output.isReady) output.value else null
     }
+
+    /** Submits the workflow of [request] past the app, as `FeeService` does; a known key is `PREVIOUSLY_ACCEPTED`. */
+    fun submit(request: FeeRequest): SendResponse<FeeOutcome> =
+        runBlocking { TestIngress.client.toWorkflow<FeeWorkflow>(keyOf(request)).request { run(request) }.send() }
 }

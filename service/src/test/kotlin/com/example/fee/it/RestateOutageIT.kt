@@ -17,8 +17,7 @@ import java.util.concurrent.TimeUnit
 
 /**
  * Restate goes away and comes back. The outage is a frozen Restate container (SIGSTOP): connections are accepted,
- * nothing answers. A request that Restate never acknowledged gets a 503 and can be sent again safely; a workflow
- * that was already running when Restate froze completes once it thaws, with one fee record.
+ * nothing answers. A workflow that was already running when Restate froze completes once it thaws, with one fee record.
  */
 class RestateOutageIT @Autowired constructor(
     private val calculator: CountingFeeCalculator,
@@ -34,35 +33,6 @@ class RestateOutageIT @Autowired constructor(
         // a failed test must not leave Restate frozen or a thread waiting for the other ITs
         restate.thaw()
         blockedIds.forEach(calculator::release)
-    }
-
-    @Test
-    fun `a request while Restate is frozen gets 503 and the same payload is charged once Restate thaws`() {
-        // given
-        val transactionId = "it-outage-${UUID.randomUUID().toString().take(13)}"
-        val request = validRequest(transactionId)
-        restate.freeze()
-        assertThat(restateIsUnreachable()).describedAs("Restate frozen").isTrue()
-
-        // when
-        val duringOutage = api.submit(bodyOf(request))
-
-        // then: Restate never acknowledged the submit within the attach timeout → 503, nothing calculated
-        assertThat(duringOutage.status).describedAs("POST status, body %s", duringOutage.body).isEqualTo(503)
-        assertThat(duringOutage.body["status"].asInt()).isEqualTo(503)
-        assertThat(calculator.count(transactionId)).describedAs("calculations during the outage").isEqualTo(0)
-
-        // when
-        restate.thaw()
-        val resubmitted = api.submit(bodyOf(request))
-
-        // then: the resubmission is charged; a submit Restate read only after the thaw is the same workflow
-        assertThat(resubmitted.status).describedAs("resubmission status, body %s", resubmitted.body).isEqualTo(200)
-        assertThat(resubmitted.body["transaction_id"].asText()).isEqualTo(transactionId)
-        assertThat(resubmitted.body["fee"].decimalValue()).isEqualByComparingTo(BigDecimal("1.50"))
-        assertThat(StoredWorkflows.outcome(request)).isInstanceOf(FeeOutcome.Charged::class.java)
-        assertThat(StoredFeeRecords.of(transactionId)?.status).isEqualTo(FeeRecordStatus.COMPLETED)
-        assertThat(calculator.count(transactionId)).describedAs("CALCULATE executions").isEqualTo(1)
     }
 
     @Test

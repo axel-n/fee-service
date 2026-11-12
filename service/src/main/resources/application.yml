@@ -5,6 +5,12 @@
 spring:
   application:
     name: fee-service
+  # POST /transaction/fee is a suspend function, so Spring MVC serves it asynchronously. FeeService bounds the wait for
+  # the result by restate.attach-timeout; 0 turns off the servlet container's own async timeout (30s on Tomcat), which
+  # would otherwise cut a longer attach-timeout short with a 503
+  mvc:
+    async:
+      request-timeout: 0
 
 server:
   port: 8081

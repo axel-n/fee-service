@@ -46,7 +46,7 @@ sealed interface FeeOutcome {
  * A new step is a new value here, its `StepHook` wrapping in the workflow and a row in the crash-recovery tests.
  */
 enum class WorkflowStep {
-    /** `RequestValidator` inside `ctx.run`, because it reads the clock. */
+    /** `RequestValidator` in a journaled step, because it reads the clock. */
     VALIDATE,
 
     /** `TransactionMapper`: pure and deterministic, so not journaled. */
@@ -55,7 +55,7 @@ enum class WorkflowStep {
     /** `TransactionFeeRecord.claim()`: the fee record of the `transaction_id`, kept beyond the run's retention. */
     CLAIM,
 
-    /** `FeeCalculator` inside `ctx.run`, because the fee numbers come from configuration. */
+    /** `FeeCalculator` in a journaled step, because the fee numbers come from configuration. */
     CALCULATE,
 
     /** `TransactionFeeRecord.complete(response)`: the fee is charged by recording it. */

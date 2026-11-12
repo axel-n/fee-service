@@ -14,7 +14,7 @@ import java.util.concurrent.CompletableFuture
 import java.util.concurrent.TimeUnit
 
 /**
- * A `POST` that outlasts `restate.attach-timeout` while its workflow is held inside its CALCULATE `ctx.run`: it answers
+ * A `POST` that outlasts `restate.attach-timeout` while its workflow is held inside its CALCULATE journaled step: it answers
  * 202 with the `IN_PROGRESS` status, and the record claimed at CLAIM is `IN_PROGRESS`. Once the calculation is let go,
  * resending the same payload returns the charged fee, calculated once.
  */

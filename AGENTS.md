@@ -20,9 +20,13 @@ setup step outside the app.
 - Kotlin, JDK 25 (or 21 if the toolchain requires it), **Maven 3.9+**, the system `mvn` (no wrapper; the dev image in `dev-setup/` pins the version)
 - Two Maven modules under the root `pom.xml`: **`api/`** (`fee-service-api`, the HTTP contract other services depend on)
   and **`service/`** (`fee-service`, the app). Run `mvn` from the root
-- Spring Boot (`spring-boot-starter-web` only)
-- Restate **Java SDK 2.9.3** (`dev.restate:sdk-java-http`, `sdk-api-gen` through kapt), used from Kotlin. The Restate server runs
-  **externally** in Docker
+- Spring Boot (`spring-boot-starter-web` only; `kotlinx-coroutines-reactor` so Spring MVC can run the `suspend` controller)
+- **Kotlin coroutines** (`kotlinx-coroutines-core`): the Restate handlers, `FeeService` and the controller are `suspend` functions.
+  Never block a thread to wait (`runBlocking`, `Future.get`) in production code
+- Restate **Kotlin SDK 2.11.0** (`dev.restate:sdk-kotlin-http`): its reflection-based API, no code generation, with Jackson
+  (`sdk-serde-jackson`, through `KotlinJacksonSerdeFactory`) as the serde instead of kotlinx-serialization. The Restate server
+  runs **externally** in Docker. The root `pom.xml` aligns Kotlin, coroutines, kotlinx-serialization and Byte Buddy with the
+  versions the SDK is built against; bump them together with `restate.version`
 - Tests: JUnit 5, Mockito, Testcontainers, Cucumber
 
 ## Hard rules
@@ -50,7 +54,9 @@ Follow the call graph in `docs/design.md`:
 - The request/response DTOs live in `contract` and the exceptions with the error body in `contract.error`, both in the **api
   module**, which every layer may import. The api module is published to other services: only Jackson and Kotlin, no Spring,
   no Restate, and nothing of the service. Nothing outside `api` imports `api` (the service's HTTP package).
-- Restate is reached only through the generated clients (ingress in `FeeService`, `ctx` in `FeeWorkflow`). The app never
+- Restate is reached only through the Kotlin SDK's typed clients, each behind an interface the tests fake: `FeeWorkflowClients`
+  (the ingress, for `FeeService`), `FeeWorkflowContext` (inside `FeeWorkflow`) and `FeeRecordState` (inside
+  `TransactionFeeRecord`). Only their `Restate*`/`Ingress*` implementations call the SDK. The app never
   calls Restate's admin API: registration is done outside the app (README), so `restate.*` holds only the ingress URL,
   the endpoint port and the attach timeout. Don't add Restate settings or admin calls without asking.
 - The endpoint is started and stopped only by `RestateEndpointLifecycle`. Don't add Actuator until that's approved.
@@ -59,10 +65,14 @@ Follow the call graph in `docs/design.md`:
 ### Restate workflow code
 
 - Workflow and virtual object handlers must be **deterministic**. Anything non-deterministic or side-effecting goes
-  inside `ctx.run("name") { … }`. That covers reading the clock, random values, UUIDs and I/O.
-  Validation runs in `ctx.run` too, because it reads the `Clock`.
-- Configuration that affects a workflow decision (the fee numbers) is read only inside `ctx.run`, so a value changed between
-  restarts can't make a replay diverge.
+  inside a journaled step, `FeeWorkflowContext.journaled("name", typeTag<T>()) { … }` (Restate's `runBlock`). That covers
+  reading the clock, random values, UUIDs and I/O. Validation is journaled too, because it reads the `Clock`.
+- Configuration that affects a workflow decision (the fee numbers) is read only inside a journaled step, so a value changed
+  between restarts can't make a replay diverge.
+- Handlers are `suspend` functions with no `ctx` parameter: the SDK finds the invocation in the coroutine context. Don't
+  launch coroutines or switch dispatchers inside a handler; Restate's journal must see every step in order.
+- Every Restate service class carries `@CustomSerdeFactory(KotlinJacksonSerdeFactory::class)`. Without it the Kotlin SDK
+  falls back to kotlinx-serialization, which can't read the Jackson-annotated durable types or the stored JSON.
 - Business results are **returned** as `FeeOutcome` (`Charged`, `Rejected`, `Conflict`), never encoded in exception messages.
   Infrastructure failures → plain exceptions (Restate retries them).
 - The workflow key is the `transaction_id`: every submission of an id attaches to its one run and gets that run's result,
@@ -112,6 +122,10 @@ Follow the call graph in `docs/design.md`:
 - Structure each test as `// given` / `// when` / `// then`.
 - Unit tests (`*Test`, Surefire): no Spring context unless it is a `@WebMvcTest` slice. Use plain constructors, Mockito mocks and
   `Clock.fixed(...)`.
+- Suspend code in tests: `fun \`…\`() = runBlocking<Unit> { … }` (the `<Unit>` matters: JUnit silently skips a test that returns
+  a value). Fake the Restate-facing interfaces (`FeeWorkflowContext`, `FeeRecordState`, `FeeWorkflowClients`) with small
+  in-memory classes. Plain Mockito can stub and verify a suspend function inside `runBlocking`. `@WebMvcTest`s go through
+  `performToCompletion`, because the controller answers asynchronously.
 - Integration and BDD tests (`*IT`, Failsafe): Testcontainers Restate (`restatedev/restate`), and Cucumber features in
   `service/src/test/resources/features/`.
 - Money assertions use `compareTo` / `isEqualByComparingTo`, so `1.5` equals `1.50`.

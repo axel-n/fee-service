@@ -54,10 +54,10 @@ Restate server (external Docker) ── journals every step ──────�
    │ invokes the app's endpoint (port 9080)                                         │
    ▼                                                                                │
 FeeWorkflow.run(request)                                                            │
-   step VALIDATE   ctx.run { RequestValidator.validate(request) }   → Rejected? ────┤
+   step VALIDATE   journaled { RequestValidator.validate(request) } → Rejected? ────┤
    step MAP        TransactionMapper.toTransaction(request)  (pure, deterministic)  │
    step CLAIM      TransactionFeeRecord/txn_001.claim()       → Conflict? / Done? ──┤
-   step CALCULATE  ctx.run { FeeCalculator.calculate(tx) }                       ───┤
+   step CALCULATE  journaled { FeeCalculator.calculate(tx) }                     ───┤
    step RECORD     TransactionFeeRecord/txn_001.complete(response)  (the charge) ───┘
    return FeeOutcome.Charged(response)
 ```
@@ -66,7 +66,7 @@ FeeWorkflow.run(request)                                                        
   submission of an id attaches to its one run instead of starting a second one, and gets that run's result.
 - **`TransactionFeeRecord`** (a Restate *virtual object*, keyed by `transaction_id`) holds the permanent fee record, so
   a charged id is not charged again even after Restate has dropped the finished run.
-- Everything non-deterministic (the clock in validation, the fee numbers) runs inside `ctx.run`, so its result is
+- Everything non-deterministic (the clock in validation, the fee numbers) runs inside a journaled step (Restate's `runBlock`), so its result is
   journaled and replayed, never recomputed.
 
 **Crash example.** The app dies right after CALCULATE. Restate retries the invocation, and the endpoint (restarted, or a
@@ -298,7 +298,7 @@ What the recovery tests prove (each counts the **CALCULATE executions**, not jus
 |------|--------|
 | `CrashRecoveryIT`, `workflow_recovery.feature` | A crash before or after any step boundary is retried by Restate, and the journaled steps are replayed, not run again (validation and calculation closures each run once): one fee, record `COMPLETED` |
 | `EndpointRestartIT`, `workflow_recovery.feature` | Stopping and restarting the endpoint in the middle of CALCULATE completes the workflow with one fee record |
-| `RestateOutageIT` | With Restate frozen, a request gets 503 and the same payload is charged once after the thaw; a workflow frozen mid-CALCULATE completes with one fee record |
+| `RestateOutageIT` | A workflow frozen mid-CALCULATE completes with one fee record once Restate thaws |
 | `InFlightStatusIT` | A run that outlasts the attach timeout answers 202 `IN_PROGRESS`; the same payload sent again gets the fee |
 | `DeterminismIT` | A validation result is journaled: moving the clock between a crash and the retry doesn't change it |
 | `DuplicatesIT`, `idempotency.feature` | One `transaction_id`, sequentially or 10 callers at once, with the same or different payloads, is charged once and every caller gets the first run's response; an id held by an unfinished run gets 409 |
@@ -355,4 +355,4 @@ order or the JSON of `FeeRequest`/`FeeResponse` is a breaking change for in-flig
   with `force`.
 - **Cancelled, killed or paused workflows** leave the record `IN_PROGRESS`, so once Restate drops the run the id gets 409
   until an operator acts.
-- The Restate SDK's newer handler API before an upgrade removes the current one; Spring Boot 4 with Jackson 3.
+- Spring Boot 4 with Jackson 3 (the Restate SDK's serde is still on Jackson 2).

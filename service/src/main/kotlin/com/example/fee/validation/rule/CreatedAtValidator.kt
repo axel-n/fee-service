@@ -15,7 +15,7 @@ import java.time.format.DateTimeFormatter
 
 /**
  * `created_at` must be in the request format ([CreatedAtFormat]) and not later than now, read as UTC (400).
- * Reads the [Clock], which is why VALIDATE runs inside `ctx.run`: the result is journaled.
+ * Reads the [Clock], which is why VALIDATE runs inside a journaled step: the result is journaled.
  * Relies on [RequiredFieldsValidator] for presence.
  */
 @Component

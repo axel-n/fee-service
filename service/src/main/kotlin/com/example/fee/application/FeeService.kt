@@ -1,5 +1,3 @@
-@file:Suppress("DEPRECATION") // the ctx-based codegen API of SDK 2.9.3, kept on purpose
-
 package com.example.fee.application
 
 import com.example.fee.config.RestateProperties
@@ -13,12 +11,11 @@ import com.example.fee.restate.FeeWorkflowClients
 import com.example.fee.validation.ValidationError
 import com.example.fee.validation.rule.TransactionIdValidator
 import com.example.fee.workflow.FeeOutcome
+import kotlinx.coroutines.withTimeoutOrNull
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
-import java.util.concurrent.CompletableFuture
-import java.util.concurrent.ExecutionException
-import java.util.concurrent.TimeUnit
-import java.util.concurrent.TimeoutException
+import kotlin.coroutines.cancellation.CancellationException
+import kotlin.time.toKotlinDuration
 
 /**
  * The thin gateway between the API and `FeeWorkflow`: it checks the `transaction_id`, which is the workflow key,
@@ -26,9 +23,9 @@ import java.util.concurrent.TimeoutException
  * or a [FeeException]. Every business decision is made inside the workflow.
  *
  * It always submits, then attaches: a `transaction_id` sent again gets `PREVIOUSLY_ACCEPTED`, its payload is ignored,
- * and the attach returns the first run's result, so a transaction is processed once. Submit and attach together wait
- * at most `restate.attach-timeout`. A run still going by then is a [FeeInProgressException]; a submit Restate didn't
- * acknowledge by then, or a Restate call that failed, is a [WorkflowUnavailableException], because resending is safe.
+ * and the attach returns the first run's result, so a transaction is processed once. The attach waits at most
+ * `restate.attach-timeout`, suspended rather than holding a thread; a run still going by then is a
+ * [FeeInProgressException]. A Restate call that failed is a [WorkflowUnavailableException], because resending is safe.
  */
 @Service
 class FeeService(
@@ -37,32 +34,30 @@ class FeeService(
     private val restateProperties: RestateProperties,
 ) {
 
-    fun submit(request: FeeRequest): FeeStatusResponse {
+    suspend fun submit(request: FeeRequest): FeeStatusResponse {
         transactionIdValidator.validate(request)?.let { throw rejected(it) }
         val transactionId = checkNotNull(request.transactionId) { "transaction_id passed the pre-check but is null" }
 
-        val client = feeWorkflowClients.forTransaction(transactionId)
-        val submitted = try {
-            client.submitAsync(request)
-        } catch (e: RuntimeException) {
-            throw unavailable(transactionId, e)
-        }
-        val outcome = submitted.thenCompose { it.attachAsync() }.thenApply { it.response() }
-
-        val result = try {
-            outcome.get(restateProperties.attachTimeout.toMillis(), TimeUnit.MILLISECONDS)
-        } catch (e: TimeoutException) {
-            if (!accepted(submitted)) throw unavailable(transactionId, e)
-            log.info("Workflow {} still running after {}; answering 202", transactionId, restateProperties.attachTimeout)
+        val attachTimeout = restateProperties.attachTimeout
+        val run = restateCall(transactionId) { feeWorkflowClients.submit(transactionId, request) }
+        val outcome = restateCall(transactionId) { withTimeoutOrNull(attachTimeout.toKotlinDuration()) { run.attach() } }
+        if (outcome == null) {
+            log.info("Workflow {} still running after {}; answering 202", transactionId, attachTimeout)
             throw FeeInProgressException(transactionId)
-        } catch (e: ExecutionException) {
-            throw unavailable(transactionId, e.cause ?: e)
-        } catch (e: InterruptedException) {
-            Thread.currentThread().interrupt()
+        }
+        return toResponse(outcome)
+    }
+
+    // A failed Restate call means Restate is unavailable. A cancellation isn't a failure: the caller went away, so it
+    // passes through untouched, as coroutines require.
+    private suspend fun <T> restateCall(transactionId: String, call: suspend () -> T): T =
+        try {
+            call()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
             throw unavailable(transactionId, e)
         }
-        return toResponse(checkNotNull(result) { "Workflow $transactionId returned no outcome" })
-    }
 
     private fun toResponse(outcome: FeeOutcome): FeeStatusResponse = when (outcome) {
         is FeeOutcome.Charged -> FeeStatusResponse.completed(outcome.response)
@@ -78,9 +73,6 @@ class FeeService(
         }
         return ValidationException(error.field, error.value, error.message, kind)
     }
-
-    private fun accepted(submitted: CompletableFuture<*>): Boolean =
-        submitted.isDone && !submitted.isCompletedExceptionally
 
     private fun unavailable(transactionId: String, cause: Throwable): WorkflowUnavailableException {
         log.warn("Restate call for workflow {} failed: {}", transactionId, cause.toString())

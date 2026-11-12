@@ -1,9 +1,10 @@
-@file:Suppress("DEPRECATION") // the generated client of the ctx-based codegen API of SDK 2.9.3
-
 package com.example.fee.it
 
+import com.example.fee.record.ClaimResult
 import com.example.fee.record.FeeRecord
-import com.example.fee.record.TransactionFeeRecordClient
+import com.example.fee.record.TransactionFeeRecord
+import dev.restate.client.kotlin.virtualObject
+import kotlinx.coroutines.runBlocking
 
 /**
  * Reads the permanent fee records straight from the shared Restate's ingress, past the app's own API, so a test sees what
@@ -12,6 +13,11 @@ import com.example.fee.record.TransactionFeeRecordClient
 object StoredFeeRecords {
 
     /** The record of `TransactionFeeRecord/{transactionId}`, or `null` if the id was never claimed. */
-    fun of(transactionId: String): FeeRecord? =
-        TransactionFeeRecordClient.fromClient(TestIngress.client, transactionId).get()
+    fun of(transactionId: String): FeeRecord? = runBlocking { record(transactionId).get() }
+
+    /** Calls `claim` on the record of [transactionId] directly, as a workflow at its CLAIM step does. */
+    fun claim(transactionId: String): ClaimResult = runBlocking { record(transactionId).claim() }
+
+    private fun record(transactionId: String): TransactionFeeRecord =
+        TestIngress.client.virtualObject<TransactionFeeRecord>(transactionId)
 }

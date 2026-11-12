@@ -9,7 +9,7 @@ import org.springframework.stereotype.Component
  * the index is checked there: a duplicate rule, a missing rule, or a rule for [TransactionType.UNKNOWN] fails startup,
  * so a new type can't ship without its rule.
  *
- * Pure: the workflow calls [calculate] inside CALCULATE's `ctx.run`, so the quote is journaled.
+ * Pure: the workflow calls [calculate] inside CALCULATE's journaled step, so the quote is journaled.
  */
 @Component
 class FeeCalculator(rules: List<FeeRule>) {

@@ -6,7 +6,7 @@ import org.springframework.stereotype.Component
  * Called by `FeeWorkflow` around every [WorkflowStep], the seam for fault injection. Production uses
  * [NoOpStepHook]; tests replace it to crash the workflow at any step boundary.
  *
- * Both methods run in the handler, outside `ctx.run`, so they run again on every replay. A plain exception thrown here
+ * Both methods run in the handler, outside the journaled steps, so they run again on every replay. A plain exception thrown here
  * makes Restate retry the invocation from the top, replaying the steps journaled so far: that is how a crash is
  * simulated. An implementation must not touch anything the workflow decides on.
  */

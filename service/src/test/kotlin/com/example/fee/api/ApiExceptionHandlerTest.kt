@@ -9,6 +9,7 @@ import com.example.fee.contract.error.FeeProblem
 import com.example.fee.contract.error.ValidationException
 import com.example.fee.contract.error.WorkflowUnavailableException
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
+import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.hamcrest.Matchers.nullValue
 import org.junit.jupiter.api.Test
@@ -49,10 +50,10 @@ class ApiExceptionHandlerTest(@Autowired private val mockMvc: MockMvc) {
     """.trimIndent()
 
     private fun postFee(body: String = requestJson): ResultActions =
-        mockMvc.perform(post("/transaction/fee").contentType(MediaType.APPLICATION_JSON).content(body))
+        mockMvc.performToCompletion(post("/transaction/fee").contentType(MediaType.APPLICATION_JSON).content(body))
 
     private fun submitThrows(exception: RuntimeException) {
-        doThrow(exception).`when`(feeService).submit(any(FeeRequest::class.java) ?: FeeRequest())
+        runBlocking { doThrow(exception).`when`(feeService).submit(any(FeeRequest::class.java) ?: FeeRequest()) }
     }
 
     @Test
@@ -236,7 +237,7 @@ class ApiExceptionHandlerTest(@Autowired private val mockMvc: MockMvc) {
         val request = post("/transaction/fee").contentType(MediaType.APPLICATION_JSON)
 
         // when
-        val result = mockMvc.perform(request)
+        val result = mockMvc.performToCompletion(request)
 
         // then
         result
@@ -252,7 +253,7 @@ class ApiExceptionHandlerTest(@Autowired private val mockMvc: MockMvc) {
         val request = post("/transaction/fee").contentType(MediaType.TEXT_PLAIN).content("txn_001")
 
         // when
-        val result = mockMvc.perform(request)
+        val result = mockMvc.performToCompletion(request)
 
         // then
         result

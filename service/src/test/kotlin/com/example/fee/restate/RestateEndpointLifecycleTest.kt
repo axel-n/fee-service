@@ -3,9 +3,8 @@ package com.example.fee.restate
 import com.example.fee.config.RestateProperties
 import com.example.fee.record.ClaimDecider
 import com.example.fee.record.TransactionFeeRecord
-import com.example.fee.record.TransactionFeeRecordHandlers
+import com.example.fee.record.RestateFeeRecordState
 import com.example.fee.workflow.FeeWorkflow
-import com.example.fee.workflow.FeeWorkflowHandlers
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.AfterEach
@@ -56,8 +55,8 @@ class RestateEndpointLifecycleTest {
         // then
         assertThat(response.statusCode()).isEqualTo(200)
         assertThat(response.body())
-            .contains("\"${FeeWorkflowHandlers.Metadata.SERVICE_NAME}\"")
-            .contains("\"${TransactionFeeRecordHandlers.Metadata.SERVICE_NAME}\"")
+            .contains("\"FeeWorkflow\"")
+            .contains("\"TransactionFeeRecord\"")
     }
 
     @Test
@@ -180,7 +179,7 @@ class RestateEndpointLifecycleTest {
 
     private fun lifecycle(endpointPort: Int) = RestateEndpointLifecycle(
         feeWorkflow = mock(FeeWorkflow::class.java),
-        transactionFeeRecord = TransactionFeeRecord(ClaimDecider()),
+        transactionFeeRecord = TransactionFeeRecord(ClaimDecider(), RestateFeeRecordState()),
         properties = RestateProperties(
             ingressUrl = "http://localhost:8080",
             endpointPort = endpointPort,

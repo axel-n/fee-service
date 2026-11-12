@@ -19,7 +19,7 @@ import java.util.stream.Stream
  * the invocation from the top, replays the journaled steps and runs the rest. The caller still gets `Charged`, and the
  * record is `COMPLETED`.
  *
- * "Not re-executed" is asserted by counting the `ctx.run` closures (validator, calculator), never hook calls: the
+ * "Not re-executed" is asserted by counting the journaled closures (validator, calculator), never hook calls: the
  * handler, hooks included, runs again on every replay. Each closure runs exactly once whichever boundary crashed: a step
  * journaled before the crash is replayed, and a step after it runs only on the retry.
  */
@@ -58,7 +58,7 @@ class CrashRecoveryIT @Autowired constructor(
         assertThat(StoredWorkflows.step(request)).isEqualTo(WorkflowStep.DONE)
         assertThat(StoredWorkflows.outcome(request)).isInstanceOf(FeeOutcome.Charged::class.java)
 
-        // then: every ctx.run closure ran exactly once, so nothing journaled before the crash ran again
+        // then: every journaled closure ran exactly once, so nothing journaled before the crash ran again
         assertThat(validator.count(transactionId)).describedAs("VALIDATE executions").isEqualTo(1)
         assertThat(calculator.count(transactionId)).describedAs("CALCULATE executions").isEqualTo(1)
 

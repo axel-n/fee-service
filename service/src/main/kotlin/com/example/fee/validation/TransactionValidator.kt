@@ -11,7 +11,7 @@ import com.example.fee.contract.FeeRequest
  * ([ValidationError.Kind.UNSUPPORTED], 422). A validator may rely on the checks ordered before it (the fields are
  * present, the asset is known) and must not repeat them. A validator without `@Order` runs last.
  *
- * Implementations must be pure apart from an injected `Clock`: they run inside `ctx.run`, so the result is journaled.
+ * Implementations must be pure apart from an injected `Clock`: they run inside a journaled step, so the result is journaled.
  */
 interface TransactionValidator {
 

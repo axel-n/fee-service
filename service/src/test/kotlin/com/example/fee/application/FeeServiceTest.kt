@@ -1,5 +1,3 @@
-@file:Suppress("DEPRECATION") // the ctx-based codegen API of SDK 2.9.3
-
 package com.example.fee.application
 
 import com.example.fee.config.RestateProperties
@@ -11,34 +9,24 @@ import com.example.fee.contract.error.FeeException
 import com.example.fee.contract.error.ValidationException
 import com.example.fee.contract.error.WorkflowUnavailableException
 import com.example.fee.restate.FeeWorkflowClients
+import com.example.fee.restate.FeeWorkflowRun
 import com.example.fee.validation.ValidationError
 import com.example.fee.validation.rule.TransactionIdValidator
 import com.example.fee.workflow.FeeOutcome
-import com.example.fee.workflow.FeeWorkflowClient
-import dev.restate.client.Client
 import dev.restate.client.IngressException
-import dev.restate.client.RequestOptions
-import dev.restate.client.Response
-import dev.restate.client.ResponseHead
-import dev.restate.client.SendResponse
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
+import org.assertj.core.api.ThrowableAssert.ThrowingCallable
 import org.junit.jupiter.api.Test
-import org.mockito.ArgumentCaptor
-import org.mockito.ArgumentMatchers
-import org.mockito.Mockito.`when`
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.never
-import org.mockito.Mockito.times
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.verifyNoInteractions
 import org.springframework.http.HttpStatus
 import java.math.BigDecimal
 import java.net.ConnectException
 import java.time.Duration
-import java.util.concurrent.CompletableFuture
-import java.util.concurrent.CompletionException
-import java.util.concurrent.TimeoutException
+import kotlin.coroutines.cancellation.CancellationException
 
 class FeeServiceTest {
 
@@ -62,14 +50,7 @@ class FeeServiceTest {
         description = "Standard fee rate of 0.15%",
     )
 
-    private val workflowClient = mock(FeeWorkflowClient.IngressClient::class.java)
-    private val invocation = mock(Client.InvocationHandle::class.java)
-    private val clients = mock(FeeWorkflowClients::class.java).also {
-        `when`(it.forTransaction(ArgumentMatchers.anyString())).thenReturn(workflowClient)
-    }
-
-
-    private fun service(attachTimeout: Duration = Duration.ofSeconds(5)) = FeeService(
+    private fun service(clients: FeeWorkflowClients, attachTimeout: Duration = Duration.ofSeconds(5)) = FeeService(
         TransactionIdValidator(),
         clients,
         RestateProperties(
@@ -79,97 +60,73 @@ class FeeServiceTest {
         ),
     )
 
-    @Suppress("UNCHECKED_CAST")
-    private fun sendResponse(status: SendResponse.SendStatus): SendResponse<FeeOutcome> =
-        SendResponse(
-            200,
-            mock(ResponseHead.Headers::class.java),
-            status,
-            invocation as Client.InvocationHandle<FeeOutcome>,
-        )
-
-    @Suppress("UNCHECKED_CAST")
-    private fun attachReturns(future: CompletableFuture<Response<FeeOutcome>>) {
-        `when`(invocation.attachAsync(anyOptions())).thenReturn(future as CompletableFuture<Response<Any?>>)
-    }
-
-    private fun submitReturns(future: CompletableFuture<SendResponse<FeeOutcome>>) {
-        `when`(workflowClient.submitAsync(ArgumentMatchers.any(FeeRequest::class.java)))
-            .thenReturn(future)
-    }
-
-    private fun workflowAnswers(outcome: FeeOutcome, status: SendResponse.SendStatus = SendResponse.SendStatus.ACCEPTED) {
-        submitReturns(CompletableFuture.completedFuture(sendResponse(status)))
-        attachReturns(CompletableFuture.completedFuture(Response(200, mock(ResponseHead.Headers::class.java), outcome)))
-    }
-
-    private fun anyOptions(): RequestOptions? = ArgumentMatchers.any(RequestOptions::class.java)
-
     private fun ingressDown(): IngressException =
         IngressException("Error when executing the request", "POST", "http://localhost:8080", -1, null, ConnectException())
 
+    // Runs submit in a coroutine; a failure comes back as the exception, so assertThatThrownBy can inspect it
+    private fun submitting(service: FeeService, request: FeeRequest) =
+        ThrowingCallable { runBlocking { service.submit(request) } }
+
     @Test
-    fun `a charged outcome completes with the workflow's response`() {
+    fun `a charged outcome completes with the workflow's response`() = runBlocking<Unit> {
         // given
-        workflowAnswers(FeeOutcome.Charged(response))
+        val clients = FakeClients(attach = { FeeOutcome.Charged(response) })
 
         // when
-        val submission = service().submit(request)
+        val submission = service(clients).submit(request)
 
         // then
         assertThat(submission).isEqualTo(FeeStatusResponse.completed(response))
     }
 
     @Test
-    fun `submits the request as sent to the workflow keyed by its transaction id`() {
+    fun `submits the request as sent to the workflow keyed by its transaction id`() = runBlocking<Unit> {
         // given
-        workflowAnswers(FeeOutcome.Charged(response))
+        val clients = FakeClients(attach = { FeeOutcome.Charged(response) })
 
         // when
-        service().submit(request)
+        service(clients).submit(request)
 
         // then
-        verify(clients).forTransaction("txn_001")
-        val input = ArgumentCaptor.forClass(FeeRequest::class.java)
-        verify(workflowClient).submitAsync(input.capture())
-        assertThat(input.value).isEqualTo(request)
+        assertThat(clients.submitted).containsExactly("txn_001" to request)
     }
 
     @Test
-    fun `a changed payload with the same transaction id goes to the same workflow`() {
+    fun `a changed payload with the same transaction id goes to the same workflow`() = runBlocking<Unit> {
         // given
-        workflowAnswers(FeeOutcome.Charged(response))
-        val service = service()
+        val clients = FakeClients(attach = { FeeOutcome.Charged(response) })
+        val service = service(clients)
 
         // when
         service.submit(request)
         service.submit(request.copy(amount = BigDecimal("2000")))
 
         // then
-        verify(clients, times(2)).forTransaction("txn_001")
+        assertThat(clients.submitted.map { it.first }).containsExactly("txn_001", "txn_001")
     }
 
     @Test
-    fun `a transaction id sent again attaches to the first run and returns its result`() {
-        // given
-        workflowAnswers(FeeOutcome.Charged(response), SendResponse.SendStatus.PREVIOUSLY_ACCEPTED)
+    fun `attaches to the run Restate returns, so a transaction id sent again gets the first run's result`() =
+        runBlocking<Unit> {
+            // given: Restate hands back the first run for a known key
+            val clients = FakeClients(attach = { FeeOutcome.Charged(response) })
 
-        // when
-        val submission = service().submit(request)
+            // when
+            val submission = service(clients).submit(request.copy(amount = BigDecimal("2000")))
 
-        // then
-        assertThat(submission).isEqualTo(FeeStatusResponse.completed(response))
-        verify(invocation).attachAsync(anyOptions())
-    }
+            // then
+            assertThat(submission).isEqualTo(FeeStatusResponse.completed(response))
+            assertThat(clients.attaches).isEqualTo(1)
+        }
 
     @Test
     fun `a malformed request rejected by the workflow is a 400 validation exception`() {
         // given
         val error = ValidationError("amount", "-5", "Amount -5 must be greater than 0", ValidationError.Kind.INVALID)
-        workflowAnswers(FeeOutcome.Rejected(error))
+        val clients = FakeClients(attach = { FeeOutcome.Rejected(error) })
 
         // when / then
-        assertThatThrownBy { service().submit(request) }
+        assertThatThrownBy(submitting(service(clients), request))
             .isInstanceOfSatisfying(ValidationException::class.java) {
                 assertThat(listOf(it.field, it.value, it.message)).containsExactly(error.field, error.value, error.message)
                 assertThat(it.kind).isEqualTo(ValidationException.Kind.INVALID)
@@ -186,10 +143,10 @@ class FeeServiceTest {
             "Unsupported state 'PENDING'. Supported: 'SETTLED - PENDING FEE'",
             ValidationError.Kind.UNSUPPORTED,
         )
-        workflowAnswers(FeeOutcome.Rejected(error))
+        val clients = FakeClients(attach = { FeeOutcome.Rejected(error) })
 
         // when / then
-        assertThatThrownBy { service().submit(request) }
+        assertThatThrownBy(submitting(service(clients), request))
             .isInstanceOfSatisfying(ValidationException::class.java) {
                 assertThat(listOf(it.field, it.value, it.message)).containsExactly(error.field, error.value, error.message)
                 assertThat(it.kind).isEqualTo(ValidationException.Kind.UNSUPPORTED)
@@ -200,10 +157,10 @@ class FeeServiceTest {
     @Test
     fun `a conflict is a 409 duplicate transaction exception`() {
         // given
-        workflowAnswers(FeeOutcome.Conflict("txn_001"))
+        val clients = FakeClients(attach = { FeeOutcome.Conflict("txn_001") })
 
         // when / then
-        assertThatThrownBy { service().submit(request) }
+        assertThatThrownBy(submitting(service(clients), request))
             .isInstanceOfSatisfying(DuplicateTransactionException::class.java) {
                 assertThat(it.transactionId).isEqualTo("txn_001")
                 assertThat(it.status).isEqualTo(HttpStatus.CONFLICT.value())
@@ -212,65 +169,56 @@ class FeeServiceTest {
 
     @Test
     fun `a missing transaction id is a 400 before Restate is called`() {
+        // given
+        val clients = FakeClients(attach = { FeeOutcome.Charged(response) })
+
         // when / then
-        assertThatThrownBy { service().submit(request.copy(transactionId = null)) }
+        assertThatThrownBy(submitting(service(clients), request.copy(transactionId = null)))
             .isInstanceOfSatisfying(ValidationException::class.java) {
                 assertThat(it.field).isEqualTo("transaction_id")
                 assertThat(it.status).isEqualTo(HttpStatus.BAD_REQUEST.value())
             }
-        verifyNoInteractions(clients)
+        assertThat(clients.submitted).isEmpty()
     }
 
     @Test
     fun `a transaction id that can't be a workflow key is a 400 naming the value before Restate is called`() {
+        // given
+        val clients = FakeClients(attach = { FeeOutcome.Charged(response) })
+
         // when / then
-        assertThatThrownBy { service().submit(request.copy(transactionId = "txn:001")) }
+        assertThatThrownBy(submitting(service(clients), request.copy(transactionId = "txn:001")))
             .isInstanceOfSatisfying(ValidationException::class.java) {
                 assertThat(it.field).isEqualTo("transaction_id")
                 assertThat(it.value).isEqualTo("txn:001")
                 assertThat(it.status).isEqualTo(HttpStatus.BAD_REQUEST.value())
             }
-        verifyNoInteractions(clients)
+        assertThat(clients.submitted).isEmpty()
     }
 
     @Test
     fun `an unreachable ingress on submit is a 503`() {
         // given
         val down = ingressDown()
-        submitReturns(CompletableFuture.failedFuture(CompletionException(down)))
+        val clients = FakeClients(submit = { throw down }, attach = { FeeOutcome.Charged(response) })
 
         // when / then
-        assertThatThrownBy { service().submit(request) }
+        assertThatThrownBy(submitting(service(clients), request))
             .isInstanceOfSatisfying(WorkflowUnavailableException::class.java) {
                 assertThat(it.status).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE.value())
                 assertThat(it.cause).isSameAs(down)
             }
-        verify(invocation, never()).attachAsync(anyOptions())
-    }
-
-    @Test
-    fun `a submit that throws right away is a 503`() {
-        // given
-        val down = ingressDown()
-        `when`(workflowClient.submitAsync(ArgumentMatchers.any(FeeRequest::class.java)))
-            .thenThrow(down)
-
-        // when / then
-        assertThatThrownBy { service().submit(request) }
-            .isInstanceOfSatisfying(WorkflowUnavailableException::class.java) {
-                assertThat(it.cause).isSameAs(down)
-            }
+        assertThat(clients.attaches).isZero()
     }
 
     @Test
     fun `an attach that fails after the submit was accepted is a 503`() {
         // given
         val down = ingressDown()
-        submitReturns(CompletableFuture.completedFuture(sendResponse(SendResponse.SendStatus.ACCEPTED)))
-        attachReturns(CompletableFuture.failedFuture(down))
+        val clients = FakeClients(attach = { throw down })
 
         // when / then
-        assertThatThrownBy { service().submit(request) }
+        assertThatThrownBy(submitting(service(clients), request))
             .isInstanceOfSatisfying(WorkflowUnavailableException::class.java) {
                 assertThat(it.cause).isSameAs(down)
             }
@@ -279,46 +227,55 @@ class FeeServiceTest {
     @Test
     fun `no result within the attach timeout is an in progress exception with the transaction id`() {
         // given: the workflow was accepted but never finishes
-        submitReturns(CompletableFuture.completedFuture(sendResponse(SendResponse.SendStatus.ACCEPTED)))
-        attachReturns(CompletableFuture())
+        val clients = FakeClients(attach = { awaitCancellation() })
 
         // when / then
-        assertThatThrownBy { service(attachTimeout = Duration.ofMillis(50)).submit(request) }
+        assertThatThrownBy(submitting(service(clients, attachTimeout = Duration.ofMillis(50)), request))
             .isInstanceOfSatisfying(FeeInProgressException::class.java) {
                 assertThat(it.transactionId).isEqualTo("txn_001")
             }
     }
 
     @Test
-    fun `a submit Restate doesn't acknowledge within the attach timeout is a 503`() {
-        // given: a frozen Restate accepts the connection but never answers
-        submitReturns(CompletableFuture())
+    fun `a request cancelled while it waits stays a cancellation and is not reported as a 503`() = runBlocking<Unit> {
+        // given: the workflow was accepted but never finishes, and the caller is waiting for it
+        val clients = FakeClients(attach = { awaitCancellation() })
+        val submission = async { service(clients).submit(request) }
+        clients.attaching.await()
 
-        // when / then
-        assertThatThrownBy { service(attachTimeout = Duration.ofMillis(50)).submit(request) }
-            .isInstanceOfSatisfying(WorkflowUnavailableException::class.java) {
-                assertThat(it.cause).isInstanceOf(TimeoutException::class.java)
-            }
-        verify(invocation, never()).attachAsync(anyOptions())
+        // when
+        submission.cancel()
+        val failure = runCatching { submission.await() }.exceptionOrNull()
+
+        // then
+        assertThat(failure).isInstanceOf(CancellationException::class.java)
     }
 
-    @Test
-    fun `an interrupted wait is a 503 and keeps the thread's interrupt flag`() {
-        // given
-        submitReturns(CompletableFuture())
-        Thread.currentThread().interrupt()
+    /**
+     * The ingress in memory: [submit] runs on every submission, which the fake records, and [attach] answers the run's
+     * outcome, or suspends until cancelled, as a run that never finishes does.
+     */
+    private class FakeClients(
+        private val submit: suspend () -> Unit = {},
+        private val attach: suspend () -> FeeOutcome,
+    ) : FeeWorkflowClients {
+        val submitted = mutableListOf<Pair<String, FeeRequest>>()
+        var attaches = 0
+            private set
 
-        // when / then
-        try {
-            assertThatThrownBy { service().submit(request) }
-                .isInstanceOf(WorkflowUnavailableException::class.java)
-            assertThat(Thread.currentThread().isInterrupted).isTrue()
-        } finally {
-            Thread.interrupted()
+        /** Completed once an attach started waiting. */
+        val attaching = CompletableDeferred<Unit>()
+
+        override suspend fun submit(transactionId: String, request: FeeRequest): FeeWorkflowRun {
+            submitted += transactionId to request
+            submit()
+            return FeeWorkflowRun {
+                attaches++
+                attaching.complete(Unit)
+                attach()
+            }
         }
     }
-
-
 }
 
 class FeeInProgressExceptionTest {

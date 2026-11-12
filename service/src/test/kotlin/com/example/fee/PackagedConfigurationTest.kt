@@ -125,6 +125,18 @@ class PackagedConfigurationTest {
     }
 
     @Test
+    fun `the servlet async timeout is off, so it can't cut the attach timeout short`() {
+        // given
+        val binder = Binder.get(environment())
+
+        // when
+        val asyncTimeout = binder.bind("spring.mvc.async.request-timeout", Duration::class.java).get()
+
+        // then
+        assertThat(asyncTimeout).isEqualTo(Duration.ZERO)
+    }
+
+    @Test
     fun `the app needs only the ingress url, the endpoint port and the attach timeout to work with Restate`() {
         // given
         val yaml = packagedYaml()

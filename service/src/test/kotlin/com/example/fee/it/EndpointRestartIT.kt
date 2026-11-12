@@ -16,7 +16,7 @@ import java.util.concurrent.CompletableFuture
 import java.util.concurrent.TimeUnit
 
 /**
- * The endpoint stops while a workflow is inside its CALCULATE `ctx.run` and starts again on the same port. The
+ * The endpoint stops while a workflow is inside its CALCULATE journaled step and starts again on the same port. The
  * step was not journaled, so Restate retries the invocation on the restarted endpoint and the closure runs again, while
  * the call from before the stop is still waiting. Once released, both calls finish, only the restarted run's result is
  * journaled, and the workflow completes with one fee record.

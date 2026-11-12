@@ -28,7 +28,7 @@ class CallCounter {
 
 /**
  * A validator that always passes and counts how often it ran, per `transaction_id`. It runs last, inside the VALIDATE
- * `ctx.run`, so its count is the number of VALIDATE executions of requests that passed every real check. Recovery tests
+ * a journaled step, so its count is the number of VALIDATE executions of requests that passed every real check. Recovery tests
  * count these instead of hook calls, because a replay runs the handler again but not a journaled closure.
  */
 @Order(Ordered.LOWEST_PRECEDENCE)
