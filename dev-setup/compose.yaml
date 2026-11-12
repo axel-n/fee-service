@@ -7,7 +7,7 @@ name: fee-service
 
 services:
   restate:
-    # TODO pin a version once spike 0.4 confirms which server version works with SDK 2.9.3
+    # TODO pin a version once spike 0.2 (tasks.md) confirms which server version works with SDK 2.9.3
     image: docker.restate.dev/restatedev/restate:latest
     container_name: fee-service-restate
     ports:
@@ -27,13 +27,19 @@ services:
     # The image's user has UID/GID 1000. keep-id maps it to your host user, whatever your host UID is.
     userns_mode: "keep-id:uid=1000,gid=1000"
     cap_drop: [ALL]
-    # newuidmap/newgidmap need these to set up the nested podman's user namespace.
+    # SETUID, SETGID: newuidmap/newgidmap need them to set up the nested podman's user namespace.
+    # SYS_CHROOT: the default seccomp profile allows chroot(2) only with this capability, and the nested podman unpacks
+    # image layers in a chroot. Without it every pull fails with "after fallback to chroot: operation not permitted".
     # They apply inside this container's own user namespace and grant nothing on the host.
-    cap_add: [SETUID, SETGID]
+    cap_add: [SETUID, SETGID, SYS_CHROOT]
     devices:
       - /dev/fuse               # fuse-overlayfs fallback for nested image storage
       - /dev/net/tun            # pasta networking for nested containers
-    security_opt: ["label=disable"]
+    # unmask=/proc/sys: netavark sets net.ipv4.ip_forward in the nested podman's own network namespace, which the bridge
+    # network needs (Testcontainers puts its containers there, and exposeHostPorts needs container-to-container traffic).
+    # The kernel still allows writes only to net.* sysctls of network namespaces this container owns; global kernel
+    # settings stay read-only.
+    security_opt: ["label=disable", "unmask=/proc/sys"]
     pids_limit: 4096
     ports:
       - "127.0.0.1:8081:8081"   # the app's HTTP API, for curl from the host
