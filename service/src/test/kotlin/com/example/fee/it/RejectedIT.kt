@@ -1,7 +1,6 @@
 package com.example.fee.it
 
 import com.example.fee.contract.FeeRequest
-import com.example.fee.record.FeeRecordStatus
 import com.example.fee.validation.ValidationError
 import com.example.fee.validation.ValidationError.Kind.INVALID
 import com.example.fee.validation.ValidationError.Kind.UNSUPPORTED
@@ -18,8 +17,9 @@ import java.util.UUID
 
 /**
  * Rejections end to end: every kind of validator rejects through the workflow's VALIDATE step, which returns
- * `FeeOutcome.Rejected` before CLAIM, so nothing is calculated or recorded and the `transaction_id` is not used up:
- * the same id with a corrected payload is a new workflow and is charged.
+ * `FeeOutcome.Rejected` before CLAIM, so nothing is calculated or recorded. The workflow key is the `transaction_id`, so
+ * the rejection stays the id's answer while Restate keeps the run: the same id with a corrected payload gets it again
+ * (`RetentionExpiredIT` covers the id once the run is gone).
  */
 class RejectedIT @Autowired constructor(
     private val calculator: CountingFeeCalculator,
@@ -47,7 +47,7 @@ class RejectedIT @Autowired constructor(
 
     @ParameterizedTest(name = "{0}")
     @MethodSource("cases")
-    fun `a rejected payload is neither recorded nor charged and the corrected payload with the same id is charged`(
+    fun `a rejected payload is neither recorded nor charged and the corrected payload with the same id gets the same rejection`(
         case: Case,
     ) {
         // given
@@ -89,20 +89,17 @@ class RejectedIT @Autowired constructor(
         assertThat(calculator.count(transactionId)).isZero()
 
         // when: the same id with the corrected payload
-        val corrected = api.submit(bodyOf(valid))
+        val resent = api.submit(bodyOf(valid))
 
-        // then: a new workflow charges it once and records it
-        assertThat(corrected.status).describedAs("POST status, body %s", corrected.body).isEqualTo(200)
-        assertThat(corrected.body["transaction_id"].asText()).isEqualTo(transactionId)
-        assertThat(corrected.body["fee"].decimalValue()).isEqualByComparingTo(BigDecimal("1.50"))
-        assertThat(StoredWorkflows.keyOf(valid)).isNotEqualTo(StoredWorkflows.keyOf(rejected))
-        val record = StoredFeeRecords.of(transactionId)
-        assertThat(record?.status).isEqualTo(FeeRecordStatus.COMPLETED)
-        assertThat(record?.response?.fee).isEqualByComparingTo(BigDecimal("1.50"))
-        assertThat(calculator.count(transactionId)).isEqualTo(1)
+        // then: the id's one workflow answers with its rejection again
+        assertThat(resent.status).describedAs("POST status, body %s", resent.body).isEqualTo(case.status)
+        assertThat(resent.body).isEqualTo(rejection.body)
+        assertThat(StoredWorkflows.keyOf(valid)).isEqualTo(StoredWorkflows.keyOf(rejected))
+        assertThat(StoredWorkflows.outcome(valid)).isEqualTo(outcome)
 
-        // then: the rejected payload keeps its own result
-        assertThat(StoredWorkflows.outcome(rejected)).isEqualTo(outcome)
+        // then: still no record, no calculation
+        assertThat(StoredFeeRecords.of(transactionId)).isNull()
+        assertThat(calculator.count(transactionId)).isZero()
     }
 
     @Test

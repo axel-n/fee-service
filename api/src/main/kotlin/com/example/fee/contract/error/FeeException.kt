@@ -29,7 +29,7 @@ enum class FeeErrorCode(val status: Int) {
     /** A well-formed request the service doesn't support, e.g. state `PENDING` ([ValidationException]). */
     UNSUPPORTED_REQUEST(422),
 
-    /** The transaction id is claimed by another payload ([DuplicateTransactionException]). */
+    /** The transaction id is claimed by an earlier run that never finished ([DuplicateTransactionException]). */
     DUPLICATE_TRANSACTION(409),
 
     /** Fee processing can't be reached right now ([WorkflowUnavailableException]). */
@@ -56,9 +56,9 @@ class ValidationException(
     }
 }
 
-/** [transactionId] is claimed by another payload, either already charged or still in progress: 409. */
+/** [transactionId] is claimed by an earlier run that never finished (one an operator killed, say): 409. */
 class DuplicateTransactionException(val transactionId: String) : FeeException(
-    "Transaction '$transactionId' was already charged or is being processed with a different payload",
+    "Transaction '$transactionId' is claimed by an earlier run that has not finished",
 ) {
     override val code: FeeErrorCode get() = FeeErrorCode.DUPLICATE_TRANSACTION
 }

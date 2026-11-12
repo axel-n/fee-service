@@ -41,8 +41,8 @@ setup step outside the app.
 Follow the call graph in `docs/design.md`:
 
 - `TransactionFeeController` calls **only** `FeeService`. It handles HTTP concerns only.
-- `FeeService` is a **thin gateway with no business logic**. It runs the `transaction_id` pre-check (needed for the workflow key),
-  builds `WorkflowKey`, submits or attaches to `FeeWorkflow`, and maps `FeeOutcome` to HTTP.
+- `FeeService` is a **thin gateway with no business logic**. It runs the `transaction_id` pre-check (the id is the workflow key),
+  submits or attaches to the `FeeWorkflow` of that id, and maps `FeeOutcome` to HTTP.
 - **All business logic runs inside `FeeWorkflow`** as journaled steps: VALIDATE → MAP → CLAIM → CALCULATE → RECORD (RECORD
   is the charge: the fee is stored as the transaction's charged fee).
   Every step is wrapped with `StepHook.before/after`.
@@ -65,8 +65,9 @@ Follow the call graph in `docs/design.md`:
   restarts can't make a replay diverge.
 - Business results are **returned** as `FeeOutcome` (`Charged`, `Rejected`, `Conflict`), never encoded in exception messages.
   Infrastructure failures → plain exceptions (Restate retries them).
-- The workflow key is `{transaction_id}:{payloadHash}`. Duplicate protection per `transaction_id` is the CLAIM on
-  `TransactionFeeRecord`; never bypass it.
+- The workflow key is the `transaction_id`: every submission of an id attaches to its one run and gets that run's result,
+  whatever payload it carries. The CLAIM on `TransactionFeeRecord` keeps protecting the id once Restate has dropped the run;
+  never bypass it.
 - Keep handlers thin. Logic lives in injected, unit-tested classes (`RequestValidator`, `FeeCalculator`, `ClaimDecider`).
 - A new workflow step needs a `WorkflowStep` value, the `StepHook` wrapping, and a row in the crash-recovery tests.
 - Changing a handler signature, step order or stored state shape is a breaking change for in-flight workflows; call it out.

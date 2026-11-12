@@ -6,7 +6,6 @@ import com.example.fee.config.RestateProperties
 import com.example.fee.contract.FeeRequest
 import com.example.fee.workflow.FeeWorkflow
 import com.example.fee.workflow.FeeWorkflowHandlers
-import com.example.fee.workflow.FeeWorkflowInput
 import dev.restate.client.Client
 import dev.restate.common.Request
 import org.assertj.core.api.Assertions.assertThat
@@ -45,30 +44,30 @@ class RestateConfigTest {
     }
 
     @Test
-    fun `workflow client factory addresses the FeeWorkflow with the given key`() {
+    fun `workflow client factory addresses the FeeWorkflow keyed by the transaction id`() {
         // given
         val client = mock(Client::class.java)
         val factory = config.feeWorkflowClients(client)
 
         // when
-        factory.forKey("txn_001:abc123").submit(FeeWorkflowInput(FeeRequest(), "abc123"))
+        factory.forTransaction("txn_001").submit(FeeRequest(transactionId = "txn_001"))
 
         // then
         val target = sentRequest(client).target
         assertThat(target.service).isEqualTo(FeeWorkflowHandlers.Metadata.SERVICE_NAME)
-        assertThat(target.key).isEqualTo("txn_001:abc123")
+        assertThat(target.key).isEqualTo("txn_001")
         assertThat(target.handler).isEqualTo("run")
     }
 
     @Test
-    fun `workflow client factory creates a client per key`() {
+    fun `workflow client factory creates a client per transaction`() {
         // given
         val client = mock(Client::class.java)
         val factory = config.feeWorkflowClients(client)
 
         // when
-        val first = factory.forKey("txn_001:abc")
-        val second = factory.forKey("txn_002:def")
+        val first = factory.forTransaction("txn_001")
+        val second = factory.forTransaction("txn_002")
 
         // then
         assertThat(first).isNotSameAs(second)

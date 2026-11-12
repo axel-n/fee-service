@@ -51,7 +51,7 @@ class FeeExceptionTest {
     }
 
     @Test
-    fun `a transaction id claimed by another payload is a 409 naming the id`() {
+    fun `a transaction id claimed by an unfinished run is a 409 naming the id`() {
         // given
         val transactionId = "txn_001"
 
@@ -62,7 +62,7 @@ class FeeExceptionTest {
         assertThat(exception.status).isEqualTo(409)
         assertThat(exception.code).isEqualTo(FeeErrorCode.DUPLICATE_TRANSACTION)
         assertThat(exception.transactionId).isEqualTo("txn_001")
-        assertThat(exception.message).contains("'txn_001'").contains("different payload")
+        assertThat(exception.message).contains("'txn_001'").contains("has not finished")
     }
 
     @Test

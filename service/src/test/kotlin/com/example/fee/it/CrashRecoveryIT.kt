@@ -65,7 +65,6 @@ class CrashRecoveryIT @Autowired constructor(
         // then: the record is completed with the charged response
         val record = StoredFeeRecords.of(transactionId)
         assertThat(record?.status).isEqualTo(FeeRecordStatus.COMPLETED)
-        assertThat(record?.payloadHash).isEqualTo(StoredWorkflows.keyOf(request).substringAfter(':'))
         assertThat(record?.response?.fee).isEqualByComparingTo(BigDecimal("1.50"))
     }
 

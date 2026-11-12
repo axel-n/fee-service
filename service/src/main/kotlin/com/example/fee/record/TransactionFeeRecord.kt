@@ -21,15 +21,15 @@ import org.springframework.stereotype.Component
 @VirtualObject
 class TransactionFeeRecord(private val claimDecider: ClaimDecider) {
 
-    /** Claims the id for the payload with [payloadHash]; on [ClaimResult.New] the record becomes `IN_PROGRESS`. */
+    /** Claims the id for the calling run; on [ClaimResult.New] the record becomes `IN_PROGRESS`. */
     @Handler
-    fun claim(ctx: ObjectContext, payloadHash: String): ClaimResult {
-        val result = claimDecider.decide(ctx.get(RECORD).orElse(null), payloadHash)
-        if (result is ClaimResult.New) ctx.set(RECORD, FeeRecord.inProgress(payloadHash))
+    fun claim(ctx: ObjectContext): ClaimResult {
+        val result = claimDecider.decide(ctx.get(RECORD).orElse(null))
+        if (result is ClaimResult.New) ctx.set(RECORD, FeeRecord.inProgress())
         return result
     }
 
-    /** Records the charged [response]: the record becomes `COMPLETED`, keeping the claiming payload's hash. */
+    /** Records the charged [response]: the record becomes `COMPLETED`. */
     @Handler
     fun complete(ctx: ObjectContext, response: FeeResponse) {
         ctx.set(RECORD, inProgress(ctx, "complete").complete(response))

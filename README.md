@@ -21,9 +21,10 @@ POST /transaction/fee          → 200 with the fee (or 202 while it is still ru
 3. **calculates** the fee with the rule of the transaction's type,
 4. **charges and records** the fee: it is stored permanently in Restate state as the transaction's charged fee.
 
-The caller waits for the result (up to `restate.attach-timeout`) and gets the fee. Sending the same payload again
-returns the same response without a second charge. A rejected request does not use up its `transaction_id`: the
-corrected payload is processed normally. Nothing is stored outside Restate.
+The caller waits for the result (up to `restate.attach-timeout`) and gets the fee. The workflow is keyed by the
+`transaction_id`, so sending the same id again returns the first run's response without a second charge, whatever the
+payload; a rejected id stays rejected until Restate drops the finished run (1 day by default).
+Nothing is stored outside Restate.
 
 ```json
 // POST /transaction/fee                          // 200 OK
@@ -45,28 +46,26 @@ corrected payload is processed normally. Nothing is stored outside Restate.
 POST /transaction/fee
    ▼
 Spring app: TransactionFeeController → FeeService           (thin gateway, no business logic)
-   │  1. transaction_id present and well-formed?  (needed to build the key; otherwise 400)
-   │  2. key = txn_001:<payloadHash>
-   │  3. submit FeeWorkflow/<key>/run, then attach  (a duplicate gets PREVIOUSLY_ACCEPTED
+   │  1. transaction_id present and well-formed?  (it is the workflow key; otherwise 400)
+   │  2. submit FeeWorkflow/txn_001/run, then attach  (the id sent again gets PREVIOUSLY_ACCEPTED
    │     and the first run's result; no result within attach-timeout → 202)
    ▼
 Restate server (external Docker) ── journals every step ───────────────────────────┐
    │ invokes the app's endpoint (port 9080)                                         │
    ▼                                                                                │
-FeeWorkflow.run(input)                                                              │
+FeeWorkflow.run(request)                                                            │
    step VALIDATE   ctx.run { RequestValidator.validate(request) }   → Rejected? ────┤
    step MAP        TransactionMapper.toTransaction(request)  (pure, deterministic)  │
-   step CLAIM      TransactionFeeRecord/txn_001.claim(hash)   → Conflict? / Done? ──┤
+   step CLAIM      TransactionFeeRecord/txn_001.claim()       → Conflict? / Done? ──┤
    step CALCULATE  ctx.run { FeeCalculator.calculate(tx) }                       ───┤
    step RECORD     TransactionFeeRecord/txn_001.complete(response)  (the charge) ───┘
    return FeeOutcome.Charged(response)
 ```
 
-- **`FeeWorkflow`** (a Restate *workflow*, keyed by `{transaction_id}:{payloadHash}`) runs each request exactly once.
-  The same payload maps to the same key, so a duplicate attaches to the first run instead of starting a second one.
-- **`TransactionFeeRecord`** (a Restate *virtual object*, keyed by `transaction_id`) holds the permanent fee record. Its
-  handlers run one at a time per key, so two different payloads for one transaction can't both claim it: one is charged,
-  the others get 409.
+- **`FeeWorkflow`** (a Restate *workflow*, keyed by `transaction_id`) runs each transaction exactly once. Every
+  submission of an id attaches to its one run instead of starting a second one, and gets that run's result.
+- **`TransactionFeeRecord`** (a Restate *virtual object*, keyed by `transaction_id`) holds the permanent fee record, so
+  a charged id is not charged again even after Restate has dropped the finished run.
 - Everything non-deterministic (the clock in validation, the fee numbers) runs inside `ctx.run`, so its result is
   journaled and replayed, never recomputed.
 
@@ -95,7 +94,7 @@ The packages of the service module:
 config/            RestateProperties, FeeProperties                         every @ConfigurationProperties class: one file per
                                                                             top-level section of application.yml
 api/               TransactionFeeController, ApiExceptionHandler            HTTP only, errors as RFC 7807 ProblemDetail
-application/       FeeService, WorkflowKey                                  thin gateway: key → submit/attach → HTTP result
+application/       FeeService                                               thin gateway: transaction_id → submit/attach → HTTP result
 workflow/          FeeWorkflow, its durable types, StepHook                 the Restate workflow: every business step
 record/            TransactionFeeRecord, FeeRecord, ClaimDecider            the Restate virtual object: one fee per transaction_id
 restate/           RestateEndpointLifecycle, RestateConfig                  Restate plumbing: the endpoint, the ingress client
@@ -197,7 +196,7 @@ never go stale.
 
 | Change | Effect |
 |--------|--------|
-| Fee numbers | Safe. A workflow that already passed CALCULATE keeps its journaled fee; everything else uses the new numbers. Completed records are never recalculated: resending a charged payload returns the original response |
+| Fee numbers | Safe. A workflow that already passed CALCULATE keeps its journaled fee; everything else uses the new numbers. Completed records are never recalculated: resending a charged transaction returns the original response |
 | `restate.ingress-url`, `attach-timeout`, `server.port` | Safe |
 | `restate.endpoint-port` (or the app's host) | Register the new URL with Restate; it becomes a new deployment. Invocations in flight stay on the old URL and keep retrying it, so let them finish first |
 
@@ -218,7 +217,7 @@ curl -s -X POST localhost:8081/transaction/fee -H 'Content-Type: application/jso
 {"transaction_id":"txn_001","status":"COMPLETED","amount":1000,"asset":"USD","type":"Mobile Top Up","fee":1.50,"rate":0.0015,"description":"Standard fee rate of 0.15%"}
 ```
 
-Sending the **same payload again** returns the same body, and the fee is not charged again.
+Sending the **same `transaction_id` again** returns the same body, whatever the payload, and the fee is not charged again.
 
 **Another type and asset**, with Bank Transfer's minimum applied:
 
@@ -238,16 +237,17 @@ curl -s -X POST localhost:8081/transaction/fee -H 'Content-Type: application/jso
 |---------|--------|------------------|
 | `"state": "PENDING"` | 422 | `"code":"UNSUPPORTED_REQUEST","detail":"Unsupported state 'PENDING'. Supported: 'SETTLED - PENDING FEE'","field":"state","value":"PENDING"` |
 | `"amount": -5` | 400 | `"code":"INVALID_REQUEST","detail":"Invalid amount '-5'. Allowed: a number greater than 0","field":"amount","value":"-5"` |
-| `txn_001` again with `"amount": 2000` | 409 | `"code":"DUPLICATE_TRANSACTION","detail":"Transaction 'txn_001' was already charged or is being processed with a different payload","transaction_id":"txn_001"` |
+| An id whose earlier run was killed after its claim, once Restate dropped that run | 409 | `"code":"DUPLICATE_TRANSACTION","detail":"Transaction 'txn_001' is claimed by an earlier run that has not finished","transaction_id":"txn_001"` |
 
-| Restate unreachable | 503 | `"code":"WORKFLOW_UNAVAILABLE"`; resending the same payload later is safe |
+| Restate unreachable | 503 | `"code":"WORKFLOW_UNAVAILABLE"`; resending later is safe |
 
 Spring MVC's own errors (a body that isn't JSON, 415, 405, an unknown path) are problems too, without a `code`.
 
 A run that takes longer than `restate.attach-timeout` answers **202** with `{"transaction_id":"…","status":"IN_PROGRESS"}`;
-resend the same payload to get the fee once it is charged.
+send the transaction again to get the fee once it is charged.
 
-A rejected request can be corrected and sent again with the same `transaction_id` (e.g. `PENDING` → `SETTLED - PENDING FEE`).
+A rejection is the `transaction_id`'s answer while Restate keeps the finished run (1 day by default): the corrected request
+sent with the same id gets the same rejection until then (e.g. `PENDING`, then `SETTLED - PENDING FEE`).
 
 ### Calling it from another service
 
@@ -284,10 +284,10 @@ scripts/check.sh      # the project's gate: rule checks + mvn clean verify, and 
 ```
 
 - **Unit tests** (`*Test`) cover every production class: each validator and its messages, each fee rule and building
-  block (rounding, minimums, `BigDecimal` comparisons), the claim rules, the payload hash, the serde of every durable type,
+  block (rounding, minimums, `BigDecimal` comparisons), the claim rules, the serde of every durable type,
   the gateway's HTTP mapping, the packaged configuration. `TestCoverageAuditTest` fails when a production file has no test.
 - **BDD features** ([`service/src/test/resources/features/`](service/src/test/resources/features)) describe the behaviour end to end against
-  a real Restate: fee calculation per type and asset, validation, transaction state (rejected → corrected), idempotency
+  a real Restate: fee calculation per type and asset, validation, transaction state (a rejected id stays rejected), idempotency
   and workflow recovery.
 - **Integration tests** (`*IT`) share one Testcontainers Restate and use only random ports, so a Restate or an app already
   running on the machine can't interfere.
@@ -301,8 +301,9 @@ What the recovery tests prove (each counts the **CALCULATE executions**, not jus
 | `RestateOutageIT` | With Restate frozen, a request gets 503 and the same payload is charged once after the thaw; a workflow frozen mid-CALCULATE completes with one fee record |
 | `InFlightStatusIT` | A run that outlasts the attach timeout answers 202 `IN_PROGRESS`; the same payload sent again gets the fee |
 | `DeterminismIT` | A validation result is journaled: moving the clock between a crash and the retry doesn't change it |
-| `DuplicatesIT`, `idempotency.feature` | The same payload, sequentially or 10 callers at once, is charged once; different payloads for one id charge one and conflict the rest |
-| `RetentionExpiredIT` | After Restate dropped a finished run, the same payload returns the stored response without charging again |
+| `DuplicatesIT`, `idempotency.feature` | One `transaction_id`, sequentially or 10 callers at once, with the same or different payloads, is charged once and every caller gets the first run's response; an id held by an unfinished run gets 409 |
+| `RejectedIT`, `transaction_state.feature` | A rejected id is neither charged nor recorded, and the corrected request with the same id gets the same rejection |
+| `RetentionExpiredIT` | After Restate dropped a finished run, a charged id returns the stored response without charging again, and a rejected id is charged normally |
 ## Fee table
 
 The defaults in the packaged `application.yml`, changeable with a restart (see [Configuration](#configuration)). Fixed
@@ -337,11 +338,10 @@ order or the JSON of `FeeRequest`/`FeeResponse` is a breaking change for in-flig
 - Malformed requests are 400, well-formed but unsupported ones 422; the first failing check (in a fixed order) is reported.
 - `created_at` is `yyyy-MM-dd HH:mm:ss[.fraction]` without a zone, read as **UTC**, and may not be in the future.
 - `transaction_id` is 1–64 ASCII letters, digits, `_` or `-`, because it becomes part of Restate keys.
-- An amount may not have more decimals than its asset (`10.001 USD` is 422); trailing zeros don't count, and `1000` and
-  `1000.00` are the same payload.
+- An amount may not have more decimals than its asset (`10.001 USD` is 422); trailing zeros don't count.
 - `fee` is returned at the asset's scale (`1.50`, which equals the challenge's `1.5`); `amount` is echoed as sent.
-- The same `transaction_id` with a different payload after a charge is a **409**; a rejected payload
-  doesn't use up the id.
+- One `transaction_id` is processed once: sending it again, with any payload, returns the first run's response (the fee or
+  the rejection) without charging again. A rejected id can be charged once Restate drops its run (1 day by default).
 - Charging a fee means recording it in Restate as the transaction's charged fee; there is no external wallet.
 - Bank Transfer has a minimum and no maximum.
 
@@ -353,5 +353,6 @@ order or the JSON of `FeeRequest`/`FeeResponse` is a breaking change for in-flig
   invocations (safe, but noisy). Stop accepting new invocations and drain the running ones first.
 - **Deployments per version:** register each release under its own URL and let the old one drain instead of re-registering
   with `force`.
-- **Cancelled, killed or paused workflows** leave the record `IN_PROGRESS`, so the id gets 409 until an operator acts.
+- **Cancelled, killed or paused workflows** leave the record `IN_PROGRESS`, so once Restate drops the run the id gets 409
+  until an operator acts.
 - The Restate SDK's newer handler API before an upgrade removes the current one; Spring Boot 4 with Jackson 3.

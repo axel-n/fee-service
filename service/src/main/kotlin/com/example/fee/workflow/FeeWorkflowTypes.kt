@@ -1,23 +1,10 @@
 package com.example.fee.workflow
 
-import com.example.fee.contract.FeeRequest
 import com.example.fee.contract.FeeResponse
 import com.example.fee.validation.ValidationError
 import com.fasterxml.jackson.annotation.JsonProperty
 import com.fasterxml.jackson.annotation.JsonSubTypes
 import com.fasterxml.jackson.annotation.JsonTypeInfo
-
-/**
- * The input of `FeeWorkflow.run`: the [request] exactly as the client sent it and its [payloadHash], the second half of
- * the workflow key. The workflow passes the hash to the claim, so the record can tell this payload from another.
- *
- * Journaled as the workflow input: renaming or removing a field breaks in-flight workflows; adding a nullable
- * field is safe.
- */
-data class FeeWorkflowInput(
-    @JsonProperty("request") val request: FeeRequest,
-    @JsonProperty("payload_hash") val payloadHash: String,
-)
 
 /**
  * The business result of `FeeWorkflow.run`, returned instead of thrown so nobody parses exception messages.
@@ -35,13 +22,19 @@ data class FeeWorkflowInput(
 )
 sealed interface FeeOutcome {
 
-    /** The fee was charged (recorded), now or by an earlier run for the same payload. */
+    /** The fee was charged (recorded), now or by an earlier run of the same `transaction_id`. */
     data class Charged(@JsonProperty("response") val response: FeeResponse) : FeeOutcome
 
-    /** Validation rejected the request; the [error]'s kind decides 400 or 422. The id is not used up. */
+    /**
+     * Validation rejected the request; the [error]'s kind decides 400 or 422. Nothing is recorded, but this is the
+     * answer for the `transaction_id` until Restate drops the finished run.
+     */
     data class Rejected(@JsonProperty("error") val error: ValidationError) : FeeOutcome
 
-    /** The id is claimed by another payload, either charged or still in progress. */
+    /**
+     * The id's fee record is claimed by an earlier run that never finished (one an operator killed, say), so this run
+     * can't charge it.
+     */
     data class Conflict(@JsonProperty("transaction_id") val transactionId: String) : FeeOutcome
 }
 
@@ -59,7 +52,7 @@ enum class WorkflowStep {
     /** `TransactionMapper`: pure and deterministic, so not journaled. */
     MAP,
 
-    /** `TransactionFeeRecord.claim(hash)`: one payload per `transaction_id`. */
+    /** `TransactionFeeRecord.claim()`: the fee record of the `transaction_id`, kept beyond the run's retention. */
     CLAIM,
 
     /** `FeeCalculator` inside `ctx.run`, because the fee numbers come from configuration. */

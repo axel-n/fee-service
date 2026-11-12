@@ -9,7 +9,6 @@ import com.example.fee.record.FeeRecordStatus
 import com.example.fee.record.TransactionFeeRecordClient
 import com.example.fee.workflow.FeeOutcome
 import com.example.fee.workflow.FeeWorkflowClient
-import com.example.fee.workflow.FeeWorkflowInput
 import com.example.fee.workflow.WorkflowStep
 import dev.restate.client.SendResponse
 import org.assertj.core.api.Assertions.assertThat
@@ -20,12 +19,11 @@ import java.math.BigDecimal
 import java.util.UUID
 
 /**
- * The same payload after Restate forgot the first run (workflow retention, 1 day on 1.8.1). The workflow key no
- * longer finds the old run, so a new workflow starts, and the permanent record stops it at CLAIM: `AlreadyCompleted` →
- * the stored response, no second charge.
+ * A `transaction_id` after Restate forgot its run (workflow retention, 1 day on 1.8.1). The workflow key no longer finds
+ * the old run, so a new workflow starts. A charged id is stopped at CLAIM by its permanent record: `AlreadyCompleted` →
+ * the stored response, no second charge. A rejected id has no record, so it is processed normally then.
  *
- * Waiting a day is not an option, so the tests reach CLAIM the two ways a forgotten run does: a new workflow key for the
- * charged payload, and the old run purged through the admin API, then the same payload sent through the app again.
+ * Waiting a day is not an option, so the tests purge the old run through the admin API, as retention would.
  */
 class RetentionExpiredIT @Autowired constructor(
     private val calculator: CountingFeeCalculator,
@@ -35,39 +33,16 @@ class RetentionExpiredIT @Autowired constructor(
     private val api = FeeApi(apiPort)
 
     @Test
-    fun `CLAIM on a completed record with the same payload hash is AlreadyCompleted with the stored response`() {
+    fun `CLAIM on a completed record is AlreadyCompleted with the stored response`() {
         // given
         val request = chargedRequest()
         val recorded = completedRecord(request)
 
         // when
-        val claim = TransactionFeeRecordClient.fromClient(TestIngress.client, transactionIdOf(request))
-            .claim(payloadHashOf(request))
+        val claim = TransactionFeeRecordClient.fromClient(TestIngress.client, transactionIdOf(request)).claim()
 
         // then: the stored response, and the record is untouched
         assertThat(claim).isEqualTo(ClaimResult.AlreadyCompleted(checkNotNull(recorded.response)))
-        assertThat(StoredFeeRecords.of(transactionIdOf(request))).isEqualTo(recorded)
-        assertChargedOnce(request)
-    }
-
-    @Test
-    fun `a new workflow key for an already charged payload returns the stored response without charging`() {
-        // given: the payload charged under its own key, and a key Restate has never seen
-        val request = chargedRequest()
-        val recorded = completedRecord(request)
-        val newKey = "${StoredWorkflows.keyOf(request)}-after-retention"
-        val workflow = FeeWorkflowClient.fromClient(TestIngress.client, newKey)
-
-        // when
-        val submitted = workflow.submit(FeeWorkflowInput(request, payloadHashOf(request)))
-        val outcome = submitted.attach().response()
-
-        // then: a run of its own, stopped at CLAIM with the stored response
-        assertThat(submitted.sendStatus()).isEqualTo(SendResponse.SendStatus.ACCEPTED)
-        assertThat(outcome).isEqualTo(FeeOutcome.Charged(checkNotNull(recorded.response)))
-        assertThat(workflow.status()).isEqualTo(WorkflowStep.DONE)
-
-        // then: no second charge, and the record is untouched
         assertThat(StoredFeeRecords.of(transactionIdOf(request))).isEqualTo(recorded)
         assertChargedOnce(request)
     }
@@ -79,10 +54,7 @@ class RetentionExpiredIT @Autowired constructor(
         val first = api.submit(bodyOf(request))
         assertThat(first.status).describedAs("first POST status, body %s", first.body).isEqualTo(200)
         val recorded = completedRecord(request)
-        RestateTestEnvironment.admin.purgeInvocation(invocationIdOf(request))
-        awaitUntil("the purged workflow ${StoredWorkflows.keyOf(request)} is forgotten") {
-            StoredWorkflows.step(request) == null
-        }
+        purgeRunOf(request)
 
         // when
         val second = api.submit(bodyOf(request))
@@ -101,6 +73,26 @@ class RetentionExpiredIT @Autowired constructor(
         assertChargedOnce(request)
     }
 
+    @Test
+    fun `a rejected transaction_id is charged with a corrected payload once its run was purged`() {
+        // given: the id rejected through the API, then its run purged as retention would
+        val valid = validRequest(newTransactionId())
+        val rejected = valid.copy(state = "PENDING")
+        val rejection = api.submit(bodyOf(rejected))
+        assertThat(rejection.status).describedAs("first POST status, body %s", rejection.body).isEqualTo(422)
+        purgeRunOf(rejected)
+
+        // when
+        val corrected = api.submit(bodyOf(valid))
+
+        // then: a new run charged it, once
+        assertThat(corrected.status).describedAs("second POST status, body %s", corrected.body).isEqualTo(200)
+        assertThat(corrected.body["fee"].decimalValue()).isEqualByComparingTo(BigDecimal("1.50"))
+        assertThat(StoredWorkflows.outcome(valid)).isInstanceOf(FeeOutcome.Charged::class.java)
+        assertThat(completedRecord(valid).response?.amount).isEqualByComparingTo(valid.amount)
+        assertChargedOnce(valid)
+    }
+
     // A payload charged through the API, so its record is COMPLETED and its fee calculated once
     private fun chargedRequest(): FeeRequest {
         val request = validRequest(newTransactionId())
@@ -113,14 +105,19 @@ class RetentionExpiredIT @Autowired constructor(
     private fun completedRecord(request: FeeRequest): FeeRecord {
         val record = checkNotNull(StoredFeeRecords.of(transactionIdOf(request))) { "no record for ${request.transactionId}" }
         assertThat(record.status).isEqualTo(FeeRecordStatus.COMPLETED)
-        assertThat(record.payloadHash).isEqualTo(payloadHashOf(request))
         return record
+    }
+
+    private fun purgeRunOf(request: FeeRequest) {
+        RestateTestEnvironment.admin.purgeInvocation(invocationIdOf(request))
+        awaitUntil("the purged workflow ${StoredWorkflows.keyOf(request)} is forgotten") {
+            StoredWorkflows.step(request) == null
+        }
     }
 
     // Resubmitting a known key is PREVIOUSLY_ACCEPTED with the run's id, its input ignored, so this starts nothing
     private fun invocationIdOf(request: FeeRequest): String {
-        val sent = FeeWorkflowClient.fromClient(TestIngress.client, StoredWorkflows.keyOf(request))
-            .submit(FeeWorkflowInput(request, payloadHashOf(request)))
+        val sent = FeeWorkflowClient.fromClient(TestIngress.client, StoredWorkflows.keyOf(request)).submit(request)
         assertThat(sent.sendStatus()).isEqualTo(SendResponse.SendStatus.PREVIOUSLY_ACCEPTED)
         return sent.invocationId()
     }
@@ -131,8 +128,6 @@ class RetentionExpiredIT @Autowired constructor(
     }
 
     private fun transactionIdOf(request: FeeRequest): String = checkNotNull(request.transactionId)
-
-    private fun payloadHashOf(request: FeeRequest): String = StoredWorkflows.keyOf(request).substringAfter(':')
 
     private fun newTransactionId() = "it-retention-${UUID.randomUUID().toString().take(13)}"
 

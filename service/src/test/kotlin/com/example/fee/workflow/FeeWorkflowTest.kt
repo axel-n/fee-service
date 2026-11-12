@@ -6,7 +6,6 @@ import com.example.fee.contract.FeeRequest
 import com.example.fee.contract.FeeResponse
 import com.example.fee.domain.TransactionMapper
 import com.example.fee.record.ClaimResult
-import com.example.fee.record.FeeRecords.HASH
 import com.example.fee.validation.RequestValidator
 import com.example.fee.validation.TransactionValidator
 import com.example.fee.validation.ValidationError
@@ -57,26 +56,26 @@ class FeeWorkflowTest {
         val ctx = FakeWorkflowContext(claim = ClaimResult.New)
 
         // when
-        val outcome = workflow().run(ctx.ctx, input())
+        val outcome = workflow().run(ctx.ctx, validRequest)
 
         // then
         assertThat(outcome).isEqualTo(FeeOutcome.Charged(expectedResponse))
     }
 
     @Test
-    fun `claims the transaction id for the payload hash, then records the response on the same fee record`() {
+    fun `claims the transaction id, then records the response on the same fee record`() {
         // given
         val ctx = FakeWorkflowContext(claim = ClaimResult.New)
 
         // when
-        workflow().run(ctx.ctx, input())
+        workflow().run(ctx.ctx, validRequest)
 
         // then
         assertThat(ctx.calls.map { it.target }).containsExactly(
             Target.virtualObject("TransactionFeeRecord", "txn_001", "claim"),
             Target.virtualObject("TransactionFeeRecord", "txn_001", "complete"),
         )
-        assertThat(ctx.calls.map { it.request }).containsExactly(HASH, expectedResponse)
+        assertThat(ctx.calls.last().request).isEqualTo(expectedResponse)
     }
 
     @Test
@@ -85,7 +84,7 @@ class FeeWorkflowTest {
         val ctx = FakeWorkflowContext(claim = ClaimResult.New)
 
         // when
-        workflow().run(ctx.ctx, input())
+        workflow().run(ctx.ctx, validRequest)
 
         // then
         assertThat(hook.events).containsExactly(
@@ -103,7 +102,7 @@ class FeeWorkflowTest {
         val ctx = FakeWorkflowContext(claim = ClaimResult.New)
 
         // when
-        workflow().run(ctx.ctx, input())
+        workflow().run(ctx.ctx, validRequest)
 
         // then
         assertThat(ctx.runs).containsExactly("validate", "calculate")
@@ -115,7 +114,7 @@ class FeeWorkflowTest {
         val ctx = FakeWorkflowContext(claim = ClaimResult.New)
 
         // when
-        workflow().run(ctx.ctx, input())
+        workflow().run(ctx.ctx, validRequest)
 
         // then
         assertThat(ctx.stepWrites).containsExactly(
@@ -126,13 +125,13 @@ class FeeWorkflowTest {
     }
 
     @Test
-    fun `returns a rejection without claiming or charging, and the id stays free`() {
+    fun `returns a rejection without claiming or charging`() {
         // given
         val error = ValidationError("state", "PENDING", "Unsupported state 'PENDING'", ValidationError.Kind.UNSUPPORTED)
         val ctx = FakeWorkflowContext(claim = ClaimResult.New)
 
         // when
-        val outcome = workflow(validator = validatorReturning(error)).run(ctx.ctx, input())
+        val outcome = workflow(validator = validatorReturning(error)).run(ctx.ctx, validRequest)
 
         // then
         assertThat(outcome).isEqualTo(FeeOutcome.Rejected(error))
@@ -142,13 +141,13 @@ class FeeWorkflowTest {
     }
 
     @Test
-    fun `returns the stored response for a payload that was already charged, without charging again`() {
+    fun `returns the stored response for a transaction that was already charged, without charging again`() {
         // given
         val stored = expectedResponse.copy(fee = BigDecimal("1.50"), description = "charged earlier")
         val ctx = FakeWorkflowContext(claim = ClaimResult.AlreadyCompleted(stored))
 
         // when
-        val outcome = workflow().run(ctx.ctx, input())
+        val outcome = workflow().run(ctx.ctx, validRequest)
 
         // then
         assertThat(outcome).isEqualTo(FeeOutcome.Charged(stored))
@@ -160,25 +159,12 @@ class FeeWorkflowTest {
     }
 
     @Test
-    fun `returns a conflict when another payload was charged for the id, without charging`() {
-        // given
-        val ctx = FakeWorkflowContext(claim = ClaimResult.Conflict)
-
-        // when
-        val outcome = workflow().run(ctx.ctx, input())
-
-        // then
-        assertThat(outcome).isEqualTo(FeeOutcome.Conflict("txn_001"))
-        assertThat(ctx.calls.map { it.target.handler }).containsExactly("claim")
-    }
-
-    @Test
-    fun `returns a conflict when another payload holds the claim, without charging`() {
+    fun `returns a conflict when an earlier run that never finished holds the claim, without charging`() {
         // given
         val ctx = FakeWorkflowContext(claim = ClaimResult.InProgress)
 
         // when
-        val outcome = workflow().run(ctx.ctx, input())
+        val outcome = workflow().run(ctx.ctx, validRequest)
 
         // then
         assertThat(outcome).isEqualTo(FeeOutcome.Conflict("txn_001"))
@@ -201,7 +187,7 @@ class FeeWorkflowTest {
         val workflow = workflow(stepHook = crashingHook)
 
         // when / then
-        assertThatThrownBy { workflow.run(ctx.ctx, input()) }.isSameAs(crash)
+        assertThatThrownBy { workflow.run(ctx.ctx, validRequest) }.isSameAs(crash)
         assertThat(ctx.calls.map { it.target.handler }).containsExactly("claim")
         assertThat(workflow.status(ctx.ctx)).isEqualTo(WorkflowStep.RECORD)
     }
@@ -215,7 +201,7 @@ class FeeWorkflowTest {
         val workflow = workflow()
 
         // when / then
-        assertThatThrownBy { workflow.run(ctx.ctx, input()) }.isSameAs(outage)
+        assertThatThrownBy { workflow.run(ctx.ctx, validRequest) }.isSameAs(outage)
         assertThat(ctx.calls.map { it.target.handler }).containsExactly("claim")
         assertThat(workflow.status(ctx.ctx)).isEqualTo(WorkflowStep.CALCULATE)
     }
@@ -227,7 +213,7 @@ class FeeWorkflowTest {
         val unmappable = validRequest.copy(createdAt = null)
 
         // when / then
-        assertThatThrownBy { workflow().run(ctx.ctx, FeeWorkflowInput(unmappable, HASH)) }
+        assertThatThrownBy { workflow().run(ctx.ctx, unmappable) }
             .isInstanceOf(IllegalStateException::class.java)
             .hasMessage("Request for transaction 'txn_001' passed validation but could not be mapped")
         assertThat(ctx.calls).isEmpty()
@@ -280,8 +266,6 @@ class FeeWorkflowTest {
         stepHook: StepHook = hook,
     ) = FeeWorkflow(validator, TransactionMapper(), allRulesCalculator(), stepHook)
 
-    private fun input(request: FeeRequest = validRequest) = FeeWorkflowInput(request, HASH)
-
     private fun validatorReturning(error: ValidationError?) = RequestValidator(
         listOf(
             object : TransactionValidator {
@@ -307,7 +291,7 @@ class FeeWorkflowTest {
     private data class Call(val target: Target, val request: Any?)
 
     /**
-     * The workflow `txn_001:hash-a` behind a mocked [WorkflowContext]: state in memory, `ctx.run` runs its closure at
+     * The workflow `txn_001` behind a mocked [WorkflowContext]: state in memory, `ctx.run` runs its closure at
      * once, and a call to `TransactionFeeRecord.claim` answers [claim].
      */
     private class FakeWorkflowContext(claim: ClaimResult) {
@@ -340,6 +324,6 @@ class FeeWorkflowTest {
     }
 
     private companion object {
-        const val KEY = "txn_001:$HASH"
+        const val KEY = "txn_001"
     }
 }

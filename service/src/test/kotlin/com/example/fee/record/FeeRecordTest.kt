@@ -1,6 +1,5 @@
 package com.example.fee.record
 
-import com.example.fee.record.FeeRecords.HASH
 import com.example.fee.record.FeeRecords.response
 import dev.restate.common.Slice
 import dev.restate.serde.jackson.JacksonSerdeFactory
@@ -13,34 +12,31 @@ class FeeRecordTest {
     private val serde = JacksonSerdeFactory().create(FeeRecord::class.java)
 
     @Test
-    fun `a new claim is in progress with only the payload hash`() {
-        // given
-        val hash = HASH
-
+    fun `a new claim is in progress without a response`() {
         // when
-        val record = FeeRecord.inProgress(hash)
+        val record = FeeRecord.inProgress()
 
         // then
-        assertThat(record).isEqualTo(FeeRecord(FeeRecordStatus.IN_PROGRESS, HASH, response = null))
+        assertThat(record).isEqualTo(FeeRecord(FeeRecordStatus.IN_PROGRESS, response = null))
     }
 
     @Test
-    fun `completing keeps the payload hash and stores the response`() {
+    fun `completing stores the response`() {
         // given
-        val record = FeeRecord.inProgress(HASH)
+        val record = FeeRecord.inProgress()
 
         // when
         val completed = record.complete(response)
 
         // then
-        assertThat(completed).isEqualTo(FeeRecord(FeeRecordStatus.COMPLETED, HASH, response = response))
+        assertThat(completed).isEqualTo(FeeRecord(FeeRecordStatus.COMPLETED, response = response))
     }
 
 
     @Test
     fun `rejects a completed record without a response`() {
         // when / then
-        assertThatThrownBy { FeeRecord(FeeRecordStatus.COMPLETED, HASH) }
+        assertThatThrownBy { FeeRecord(FeeRecordStatus.COMPLETED) }
             .isInstanceOf(IllegalArgumentException::class.java)
             .hasMessageContaining("COMPLETED")
     }
@@ -48,7 +44,7 @@ class FeeRecordTest {
     @Test
     fun `rejects a response on a record that is not completed`() {
         // when / then
-        assertThatThrownBy { FeeRecord(FeeRecordStatus.IN_PROGRESS, HASH, response = response) }
+        assertThatThrownBy { FeeRecord(FeeRecordStatus.IN_PROGRESS, response = response) }
             .isInstanceOf(IllegalArgumentException::class.java)
             .hasMessageContaining("IN_PROGRESS")
     }
@@ -57,14 +53,14 @@ class FeeRecordTest {
     @Test
     fun `is stored by Restate's serde with snake_case names and read back unchanged`() {
         // given
-        val record = FeeRecord.inProgress(HASH).complete(response)
+        val record = FeeRecord.inProgress().complete(response)
 
         // when
         val json = String(serde.serialize(record).toByteArray())
         val restored = serde.deserialize(Slice.wrap(json))
 
         // then
-        assertThat(json).startsWith("""{"status":"COMPLETED","payload_hash":"hash-a","response":{"transaction_id":"txn_001",""")
+        assertThat(json).startsWith("""{"status":"COMPLETED","response":{"transaction_id":"txn_001",""")
         assertThat(json).doesNotContain("failure_reason")
         assertThat(restored).isEqualTo(record)
         assertThat(restored.response?.fee).isEqualByComparingTo("1.5")
@@ -73,7 +69,7 @@ class FeeRecordTest {
     @Test
     fun `refuses stored state that breaks the status invariant`() {
         // given
-        val json = """{"status":"COMPLETED","payload_hash":"hash-a","response":null}"""
+        val json = """{"status":"COMPLETED","response":null}"""
 
         // when / then
         assertThatThrownBy { serde.deserialize(Slice.wrap(json)) }

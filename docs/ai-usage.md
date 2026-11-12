@@ -19,7 +19,8 @@ The design came first, in a conversation and not in code. The questions that sha
 
 - where the business logic lives (all of it inside `FeeWorkflow`, `FeeService` is a thin gateway)
 - how duplicates are handled: the workflow key `{transaction_id}:{payloadHash}`, so a rejected payload doesn't use up the
-  id, plus a claim on a virtual object per `transaction_id`
+  id, plus a claim on a virtual object per `transaction_id` (later simplified to the `transaction_id` alone as the key,
+  since `requirements.md` asks for no rule about changed payloads)
 - self-registration that never fails startup, crash simulation through a `StepHook`, and tests on random ports only
 - fee numbers in configuration and read inside `ctx.run`, so a restart with new values can't change a replay
 

@@ -1,7 +1,11 @@
+@file:Suppress("DEPRECATION") // the generated client of the ctx-based codegen API of SDK 2.9.3
+
 package com.example.fee.it
 
 import com.example.fee.contract.FeeRequest
+import com.example.fee.record.ClaimResult
 import com.example.fee.record.FeeRecordStatus
+import com.example.fee.record.TransactionFeeRecordClient
 import com.example.fee.workflow.FeeOutcome
 import com.example.fee.workflow.WorkflowStep
 import org.assertj.core.api.Assertions.assertThat
@@ -16,10 +20,9 @@ import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
 /**
- * Duplicates end to end. The same payload is the same workflow key, so Restate runs it once and every caller attaches to
- * that run. A different payload for the same `transaction_id` is a new workflow, and the CLAIM on
- * `TransactionFeeRecord/{transaction_id}` stops it: `Conflict` → 409. Idempotency is asserted by the number of
- * CALCULATE executions, not just by the response.
+ * Duplicates end to end. The workflow key is the `transaction_id`, so Restate runs one workflow per id and every caller
+ * of that id attaches to that run, whatever payload it sends: the first run's result is the answer. Idempotency is
+ * asserted by the number of CALCULATE executions, not just by the response.
  */
 class DuplicatesIT @Autowired constructor(
     private val calculator: CountingFeeCalculator,
@@ -68,7 +71,7 @@ class DuplicatesIT @Autowired constructor(
     }
 
     @Test
-    fun `a changed payload for an already charged transaction_id is a conflict and is not charged`() {
+    fun `a changed payload for an already charged transaction_id gets the first response and is not charged`() {
         // given
         val transactionId = newTransactionId()
         val original = validRequest(transactionId)
@@ -77,24 +80,24 @@ class DuplicatesIT @Autowired constructor(
         val changed = original.copy(amount = BigDecimal("2000"))
 
         // when
-        val conflict = api.submit(bodyOf(changed))
+        val second = api.submit(bodyOf(changed))
 
-        // then: 409 naming the transaction
-        assertThat(conflict.status).describedAs("POST status, body %s", conflict.body).isEqualTo(409)
-        assertThat(conflict.body["transaction_id"].asText()).isEqualTo(transactionId)
+        // then: the first run's response, for the original amount
+        assertThat(second.status).describedAs("second POST status, body %s", second.body).isEqualTo(200)
+        assertThat(second.body).isEqualTo(charged.body)
+        assertThat(second.body["amount"].decimalValue()).isEqualByComparingTo(BigDecimal("1000"))
 
-        // then: a workflow of its own, which CLAIM stopped
-        assertThat(StoredWorkflows.keyOf(changed)).isNotEqualTo(StoredWorkflows.keyOf(original))
+        // then: the one workflow of the id, which ran for the original payload
+        assertThat(StoredWorkflows.keyOf(changed)).isEqualTo(StoredWorkflows.keyOf(original))
         assertThat(StoredWorkflows.step(changed)).isEqualTo(WorkflowStep.DONE)
-        assertThat(StoredWorkflows.outcome(changed)).isEqualTo(FeeOutcome.Conflict(transactionId))
+        assertThat(StoredWorkflows.outcome(changed)).isInstanceOf(FeeOutcome.Charged::class.java)
 
         // then: the original charge and record stand, and the changed payload was not charged
         assertChargedOnce(original)
-        assertThat(StoredFeeRecords.of(transactionId)?.response?.amount).isEqualByComparingTo(BigDecimal("1000"))
     }
 
     @Test
-    fun `different payloads for one transaction_id sent concurrently charge one and conflict the others`() {
+    fun `different payloads for one transaction_id sent concurrently are charged once and every caller gets the same response`() {
         // given: the same id, each payload with its own amount
         val transactionId = newTransactionId()
         val requests = List(CONCURRENT_CALLERS) { validRequest(transactionId).copy(amount = BigDecimal(1000 + it)) }
@@ -102,31 +105,38 @@ class DuplicatesIT @Autowired constructor(
         // when
         val responses = submitConcurrently(requests)
 
-        // then: exactly one is charged, every other one is a conflict
+        // then: every caller gets the one run's response
         responses.forEach {
-            assertThat(it.status).describedAs("POST status, body %s", it.body).isIn(200, 409)
+            assertThat(it.status).describedAs("POST status, body %s", it.body).isEqualTo(200)
         }
-        val winners = requests.indices.filter { responses[it].status == 200 }
-        assertThat(winners).describedAs("charged payloads").hasSize(1)
-        val winner = requests[winners.single()]
-        responses.filter { it.status == 409 }.forEach {
-            assertThat(it.body["transaction_id"].asText()).isEqualTo(transactionId)
-        }
-        assertThat(responses[winners.single()].body["amount"].decimalValue()).isEqualByComparingTo(winner.amount)
+        assertThat(responses.map { it.body }.distinct()).describedAs("distinct response bodies").hasSize(1)
 
-        // then: each workflow returned its business result
-        requests.forEachIndexed { index, request ->
-            val outcome = StoredWorkflows.outcome(request)
-            if (index == winners.single()) {
-                assertThat(outcome).isInstanceOf(FeeOutcome.Charged::class.java)
-            } else {
-                assertThat(outcome).describedAs("outcome of amount %s", request.amount)
-                    .isEqualTo(FeeOutcome.Conflict(transactionId))
-            }
-        }
-
-        // then: one fee, for the winner, recorded as completed
+        // then: the payload that reached Restate first was charged, once
+        val chargedAmount = responses.first().body["amount"].decimalValue()
+        val winner = requests.single { checkNotNull(it.amount).compareTo(chargedAmount) == 0 }
         assertChargedOnce(winner)
+    }
+
+    @Test
+    fun `a transaction_id whose record is claimed by a run that never finished is a conflict and is not charged`() {
+        // given: the record claimed as a run killed after CLAIM leaves it, and no workflow for the id
+        val request = validRequest(newTransactionId())
+        val transactionId = checkNotNull(request.transactionId)
+        val claim = TransactionFeeRecordClient.fromClient(TestIngress.client, transactionId).claim()
+        assertThat(claim).isEqualTo(ClaimResult.New)
+
+        // when
+        val response = api.submit(bodyOf(request))
+
+        // then: 409 naming the transaction
+        assertThat(response.status).describedAs("POST status, body %s", response.body).isEqualTo(409)
+        assertThat(response.body["code"].asText()).isEqualTo("DUPLICATE_TRANSACTION")
+        assertThat(response.body["transaction_id"].asText()).isEqualTo(transactionId)
+
+        // then: the workflow stopped at CLAIM, nothing was calculated, and the claim stands
+        assertThat(StoredWorkflows.outcome(request)).isEqualTo(FeeOutcome.Conflict(transactionId))
+        assertThat(calculator.count(transactionId)).describedAs("CALCULATE executions").isZero()
+        assertThat(StoredFeeRecords.of(transactionId)?.status).isEqualTo(FeeRecordStatus.IN_PROGRESS)
     }
 
     private fun assertChargedOnce(request: FeeRequest) {
@@ -135,7 +145,6 @@ class DuplicatesIT @Autowired constructor(
 
         val record = StoredFeeRecords.of(transactionId)
         assertThat(record?.status).isEqualTo(FeeRecordStatus.COMPLETED)
-        assertThat(record?.payloadHash).isEqualTo(StoredWorkflows.keyOf(request).substringAfter(':'))
         assertThat(record?.response?.amount).isEqualByComparingTo(request.amount)
         assertThat(record?.response?.fee).isEqualByComparingTo(expectedFee(request))
     }

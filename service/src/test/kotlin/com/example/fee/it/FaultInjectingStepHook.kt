@@ -46,15 +46,15 @@ class FaultInjectingStepHook : StepHook {
 
     override fun after(step: WorkflowStep, workflowKey: String) = reach(workflowKey, Boundary(step, Phase.AFTER))
 
-    private fun reach(workflowKey: String, boundary: Boundary) {
-        val transactionId = workflowKey.substringBefore(':')
+    // The workflow key is the transaction_id
+    private fun reach(transactionId: String, boundary: Boundary) {
         calls.computeIfAbsent(transactionId to boundary) { AtomicInteger() }.incrementAndGet()
         // remove(key, value) disarms atomically, so the crash happens exactly once even if two runs reach it together
         val arming = armed[transactionId]?.takeIf { it.boundary == boundary } ?: return
         if (armed.remove(transactionId, arming)) {
             crashes.computeIfAbsent(transactionId) { AtomicInteger() }.incrementAndGet()
             arming.onCrash()
-            throw SimulatedCrash("Simulated crash ${boundary.phase} ${boundary.step} in workflow $workflowKey")
+            throw SimulatedCrash("Simulated crash ${boundary.phase} ${boundary.step} in workflow $transactionId")
         }
     }
 

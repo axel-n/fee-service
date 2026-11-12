@@ -12,7 +12,7 @@ import org.springframework.stereotype.Component
  */
 interface StepHook {
 
-    /** Called before [step] runs in the workflow with [workflowKey] (`{transaction_id}:{payloadHash}`). */
+    /** Called before [step] runs in the workflow with [workflowKey] (the `transaction_id`). */
     fun before(step: WorkflowStep, workflowKey: String)
 
     /** Called after [step] completed in the workflow with [workflowKey]. */

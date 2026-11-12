@@ -12,9 +12,9 @@ import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
 /**
- * The steps of duplicate submissions: the same transaction sent again, sent by several callers at once, and the
- * conflict a changed payload meets. The scenario's request and its submissions live in [FeeSteps] (injected, the same
- * instance as the scenario's), so the fee, charge and record steps there check these submissions too.
+ * The steps of duplicate submissions: the same transaction sent again, and sent by several callers at once. The
+ * scenario's request and its submissions live in [FeeSteps] (injected, the same instance as the scenario's), so the
+ * fee, charge and record steps there check these submissions too.
  */
 class IdempotencySteps(
     private val fee: FeeSteps,
@@ -68,36 +68,15 @@ class IdempotencySteps(
     }
 
     /**
-     * One payload won the claim and was charged with its own amount; every other one is a 409 naming the transaction.
+     * The one response every caller got charges the amount one of them sent: the payload that reached Restate first.
      */
-    @Then("one caller gets status 200 and every other caller a conflict naming the transaction")
-    fun oneCallerIsChargedAndTheOthersConflict() {
-        val responses = callerResponses()
-        responses.forEach {
-            assertThat(it.status).describedAs("response status, body %s", it.body).isIn(200, 409)
-        }
-        val charged = responses.indices.filter { responses[it].status == 200 }
-        assertThat(charged).describedAs("charged responses").hasSize(1)
-        val winner = charged.single()
-        assertThat(responses[winner].body["amount"].decimalValue())
-            .describedAs("amount of the charged response")
-            .isEqualByComparingTo(concurrentCalls[winner].first["amount"] as BigDecimal)
-        responses.filter { it.status == 409 }.forEach(::assertConflictOfThisTransaction)
-    }
-
-    @Then("the response is a conflict naming the transaction")
-    fun theResponseIsAConflict() {
-        val response = fee.response()
-        assertThat(response.status).describedAs("response status, body %s", response.body).isEqualTo(409)
-        assertConflictOfThisTransaction(response)
-    }
-
-    private fun assertConflictOfThisTransaction(response: FeeApi.Response) {
-        assertThat(response.body["status"]?.asInt()).describedAs("problem status in %s", response.body).isEqualTo(409)
-        assertThat(response.body["transaction_id"]?.asText())
-            .describedAs("transaction_id of %s", response.body)
-            .isEqualTo(fee.submittedTransactionId())
-        assertThat(response.body.has("fee")).describedAs("fee in %s", response.body).isFalse()
+    @Then("the response is the charge of one caller's amount")
+    fun theResponseIsTheChargeOfOneCallersAmount() {
+        val charged = callerResponses().first().body["amount"].decimalValue()
+        val sent = concurrentCalls.map { (body, _) -> body["amount"] as BigDecimal }
+        assertThat(sent.filter { it.compareTo(charged) == 0 })
+            .describedAs("amounts sent %s that the charged amount %s matches", sent, charged)
+            .hasSize(1)
     }
 
     private fun callerResponses(): List<FeeApi.Response> {

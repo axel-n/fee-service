@@ -20,9 +20,9 @@ import dev.restate.sdk.common.StateKey
 import org.springframework.stereotype.Component
 
 /**
- * Processes the fee of one payload (the workflow key is `{transaction_id}:{payloadHash}`): VALIDATE → MAP → CLAIM →
- * CALCULATE → RECORD, each a journaled step wrapped by [StepHook]. RECORD charges the fee by storing it in the
- * `transaction_id`'s fee record. On a retry Restate replays the journaled steps instead of running them again.
+ * Processes the fee of one transaction (the workflow key is its `transaction_id`): VALIDATE → MAP → CLAIM → CALCULATE →
+ * RECORD, each a journaled step wrapped by [StepHook]. RECORD charges the fee by storing it in the `transaction_id`'s
+ * fee record. On a retry Restate replays the journaled steps instead of running them again.
  *
  * Business results are returned as [FeeOutcome]. The handler is deterministic: the clock and the fee numbers are only
  * read inside `ctx.run`.
@@ -38,10 +38,13 @@ class FeeWorkflow(
     private val stepHook: StepHook,
 ) {
 
-    /** Validates, claims, calculates, then charges the fee by recording it, for the request in [input]. */
+    /**
+     * Validates, claims, calculates, then charges the fee by recording it, for [request] exactly as the client sent it.
+     * The request is journaled as the workflow input.
+     */
     @Workflow
-    fun run(ctx: WorkflowContext, input: FeeWorkflowInput): FeeOutcome {
-        val outcome = process(ctx, input)
+    fun run(ctx: WorkflowContext, request: FeeRequest): FeeOutcome {
+        val outcome = process(ctx, request)
         ctx.set(STEP, WorkflowStep.DONE)
         return outcome
     }
@@ -50,20 +53,20 @@ class FeeWorkflow(
     @Shared
     fun status(ctx: SharedWorkflowContext): WorkflowStep? = ctx.get(STEP).orElse(null)
 
-    private fun process(ctx: WorkflowContext, input: FeeWorkflowInput): FeeOutcome {
+    private fun process(ctx: WorkflowContext, request: FeeRequest): FeeOutcome {
         val error = step(ctx, WorkflowStep.VALIDATE) {
-            ctx.run("validate", ValidationError::class.java) { requestValidator.validate(input.request) }
+            ctx.run("validate", ValidationError::class.java) { requestValidator.validate(request) }
         }
         if (error != null) return FeeOutcome.Rejected(error)
 
-        val transaction = step(ctx, WorkflowStep.MAP) { map(input.request) }
+        val transaction = step(ctx, WorkflowStep.MAP) { map(request) }
         val record = TransactionFeeRecordClient.fromContext(ctx, transaction.transactionId)
 
-        val claim = step(ctx, WorkflowStep.CLAIM) { record.claim(input.payloadHash).await() }
+        val claim = step(ctx, WorkflowStep.CLAIM) { record.claim().await() }
         when (claim) {
             ClaimResult.New -> Unit
             is ClaimResult.AlreadyCompleted -> return FeeOutcome.Charged(claim.response)
-            ClaimResult.InProgress, ClaimResult.Conflict -> return FeeOutcome.Conflict(transaction.transactionId)
+            ClaimResult.InProgress -> return FeeOutcome.Conflict(transaction.transactionId)
         }
 
         val quote = step(ctx, WorkflowStep.CALCULATE) {

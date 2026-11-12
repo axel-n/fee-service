@@ -24,17 +24,18 @@ class RestateConfig {
 
     @Bean
     fun feeWorkflowClients(restateIngressClient: Client): FeeWorkflowClients =
-        FeeWorkflowClients { workflowKey -> FeeWorkflowClient.fromClient(restateIngressClient, workflowKey) }
+        FeeWorkflowClients { transactionId -> FeeWorkflowClient.fromClient(restateIngressClient, transactionId) }
 
 }
 
 /**
- * Creates the generated ingress client of `FeeWorkflow` for one workflow key. Generated clients are bound to a key, so
- * `FeeService` gets this factory instead of a client, and tests replace it with a mock.
+ * Creates the generated ingress client of `FeeWorkflow` for one transaction: the workflow key is the `transaction_id`.
+ * Generated clients are bound to a key, so `FeeService` gets this factory instead of a client, and tests replace it
+ * with a mock.
  */
 fun interface FeeWorkflowClients {
 
-    /** The ingress client of the workflow `FeeWorkflow/{workflowKey}`. */
-    fun forKey(workflowKey: String): FeeWorkflowClient.IngressClient
+    /** The ingress client of the workflow `FeeWorkflow/{transactionId}`. */
+    fun forTransaction(transactionId: String): FeeWorkflowClient.IngressClient
 }
 

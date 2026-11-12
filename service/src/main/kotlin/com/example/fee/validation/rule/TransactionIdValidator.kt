@@ -9,8 +9,8 @@ import org.springframework.core.annotation.Order
 import org.springframework.stereotype.Component
 
 /**
- * `transaction_id` must be 1 to [MAX_LENGTH] ASCII letters, digits, `_` or `-` (400). It becomes part of the workflow
- * key `{transaction_id}:{payloadHash}`, the Virtual Object key and the `GET` path, so `:`, `/` and whitespace are out.
+ * `transaction_id` must be 1 to [MAX_LENGTH] ASCII letters, digits, `_` or `-` (400). It becomes the workflow key and
+ * the Virtual Object key, which Restate puts in URL paths, so `/`, `:` and whitespace are out.
  *
  * `FeeService` also runs it on its own as the key pre-check, before any other validator, so it handles a missing id
  * itself instead of relying on [RequiredFieldsValidator].

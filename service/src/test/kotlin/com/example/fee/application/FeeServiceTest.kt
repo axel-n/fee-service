@@ -15,7 +15,6 @@ import com.example.fee.validation.ValidationError
 import com.example.fee.validation.rule.TransactionIdValidator
 import com.example.fee.workflow.FeeOutcome
 import com.example.fee.workflow.FeeWorkflowClient
-import com.example.fee.workflow.FeeWorkflowInput
 import dev.restate.client.Client
 import dev.restate.client.IngressException
 import dev.restate.client.RequestOptions
@@ -66,7 +65,7 @@ class FeeServiceTest {
     private val workflowClient = mock(FeeWorkflowClient.IngressClient::class.java)
     private val invocation = mock(Client.InvocationHandle::class.java)
     private val clients = mock(FeeWorkflowClients::class.java).also {
-        `when`(it.forKey(ArgumentMatchers.anyString())).thenReturn(workflowClient)
+        `when`(it.forTransaction(ArgumentMatchers.anyString())).thenReturn(workflowClient)
     }
 
 
@@ -95,7 +94,7 @@ class FeeServiceTest {
     }
 
     private fun submitReturns(future: CompletableFuture<SendResponse<FeeOutcome>>) {
-        `when`(workflowClient.submitAsync(ArgumentMatchers.any(FeeWorkflowInput::class.java)))
+        `when`(workflowClient.submitAsync(ArgumentMatchers.any(FeeRequest::class.java)))
             .thenReturn(future)
     }
 
@@ -122,37 +121,36 @@ class FeeServiceTest {
     }
 
     @Test
-    fun `submits to the workflow keyed by transaction id and payload hash with the request and its hash`() {
+    fun `submits the request as sent to the workflow keyed by its transaction id`() {
         // given
         workflowAnswers(FeeOutcome.Charged(response))
-        val hash = PayloadHash.of(request)
 
         // when
         service().submit(request)
 
         // then
-        verify(clients).forKey("txn_001:${hash.value}")
-        val input = ArgumentCaptor.forClass(FeeWorkflowInput::class.java)
+        verify(clients).forTransaction("txn_001")
+        val input = ArgumentCaptor.forClass(FeeRequest::class.java)
         verify(workflowClient).submitAsync(input.capture())
-        assertThat(input.value).isEqualTo(FeeWorkflowInput(request, hash.value))
+        assertThat(input.value).isEqualTo(request)
     }
 
     @Test
-    fun `the same payload with the amount written differently goes to the same workflow`() {
+    fun `a changed payload with the same transaction id goes to the same workflow`() {
         // given
         workflowAnswers(FeeOutcome.Charged(response))
         val service = service()
 
         // when
         service.submit(request)
-        service.submit(request.copy(amount = BigDecimal("1000.00")))
+        service.submit(request.copy(amount = BigDecimal("2000")))
 
         // then
-        verify(clients, times(2)).forKey("txn_001:${PayloadHash.of(request).value}")
+        verify(clients, times(2)).forTransaction("txn_001")
     }
 
     @Test
-    fun `a previously accepted payload attaches to the first run and returns its result`() {
+    fun `a transaction id sent again attaches to the first run and returns its result`() {
         // given
         workflowAnswers(FeeOutcome.Charged(response), SendResponse.SendStatus.PREVIOUSLY_ACCEPTED)
 
@@ -224,7 +222,7 @@ class FeeServiceTest {
     }
 
     @Test
-    fun `a transaction id that can't go into the key is a 400 naming the value before Restate is called`() {
+    fun `a transaction id that can't be a workflow key is a 400 naming the value before Restate is called`() {
         // when / then
         assertThatThrownBy { service().submit(request.copy(transactionId = "txn:001")) }
             .isInstanceOfSatisfying(ValidationException::class.java) {
@@ -254,7 +252,7 @@ class FeeServiceTest {
     fun `a submit that throws right away is a 503`() {
         // given
         val down = ingressDown()
-        `when`(workflowClient.submitAsync(ArgumentMatchers.any(FeeWorkflowInput::class.java)))
+        `when`(workflowClient.submitAsync(ArgumentMatchers.any(FeeRequest::class.java)))
             .thenThrow(down)
 
         // when / then

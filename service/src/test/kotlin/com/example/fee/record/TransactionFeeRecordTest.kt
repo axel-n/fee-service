@@ -2,8 +2,6 @@
 
 package com.example.fee.record
 
-import com.example.fee.record.FeeRecords.HASH
-import com.example.fee.record.FeeRecords.OTHER_HASH
 import com.example.fee.record.FeeRecords.response
 import com.example.fee.record.TransactionFeeRecord.Companion.RECORD
 import dev.restate.sdk.ObjectContext
@@ -27,40 +25,40 @@ class TransactionFeeRecordTest {
     private val handlers = TransactionFeeRecord(ClaimDecider())
 
     @Test
-    fun `a first claim is new and stores an in-progress record for the payload`() {
+    fun `a first claim is new and stores an in-progress record`() {
         // given
         val state = ObjectState(record = null)
 
         // when
-        val result = handlers.claim(state.ctx, HASH)
+        val result = handlers.claim(state.ctx)
 
         // then
         assertThat(result).isEqualTo(ClaimResult.New)
-        assertThat(state.record).isEqualTo(FeeRecord.inProgress(HASH))
+        assertThat(state.record).isEqualTo(FeeRecord.inProgress())
     }
 
     @Test
-    fun `a claim while another payload holds the id is in progress and leaves the record unchanged`() {
+    fun `a claim while an earlier run holds the id is in progress and leaves the record unchanged`() {
         // given
-        val state = ObjectState(record = FeeRecord.inProgress(HASH))
+        val state = ObjectState(record = FeeRecord.inProgress())
 
         // when
-        val result = handlers.claim(state.ctx, OTHER_HASH)
+        val result = handlers.claim(state.ctx)
 
         // then
         assertThat(result).isEqualTo(ClaimResult.InProgress)
-        assertThat(state.record).isEqualTo(FeeRecord.inProgress(HASH))
+        assertThat(state.record).isEqualTo(FeeRecord.inProgress())
         assertThat(state.writes).isZero()
     }
 
     @Test
-    fun `a claim by the charged payload returns the stored response and leaves the record unchanged`() {
+    fun `a claim on a charged id returns the stored response and leaves the record unchanged`() {
         // given
-        val completed = FeeRecord.inProgress(HASH).complete(response)
+        val completed = FeeRecord.inProgress().complete(response)
         val state = ObjectState(record = completed)
 
         // when
-        val result = handlers.claim(state.ctx, HASH)
+        val result = handlers.claim(state.ctx)
 
         // then
         assertThat(result).isEqualTo(ClaimResult.AlreadyCompleted(response))
@@ -69,30 +67,15 @@ class TransactionFeeRecordTest {
     }
 
     @Test
-    fun `a claim by another payload after a charge is a conflict and leaves the record unchanged`() {
+    fun `complete stores the response as a completed record`() {
         // given
-        val completed = FeeRecord.inProgress(HASH).complete(response)
-        val state = ObjectState(record = completed)
-
-        // when
-        val result = handlers.claim(state.ctx, OTHER_HASH)
-
-        // then
-        assertThat(result).isEqualTo(ClaimResult.Conflict)
-        assertThat(state.record).isEqualTo(completed)
-        assertThat(state.writes).isZero()
-    }
-
-    @Test
-    fun `complete stores the response as a completed record, keeping the claiming payload's hash`() {
-        // given
-        val state = ObjectState(record = FeeRecord.inProgress(HASH))
+        val state = ObjectState(record = FeeRecord.inProgress())
 
         // when
         handlers.complete(state.ctx, response)
 
         // then
-        assertThat(state.record).isEqualTo(FeeRecord(FeeRecordStatus.COMPLETED, HASH, response = response))
+        assertThat(state.record).isEqualTo(FeeRecord(FeeRecordStatus.COMPLETED, response = response))
     }
 
     @Test
@@ -110,7 +93,7 @@ class TransactionFeeRecordTest {
     @Test
     fun `complete on a completed record is a bug and keeps the stored response`() {
         // given
-        val completed = FeeRecord.inProgress(HASH).complete(response)
+        val completed = FeeRecord.inProgress().complete(response)
         val state = ObjectState(record = completed)
 
         // when / then
@@ -123,7 +106,7 @@ class TransactionFeeRecordTest {
     @Test
     fun `get returns the stored record`() {
         // given
-        val completed = FeeRecord.inProgress(HASH).complete(response)
+        val completed = FeeRecord.inProgress().complete(response)
         val state = ObjectState(record = completed)
 
         // when

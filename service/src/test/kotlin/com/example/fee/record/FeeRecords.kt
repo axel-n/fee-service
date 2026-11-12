@@ -3,11 +3,8 @@ package com.example.fee.record
 import com.example.fee.contract.FeeResponse
 import java.math.BigDecimal
 
-/** Test fixtures for fee records: the reference Mobile Top Up response and two distinct payload hashes. */
+/** Test fixtures for fee records: the reference Mobile Top Up response. */
 object FeeRecords {
-    const val HASH = "hash-a"
-    const val OTHER_HASH = "hash-b"
-
     val response = FeeResponse(
         transactionId = "txn_001",
         amount = BigDecimal("1000"),

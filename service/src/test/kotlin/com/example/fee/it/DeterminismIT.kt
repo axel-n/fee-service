@@ -23,7 +23,8 @@ import java.util.UUID
  * and Restate's retry, the replay returns the journaled result instead of judging `created_at` again.
  *
  * The clock is moved by the crash itself ([FaultInjectingStepHook.crashOnce]'s `onCrash`), so it has certainly moved
- * before the retry. A second payload checked at the moved clock shows that a re-run would have decided differently.
+ * before the retry. A second transaction with the same `created_at`, checked at the moved clock, shows that a re-run
+ * would have decided differently. It needs its own `transaction_id`: the same id would attach to the first run.
  */
 class DeterminismIT @Autowired constructor(
     private val calculator: CountingFeeCalculator,
@@ -80,14 +81,15 @@ class DeterminismIT @Autowired constructor(
         assertThat(validator.count(transactionId)).describedAs("VALIDATE executions that passed").isZero()
         assertThat(calculator.count(transactionId)).isZero()
 
-        // when: another payload with the same created_at, validated at the advanced clock
-        val reValidated = request.copy(amount = BigDecimal("2000"))
+        // when: another transaction with the same created_at, validated at the advanced clock
+        val reValidated = request.copy(transactionId = newTransactionId(), amount = BigDecimal("2000"))
         val charged = api.submit(bodyOf(reValidated))
 
         // then: it passes, so only the journal kept the first payload rejected
         assertThat(charged.status).describedAs("POST status, body %s", charged.body).isEqualTo(200)
         assertThat(charged.body["fee"].decimalValue()).isEqualByComparingTo(BigDecimal("3.00"))
-        assertThat(calculator.count(transactionId)).isEqualTo(1)
+        assertThat(calculator.count(checkNotNull(reValidated.transactionId))).isEqualTo(1)
+        assertThat(calculator.count(transactionId)).isZero()
         assertThat(StoredWorkflows.outcome(request)).isEqualTo(outcome)
     }
 
@@ -119,14 +121,15 @@ class DeterminismIT @Autowired constructor(
         assertThat(calculator.count(transactionId)).describedAs("CALCULATE executions").isEqualTo(1)
         assertThat(StoredFeeRecords.of(transactionId)?.status).isEqualTo(FeeRecordStatus.COMPLETED)
 
-        // when: another payload with the same created_at, validated at the clock that moved back
-        val reValidated = request.copy(amount = BigDecimal("2000"))
+        // when: another transaction with the same created_at, validated at the clock that moved back
+        val reValidated = request.copy(transactionId = newTransactionId(), amount = BigDecimal("2000"))
         val rejected = api.submit(bodyOf(reValidated))
 
         // then: it is rejected as in the future, so only the journal kept the first payload valid
         assertThat(rejected.status).describedAs("POST status, body %s", rejected.body).isEqualTo(400)
         assertThat(rejected.body["field"].asText()).isEqualTo("created_at")
         assertThat(rejected.body["message"].asText()).contains("it is in the future")
+        assertThat(calculator.count(checkNotNull(reValidated.transactionId))).isZero()
         assertThat(calculator.count(transactionId)).isEqualTo(1)
     }
 
