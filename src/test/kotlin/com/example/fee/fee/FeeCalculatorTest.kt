@@ -1,7 +1,16 @@
 package com.example.fee.fee
 
+import com.example.fee.config.BankTransferFeeProperties
+import com.example.fee.config.CashWithdrawalFeeProperties
+import com.example.fee.config.MerchantPaymentFeeProperties
+import com.example.fee.config.MobileTopUpFeeProperties
 import com.example.fee.domain.Asset
 import com.example.fee.domain.TransactionType
+import com.example.fee.fee.formula.FlatFee
+import com.example.fee.fee.rule.BankTransferFeeRule
+import com.example.fee.fee.rule.CashWithdrawalFeeRule
+import com.example.fee.fee.rule.MerchantPaymentFeeRule
+import com.example.fee.fee.rule.MobileTopUpFeeRule
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test

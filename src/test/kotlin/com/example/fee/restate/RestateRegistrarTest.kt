@@ -4,6 +4,7 @@ import ch.qos.logback.classic.Level
 import ch.qos.logback.classic.Logger
 import ch.qos.logback.classic.spi.ILoggingEvent
 import ch.qos.logback.core.read.ListAppender
+import com.example.fee.config.RestateProperties
 import com.example.fee.restate.RegistrationStatus.Snapshot
 import com.example.fee.restate.RegistrationStatus.State
 import org.assertj.core.api.Assertions.assertThat
@@ -13,13 +14,13 @@ import org.junit.jupiter.api.Test
 import org.mockito.ArgumentMatchers.any
 import org.mockito.ArgumentMatchers.anyBoolean
 import org.mockito.ArgumentMatchers.anyString
+import org.mockito.Mockito.`when`
 import org.mockito.Mockito.doAnswer
 import org.mockito.Mockito.mock
 import org.mockito.Mockito.never
 import org.mockito.Mockito.times
 import org.mockito.Mockito.verify
 import org.mockito.Mockito.verifyNoInteractions
-import org.mockito.Mockito.`when`
 import org.slf4j.LoggerFactory
 import org.springframework.core.task.TaskRejectedException
 import org.springframework.scheduling.TaskScheduler

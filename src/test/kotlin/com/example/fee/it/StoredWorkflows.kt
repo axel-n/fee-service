@@ -5,9 +5,9 @@ package com.example.fee.it
 import com.example.fee.application.PayloadHash
 import com.example.fee.application.WorkflowKey
 import com.example.fee.contract.FeeRequest
-import com.example.fee.restate.FeeOutcome
-import com.example.fee.restate.FeeWorkflowClient
-import com.example.fee.restate.WorkflowStep
+import com.example.fee.workflow.FeeOutcome
+import com.example.fee.workflow.FeeWorkflowClient
+import com.example.fee.workflow.WorkflowStep
 
 /**
  * Reads `FeeWorkflow` runs straight from the shared Restate's ingress, by the key the app derives from a request

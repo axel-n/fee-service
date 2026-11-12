@@ -2,8 +2,8 @@
 
 package com.example.fee.it
 
-import com.example.fee.restate.FeeRecord
-import com.example.fee.restate.TransactionFeeRecordClient
+import com.example.fee.record.FeeRecord
+import com.example.fee.record.TransactionFeeRecordClient
 
 /**
  * Reads the permanent fee records straight from the shared Restate's ingress, past the app's own API, so a test sees what

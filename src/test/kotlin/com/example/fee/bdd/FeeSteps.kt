@@ -5,8 +5,8 @@ import com.example.fee.it.FeeApi
 import com.example.fee.it.StoredFeeRecords
 import com.example.fee.it.TestClock
 import com.example.fee.it.TestWalletGateway
-import com.example.fee.restate.FeeRecordStatus
-import com.example.fee.restate.FeeWorkflow
+import com.example.fee.record.FeeRecordStatus
+import com.example.fee.workflow.FeeWorkflow
 import io.cucumber.datatable.DataTable
 import io.cucumber.java.After
 import io.cucumber.java.en.Given

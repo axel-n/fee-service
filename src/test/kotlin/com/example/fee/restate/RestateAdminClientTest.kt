@@ -1,5 +1,6 @@
 package com.example.fee.restate
 
+import com.example.fee.config.RestateProperties
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test

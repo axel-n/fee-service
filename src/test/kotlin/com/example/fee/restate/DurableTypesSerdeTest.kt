@@ -4,10 +4,15 @@ import com.example.fee.contract.FeeRequest
 import com.example.fee.contract.FeeResponse
 import com.example.fee.domain.Asset
 import com.example.fee.fee.FeeQuote
-import com.example.fee.restate.FeeRecords.HASH
-import com.example.fee.restate.FeeRecords.response
+import com.example.fee.record.ClaimResult
+import com.example.fee.record.FeeRecord
+import com.example.fee.record.FeeRecords.HASH
+import com.example.fee.record.FeeRecords.response
 import com.example.fee.validation.ValidationError
 import com.example.fee.wallet.ChargeReceipt
+import com.example.fee.workflow.FeeOutcome
+import com.example.fee.workflow.FeeWorkflowInput
+import com.example.fee.workflow.WorkflowStep
 import dev.restate.serde.jackson.JacksonSerdeFactory
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.params.ParameterizedTest

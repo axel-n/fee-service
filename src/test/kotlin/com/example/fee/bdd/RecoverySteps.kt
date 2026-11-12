@@ -3,9 +3,9 @@ package com.example.fee.bdd
 import com.example.fee.it.FaultInjectingStepHook
 import com.example.fee.it.TestWalletGateway
 import com.example.fee.it.awaitUntil
-import com.example.fee.restate.FeeWorkflow
 import com.example.fee.restate.RestateEndpointLifecycle
-import com.example.fee.restate.WorkflowStep
+import com.example.fee.workflow.FeeWorkflow
+import com.example.fee.workflow.WorkflowStep
 import io.cucumber.java.After
 import io.cucumber.java.en.Given
 import io.cucumber.java.en.Then

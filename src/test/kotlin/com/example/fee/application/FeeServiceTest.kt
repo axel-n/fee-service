@@ -2,19 +2,19 @@
 
 package com.example.fee.application
 
+import com.example.fee.config.RestateProperties
 import com.example.fee.contract.FeeRequest
 import com.example.fee.contract.FeeResponse
 import com.example.fee.contract.FeeStatusResponse
-import com.example.fee.restate.FeeOutcome
-import com.example.fee.restate.FeeWorkflowClient
+import com.example.fee.record.FeeRecord
+import com.example.fee.record.TransactionFeeRecordClient
 import com.example.fee.restate.FeeWorkflowClients
-import com.example.fee.restate.FeeWorkflowInput
-import com.example.fee.restate.FeeRecord
-import com.example.fee.restate.RestateProperties
-import com.example.fee.restate.TransactionFeeRecordClient
 import com.example.fee.restate.TransactionFeeRecordClients
-import com.example.fee.validation.TransactionIdValidator
 import com.example.fee.validation.ValidationError
+import com.example.fee.validation.rule.TransactionIdValidator
+import com.example.fee.workflow.FeeOutcome
+import com.example.fee.workflow.FeeWorkflowClient
+import com.example.fee.workflow.FeeWorkflowInput
 import dev.restate.client.Client
 import dev.restate.client.IngressException
 import dev.restate.client.RequestOptions
@@ -26,12 +26,12 @@ import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import org.mockito.ArgumentCaptor
 import org.mockito.ArgumentMatchers
+import org.mockito.Mockito.`when`
 import org.mockito.Mockito.mock
 import org.mockito.Mockito.never
 import org.mockito.Mockito.times
 import org.mockito.Mockito.verify
 import org.mockito.Mockito.verifyNoInteractions
-import org.mockito.Mockito.`when`
 import org.springframework.http.HttpStatus
 import java.math.BigDecimal
 import java.net.ConnectException
@@ -441,5 +441,57 @@ class FeeServiceTest {
             .isInstanceOfSatisfying(WorkflowUnavailableException::class.java) {
                 assertThat(it.cause).isInstanceOf(TimeoutException::class.java)
             }
+    }
+}
+
+class FeeSubmissionTest {
+
+    private val response = FeeResponse(
+        transactionId = "txn_001",
+        amount = BigDecimal("1000"),
+        asset = "USD",
+        type = "Mobile Top Up",
+        fee = BigDecimal("1.50"),
+        rate = BigDecimal("0.0015"),
+        description = "Standard fee rate of 0.15%",
+    )
+
+    @Test
+    fun `a completed submission carries the fee response`() {
+        // given
+        val submission: FeeSubmission = FeeSubmission.Completed(response)
+
+        // when
+        val carried = (submission as FeeSubmission.Completed).response
+
+        // then
+        assertThat(carried).isEqualTo(response)
+        assertThat(carried.fee).isEqualByComparingTo("1.5")
+    }
+
+    @Test
+    fun `a submission still processing carries the transaction id the caller polls`() {
+        // given
+        val submission: FeeSubmission = FeeSubmission.Processing("txn_001")
+
+        // when
+        val transactionId = (submission as FeeSubmission.Processing).transactionId
+
+        // then
+        assertThat(transactionId).isEqualTo("txn_001")
+    }
+
+    @Test
+    fun `submissions are values compared by content`() {
+        // given
+        val first = FeeSubmission.Processing("txn_001")
+
+        // when
+        val same = FeeSubmission.Processing("txn_001")
+
+        // then
+        assertThat(same).isEqualTo(first)
+        assertThat(FeeSubmission.Completed(response.copy())).isEqualTo(FeeSubmission.Completed(response))
+        assertThat(FeeSubmission.Processing("txn_002")).isNotEqualTo(first)
     }
 }

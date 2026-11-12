@@ -1,6 +1,15 @@
 package com.example.fee.validation
 
 import com.example.fee.contract.FeeRequest
+import com.example.fee.validation.rule.AmountScaleValidator
+import com.example.fee.validation.rule.AmountValidator
+import com.example.fee.validation.rule.AssetTypeValidator
+import com.example.fee.validation.rule.AssetValidator
+import com.example.fee.validation.rule.CreatedAtValidator
+import com.example.fee.validation.rule.RequiredFieldsValidator
+import com.example.fee.validation.rule.StateValidator
+import com.example.fee.validation.rule.TransactionIdValidator
+import com.example.fee.validation.rule.TransactionTypeValidator
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest

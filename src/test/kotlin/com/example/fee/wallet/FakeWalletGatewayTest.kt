@@ -1,5 +1,6 @@
 package com.example.fee.wallet
 
+import com.example.fee.config.FakeWalletProperties
 import com.example.fee.domain.Asset
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test

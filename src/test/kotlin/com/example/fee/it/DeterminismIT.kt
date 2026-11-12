@@ -1,11 +1,11 @@
 package com.example.fee.it
 
 import com.example.fee.contract.FeeRequest
-import com.example.fee.restate.FeeOutcome
-import com.example.fee.restate.FeeRecordStatus
-import com.example.fee.restate.FeeWorkflow
-import com.example.fee.restate.WorkflowStep
+import com.example.fee.record.FeeRecordStatus
 import com.example.fee.validation.ValidationError
+import com.example.fee.workflow.FeeOutcome
+import com.example.fee.workflow.FeeWorkflow
+import com.example.fee.workflow.WorkflowStep
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test

@@ -1,5 +1,6 @@
 package com.example.fee.restate
 
+import com.example.fee.config.RestateProperties
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.DisposableBean
 import org.springframework.boot.context.event.ApplicationReadyEvent

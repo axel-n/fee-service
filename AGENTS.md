@@ -73,12 +73,12 @@ Follow the call graph in `docs/design.md`:
 
 ## Extending
 
-- **New validation:** a `@Component @Order(ValidationOrder.X)` class implementing `TransactionValidator` that returns `ValidationError?`
-  (never throws). Add its constant to `ValidationOrder`, leaving gaps of 100. Structural checks (400) come before business checks (422).
-  Messages must be readable and include the rejected value and the allowed values.
-- **New transaction type:** an enum value in `TransactionType` + one `@Component` `FeeRule` (compose the building blocks) + its
-  `@ConfigurationProperties` class + a `fee.<type>` section in `application.yml` + a unit test + a row in the BDD outline.
-  `FeeCalculator`'s startup check fails if a rule is missing.
+- **New validation:** a `@Component @Order(ValidationOrder.X)` class in `validation.rule` implementing `TransactionValidator` that
+  returns `ValidationError?` (never throws). Add its constant to `ValidationOrder`, leaving gaps of 100. Structural checks (400) come
+  before business checks (422). Messages must be readable and include the rejected value and the allowed values.
+- **New transaction type:** an enum value in `TransactionType` + one `@Component` `FeeRule` in `fee.rule` (compose the building
+  blocks in `fee.formula`) + its `@ConfigurationProperties` class in `config/FeeProperties.kt` + a `fee.<type>` section in
+  `application.yml` + a unit test + a row in the BDD outline. `FeeCalculator`'s startup check fails if a rule is missing.
 - **New asset:** an enum value in `Asset` with its decimals and asset type.
 - Never add `when` branches over types or validators in central classes. Extension means **adding a class**.
 
@@ -91,6 +91,12 @@ Follow the call graph in `docs/design.md`:
 - Tunable values (fee numbers, URLs, ports, timeouts) come from `application.yml` through `@ConfigurationProperties` classes and are
   never hardcoded. Defaults live only in the packaged `application.yml` (D22). Renaming a key breaks existing override files and
   environment variables; call it out.
+- **Every `@ConfigurationProperties` class lives in `config`**, one file per top-level section of `application.yml`, never next to
+  the bean that uses it (D75).
+- Package and file layout (D75): a package holds one kind of class, and an extension point's implementations get a sub-package
+  (`fee.rule`, `fee.formula`, `validation.rule`). A file holds one main type plus the small types and helpers that exist only to
+  serve it (its result and field types, its default implementation, internal helpers). Don't create a file for a lone data class,
+  enum or helper function that belongs to another type. A test file mirrors its production file, one test class per production class.
 - JSON uses snake_case through `@JsonProperty` on DTOs; `BigDecimal` is serialized as a plain number.
 - Errors are subclasses of the sealed `FeeException` and are mapped to `ProblemDetail` in `ApiExceptionHandler`.
 - Small classes with one responsibility. Comment only *why*, not *what*. Add KDoc to public extension points (`FeeRule`, `TransactionValidator`).

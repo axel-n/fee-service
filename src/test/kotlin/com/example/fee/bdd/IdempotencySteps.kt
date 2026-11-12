@@ -2,7 +2,7 @@ package com.example.fee.bdd
 
 import com.example.fee.it.FeeApi
 import com.example.fee.it.TestWalletGateway
-import com.example.fee.restate.FeeWorkflow
+import com.example.fee.workflow.FeeWorkflow
 import io.cucumber.java.en.Then
 import io.cucumber.java.en.When
 import org.assertj.core.api.Assertions.assertThat

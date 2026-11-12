@@ -1,7 +1,7 @@
 package com.example.fee.it
 
-import com.example.fee.restate.StepHook
-import com.example.fee.restate.WorkflowStep
+import com.example.fee.workflow.StepHook
+import com.example.fee.workflow.WorkflowStep
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
 

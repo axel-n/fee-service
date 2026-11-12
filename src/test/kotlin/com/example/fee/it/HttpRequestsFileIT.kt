@@ -1,6 +1,6 @@
 package com.example.fee.it
 
-import com.example.fee.restate.FeeWorkflow
+import com.example.fee.workflow.FeeWorkflow
 import com.fasterxml.jackson.databind.DeserializationFeature
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper

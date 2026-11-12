@@ -47,13 +47,14 @@ rule() {
 }
 
 echo "== rules (AGENTS.md)"
-# Only the packages that handle money: a Double elsewhere (say, a backoff multiplier in restate/) is not money.
-rule "Money is BigDecimal: no Double/Float in contract, domain, fee, validation, wallet or application (hard rule 3)" \
-  "$(g '\b(Double|Float)\b|\.to(Double|Float)\(' "$PKG/contract" "$PKG/domain" "$PKG/fee" "$PKG/validation" "$PKG/wallet" "$PKG/application")"
+# Only the code that handles money: a Double elsewhere (say, a backoff multiplier in restate/ or RestateProperties) is
+# not money. Of config/, only the fee numbers are money.
+rule "Money is BigDecimal: no Double/Float in contract, domain, fee, validation, wallet, application, workflow, record or the fee properties (hard rule 3)" \
+  "$(g '\b(Double|Float)\b|\.to(Double|Float)\(' "$PKG/contract" "$PKG/domain" "$PKG/fee" "$PKG/validation" "$PKG/wallet" "$PKG/application" "$PKG/workflow" "$PKG/record" "$PKG/config/FeeProperties.kt")"
 rule "Create BigDecimal from a String, never from a floating-point literal (hard rule 3)" \
   "$(g 'BigDecimal\(\s*-?[0-9]+\.[0-9]' "$MAIN" "$TEST")"
 rule "contract, domain, fee, validation and ClaimDecider are pure: no Restate imports" \
-  "$(g '^import dev\.restate' "$PKG/contract" "$PKG/domain" "$PKG/fee" "$PKG/validation" "$PKG/restate/ClaimDecider.kt")"
+  "$(g '^import dev\.restate' "$PKG/contract" "$PKG/domain" "$PKG/fee" "$PKG/validation" "$PKG/record/ClaimDecider.kt")"
 rule "Nothing outside api imports api" \
   "$(g '^import com\.example\.fee\.api\.' "$MAIN" | grep -v "^$PKG/api/")"
 rule "Inject Clock: no now() or currentTimeMillis() without a Clock in production code" \

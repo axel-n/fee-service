@@ -1,5 +1,8 @@
 package com.example.fee.restate
 
+import com.example.fee.config.RestateProperties
+import com.example.fee.record.TransactionFeeRecord
+import com.example.fee.workflow.FeeWorkflow
 import dev.restate.sdk.endpoint.Endpoint
 import dev.restate.sdk.http.vertx.RestateHttpServer
 import org.slf4j.LoggerFactory

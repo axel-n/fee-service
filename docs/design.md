@@ -100,92 +100,110 @@ It asks Restate to discover the endpoint in a dry run and compares that with the
 
 ## Class design
 
-Base package: `com.example.fee`.
+Base package: `com.example.fee`. The tree lists **files**. A package holds one kind of class, and an extension point's
+implementations get their own sub-package (`fee.rule`, `fee.formula`, `validation.rule`). A file holds one main type plus the
+small types and helpers that exist only to serve it: its result and field types, its default implementation, its internal
+helpers. Every `@ConfigurationProperties` class lives in `config`, one file per top-level section of `application.yml` (D75).
+A test file mirrors its production file, with one test class per production class.
 
 ```
 com.example.fee
-├── FeeServiceApplication               @SpringBootApplication + @ConfigurationPropertiesScan + main(); Clock bean
+├── FeeServiceApplication.kt            @SpringBootApplication + @ConfigurationPropertiesScan + main(); Clock bean
+│
+├── config/                             every @ConfigurationProperties class: what application.yml and its overrides can set (D75)
+│   ├── RestateProperties.kt            restate.*: ingressUrl, adminUrl, endpointPort, advertisedUrl, attachTimeout, registration.{enabled, maxAttempts, backoff}
+│   ├── FeeProperties.kt                fee.*: MobileTopUpFeeProperties, BankTransferFeeProperties, MerchantPaymentFeeProperties,
+│   │                                   CashWithdrawalFeeProperties: one class per type, fee.<type>.{rate, min, fixed} as the formula needs;
+│   │                                   init checks requiredRate / requiredAmount fail startup on a bad value (D23, D41)
+│   └── FakeWalletProperties.kt         wallet.fake: delay (D24, D46)
 │
 ├── api/                                HTTP only
-│   ├── TransactionFeeController        POST /transaction/fee (200, or 202 + Location), GET /transaction/fee/{id} → calls only FeeService
-│   └── ApiExceptionHandler             @RestControllerAdvice: FeeException and Spring MVC errors → ProblemDetail (D60)
+│   ├── TransactionFeeController.kt     POST /transaction/fee (200, or 202 + Location), GET /transaction/fee/{id} → calls only FeeService
+│   └── ApiExceptionHandler.kt          @RestControllerAdvice: FeeException and Spring MVC errors → ProblemDetail (D60)
 │
 ├── contract/                           DTOs shared by HTTP and Restate (pure Kotlin + Jackson annotations, snake_case), D21
-│   ├── FeeRequest                      all fields nullable; enums/dates as String, amount as BigDecimal. Journaled as the workflow input
-│   ├── FeeResponse                     transaction_id, amount, asset, type, fee, rate, description. Stored permanently in TransactionFeeRecord
-│   └── FeeStatusResponse               GET body: transaction_id, status, the FeeResponse fields once COMPLETED, failure_reason once FAILED
-│                                       (HTTP only, never stored)
+│   ├── FeeRequest.kt                   all fields nullable; enums/dates as String, amount as BigDecimal. Journaled as the workflow input
+│   ├── FeeResponse.kt                  transaction_id, amount, asset, type, fee, rate, description. Stored permanently in TransactionFeeRecord
+│   ├── FeeStatusResponse.kt            GET body: transaction_id, status, the FeeResponse fields once COMPLETED, failure_reason once FAILED
+│   │                                   (HTTP only, never stored)
+│   └── PlainBigDecimalSerializer.kt    BigDecimal as a plain JSON number (D38)
 │
 ├── application/                        thin gateway to Restate
-│   ├── FeeService                      key pre-check → WorkflowKey → submit/attach (bounded by attachTimeout) → FeeOutcome → FeeSubmission or FeeException
-│   ├── FeeSubmission                   sealed: Completed(response) → 200, Processing(transactionId) → 202 + Location
-│   ├── WorkflowKey                     value class: "{transactionId}:{payloadHash}"
-│   ├── PayloadHash                     SHA-256 of the canonical FeeRequest (amount normalized: 1000 == 1000.00)
-│   └── FeeException                    sealed: ValidationException (400/422), DuplicateTransactionException (409),
+│   ├── FeeService.kt                   FeeService: key pre-check → WorkflowKey → submit/attach (bounded by attachTimeout) → FeeOutcome →
+│   │                                   FeeSubmission or FeeException; FeeSubmission (sealed): Completed(response) → 200, Processing(transactionId) → 202
+│   ├── WorkflowKey.kt                  WorkflowKey (value class "{transactionId}:{payloadHash}") + PayloadHash: SHA-256 of the canonical FeeRequest
+│   │                                   (amount normalized: 1000 == 1000.00)
+│   └── FeeException.kt                 sealed: ValidationException (400/422), DuplicateTransactionException (409),
 │                                       ChargeFailedException (422), TransactionNotFoundException (404, GET), WorkflowUnavailableException (503).
 │                                       Gateway only: the workflow returns FeeOutcome and never throws these
 │
 ├── validation/                         executed inside the workflow
-│   ├── TransactionValidator            interface: validate(request): ValidationError?
-│   ├── ValidationError                 data class(field, value, message, kind: INVALID | UNSUPPORTED)
-│   ├── ValidationOrder                 object of `const val`s spaced by 100 (`@Order` needs compile-time constants)
-│   ├── RequestValidator                sorts by @Order (so hand-built lists in unit tests are ordered too), fail-fast, returns ValidationError?
-│   ├── RequiredFieldsValidator         @Order(100)  → 400
-│   ├── TransactionIdValidator          @Order(200)  → 400   (also reused by FeeService for the key pre-check)
-│   ├── AmountValidator                 @Order(300)  → 400
-│   ├── CreatedAtValidator              @Order(400)  → 400   (Clock)
-│   ├── StateValidator                  @Order(500)  → 422
-│   ├── AssetValidator                  @Order(600)  → 422
-│   ├── AssetTypeValidator              @Order(700)  → 422
-│   ├── TransactionTypeValidator        @Order(800)  → 422   (FeeCalculator.supports)
-│   └── AmountScaleValidator            @Order(900)  → 422   (a rule of the asset: needs its decimals, so it runs after AssetValidator)
+│   ├── TransactionValidator.kt         interface validate(request): ValidationError? + ValidationOrder: `const val`s spaced by 100
+│   │                                   (`@Order` needs compile-time constants)
+│   ├── ValidationError.kt              data class(field, value, message, kind: INVALID | UNSUPPORTED) + its builders: UnsupportedValue
+│   │                                   (the 422 message), ValueDisplay (how a rejected value appears, shortened)
+│   ├── RequestValidator.kt             sorts by @Order (so hand-built lists in unit tests are ordered too), fail-fast, returns ValidationError?
+│   └── rule/                           one TransactionValidator @Component per check
+│       ├── RequiredFieldsValidator.kt  @Order(100)  → 400
+│       ├── TransactionIdValidator.kt   @Order(200)  → 400   (also reused by FeeService for the key pre-check)
+│       ├── AmountValidator.kt          @Order(300)  → 400
+│       ├── CreatedAtValidator.kt       @Order(400)  → 400   (Clock)
+│       ├── StateValidator.kt           @Order(500)  → 422
+│       ├── AssetValidator.kt           @Order(600)  → 422
+│       ├── AssetTypeValidator.kt       @Order(700)  → 422
+│       ├── TransactionTypeValidator.kt @Order(800)  → 422   (FeeCalculator.supports)
+│       └── AmountScaleValidator.kt     @Order(900)  → 422   (a rule of the asset: needs its decimals, so it runs after AssetValidator)
 │
 ├── domain/                             pure Kotlin
-│   ├── Transaction                     data class
-│   ├── TransactionMapper               FeeRequest → Transaction? (after validation; never throws; null if unvalidated, D39)
-│   ├── CreatedAtFormat                 parseOrNull(created_at): the one created_at format, shared with CreatedAtValidator
-│   └── TransactionType / TransactionState / Asset / AssetType    enums + UNKNOWN + fromValue()
+│   ├── Transaction.kt                  data class Transaction + the enums of its fields: TransactionType, TransactionState, Asset (with its
+│   │                                   decimals and AssetType), AssetType; each with value, UNKNOWN and fromValue()
+│   ├── TransactionMapper.kt            FeeRequest → Transaction? (after validation; never throws; null if unvalidated, D39)
+│   └── CreatedAtFormat.kt              parseOrNull(created_at): the one created_at format, shared with CreatedAtValidator
 │
 ├── fee/
-│   ├── FeeQuote, FeeRule
-│   ├── PercentageFee, PercentageWithMinimumFee, PercentagePlusFixedFee, FlatFee      building blocks
-│   ├── MobileTopUpFeeRule, BankTransferFeeRule, MerchantPaymentFeeRule, CashWithdrawalFeeRule   @Component, built from its *FeeProperties
-│   ├── MobileTopUpFeeProperties, …     one per rule, @ConfigurationProperties("fee.<type>"): its numbers (rate, min, fixed).
-│   │                                   init { require(…) } fails startup on a bad value (D23)
-│   └── FeeCalculator                   List<FeeRule> → map by type; calculate(tx), supports(type); startup check
+│   ├── FeeRule.kt                      interface FeeRule (the extension point) + FeeQuote, its result (journaled by CALCULATE)
+│   ├── FeeCalculator.kt                List<FeeRule> → map by type; calculate(tx), supports(type); startup check
+│   ├── FeeNumbers.kt                   internal helpers: roundedFor(asset) (HALF_EVEN), requireRate / requireNonNegative, percent / money (wording)
+│   ├── formula/                        the building blocks, each a FeeRule
+│   │   └── PercentageFee.kt, PercentageWithMinimumFee.kt, PercentagePlusFixedFee.kt, FlatFee.kt
+│   └── rule/                           one @Component FeeRule per transaction type, built from its *FeeProperties in config
+│       └── MobileTopUpFeeRule.kt, BankTransferFeeRule.kt, MerchantPaymentFeeRule.kt, CashWithdrawalFeeRule.kt
 │
-├── restate/
-│   ├── FeeWorkflow                     @Component @Workflow run(FeeWorkflowInput): FeeOutcome; @Shared status(): WorkflowStep? (D50)
+├── workflow/                           the FeeWorkflow Restate service
+│   ├── FeeWorkflow.kt                  @Component @Workflow run(FeeWorkflowInput): FeeOutcome; @Shared status(): WorkflowStep? (D50)
 │   │                                   ctor: RequestValidator, TransactionMapper, FeeCalculator, WalletGateway, StepHook
 │   │                                   (the ctx-based codegen API of SDK 2.9.3, deprecated but kept, D29)
-│   ├── FeeWorkflowInput                data class(request: FeeRequest, payloadHash)
-│   ├── FeeOutcome                      sealed: Charged(response), Rejected(error), Conflict(transactionId), Failed(reason)
-│   ├── WorkflowStep                    enum: VALIDATE, MAP, CLAIM, CALCULATE, CHARGE, RECORD, DONE
-│   ├── StepHook                        interface before(step, key)/after(step, key); NoOpStepHook is the default @Component
-│   ├── TransactionFeeRecord            @Component @VirtualObject (key = transaction_id): claim(hash), complete(response), fail(reason); @Shared get()
-│   ├── FeeRecord, FeeRecordStatus      stored state (IN_PROGRESS / COMPLETED / FAILED, payloadHash, response, failureReason)
-│   ├── ClaimDecider                    pure function (FeeRecord?, hash) → ClaimResult (unit-testable without Restate)
-│   ├── ClaimResult                     sealed: New, AlreadyCompleted(response), InProgress, Conflict
-│   ├── RestateEndpointLifecycle        SmartLifecycle: binds the FeeWorkflow and TransactionFeeRecord beans, starts/stops the endpoint server (port 9080)
+│   ├── FeeWorkflowTypes.kt             its durable types: FeeWorkflowInput (request, payloadHash); FeeOutcome (sealed: Charged(response),
+│   │                                   Rejected(error), Conflict(transactionId), Failed(reason)); WorkflowStep (VALIDATE … RECORD, DONE)
+│   └── StepHook.kt                     interface before(step, key)/after(step, key) + NoOpStepHook, the default @Component
+│   (generated by sdk-api-gen: FeeWorkflowClient, FeeWorkflowHandlers)
+│
+├── record/                             the TransactionFeeRecord Restate service
+│   ├── TransactionFeeRecord.kt         @Component @VirtualObject (key = transaction_id): claim(hash), complete(response), fail(reason); @Shared get()
+│   ├── FeeRecord.kt                    stored state FeeRecord (status, payloadHash, response, failureReason) + FeeRecordStatus
+│   │                                   (IN_PROGRESS / COMPLETED / FAILED)
+│   └── ClaimDecider.kt                 pure function (FeeRecord?, hash) → ClaimResult (unit-testable without Restate) + ClaimResult
+│                                       (sealed: New, AlreadyCompleted(response), InProgress, Conflict)
+│   (generated by sdk-api-gen: TransactionFeeRecordClient, TransactionFeeRecordHandlers)
+│
+├── restate/                            Restate plumbing: the endpoint, registration, the ingress clients
+│   ├── RestateEndpointLifecycle.kt     SmartLifecycle: binds the FeeWorkflow and TransactionFeeRecord beans, starts/stops the endpoint server (port 9080)
 │   │                                   on its own Vert.x instance, reached by reflection (vertx-core is runtime-only, D32)
-│   ├── RestateRegistrar                ApplicationReadyEvent: ensure the deployment is registered (missing → register, changed → force);
+│   ├── RestateRegistrar.kt             ApplicationReadyEvent: ensure the deployment is registered (missing → register, changed → force);
 │   │                                   retries on Boot's TaskScheduler every `backoff`, WARN + FAILING after maxAttempts (D55);
 │   │                                   "changed" = dry-run discovery differs from the registered services (D31)
-│   ├── RegistrationStatus              bean: PENDING / REGISTERED / FAILING + last error; the future readiness indicator (D15)
-│   ├── RestateAdminClient              Spring RestClient wrapper: listDeployments(), deployment(id), register(uri, force, dryRun);
-│   │                                   failures → RestateAdminException; response types in RestateAdminTypes (D54)
-│   ├── RestateConfig                   @Configuration: ingress Client bean; keyed client factories (key → generated ingress client),
-│   │                                   because generated clients are created per key and FeeService must be testable with mocks
-│   ├── FeeWorkflowClients, TransactionFeeRecordClients   the keyed factories: fun interface forKey(key) → generated IngressClient (D52)
-│   └── RestateProperties               @ConfigurationProperties("restate"): ingressUrl, adminUrl, endpointPort, advertisedUrl, attachTimeout, registration.{enabled, maxAttempts, backoff}
-│   (generated by sdk-api-gen: FeeWorkflowClient, TransactionFeeRecordClient)
+│   ├── RegistrationStatus.kt           bean: PENDING / REGISTERED / FAILING + last error; the future readiness indicator (D15)
+│   ├── RestateAdminClient.kt           Spring RestClient wrapper: listDeployments(), deployment(id), register(uri, force, dryRun);
+│   │                                   failures → RestateAdminException; plus its response types (D54)
+│   └── RestateConfig.kt                @Configuration: ingress Client bean; the keyed client factories FeeWorkflowClients and
+│                                       TransactionFeeRecordClients (fun interface forKey(key) → generated IngressClient, D52), because
+│                                       generated clients are created per key and FeeService must be testable with mocks
 │
 └── wallet/
-    ├── WalletGateway                   interface charge(idempotencyKey, amount, asset): ChargeReceipt
-    ├── ChargeDeclinedException         business failure; rethrown as TerminalException inside the CHARGE ctx.run → FeeOutcome.Failed
-    ├── FakeWalletGateway               @Component, in-memory, idempotent by key, chargeCount(key); waits wallet.fake.delay first (demo, D24); logs each wait and charge (D74)
-    ├── FakeWalletProperties            @ConfigurationProperties("wallet.fake"): delay (D24, D46)
-    └── ChargeReceipt                   data class
+    ├── WalletGateway.kt                interface charge(idempotencyKey, amount, asset): ChargeReceipt + ChargeReceipt (data class) +
+    │                                   ChargeDeclinedException (business failure; rethrown as TerminalException inside the CHARGE ctx.run
+    │                                   → FeeOutcome.Failed)
+    └── FakeWalletGateway.kt            @Component, in-memory, idempotent by key, chargeCount(key); waits wallet.fake.delay first (demo, D24); logs each wait and charge (D74)
 ```
 
 ### Wiring: Spring builds, Restate invokes
@@ -240,13 +258,13 @@ Rules:
 
 | To add… | Do this |
 |---------|---------|
-| a validation rule | a `@Component @Order(ValidationOrder.X)` `TransactionValidator` + a unit test (it runs in the workflow automatically) |
-| a transaction type | an enum value + a `@Component` `FeeRule` + its `*FeeProperties` + a `fee.<type>` section in `application.yml` + a unit test + a BDD outline row |
-| a fee formula | a new building block implementing `FeeRule` |
+| a validation rule | a `@Component @Order(ValidationOrder.X)` `TransactionValidator` in `validation.rule` + a unit test (it runs in the workflow automatically) |
+| a transaction type | an enum value + a `@Component` `FeeRule` in `fee.rule` + its `*FeeProperties` class in `config/FeeProperties.kt` + a `fee.<type>` section in `application.yml` + a unit test + a BDD outline row |
+| a fee formula | a new building block implementing `FeeRule` in `fee.formula` |
 | an asset | an enum value in `Asset` (with its decimals) |
 | a workflow step | a `WorkflowStep` value + a step in `FeeWorkflow` wrapped with `StepHook` (recovery tests then cover it) |
 | a real wallet | a `WalletGateway` implementation that replaces the fake |
-| a tunable value | a field in the matching `@ConfigurationProperties` class + its default in `application.yml` (+ a `${ENV_VAR:…}` placeholder for an operational setting) |
+| a tunable value | a field in the matching `@ConfigurationProperties` class in `config` (a new top-level section gets its own file there) + its default in `application.yml` (+ a `${ENV_VAR:…}` placeholder for an operational setting) |
 
 ---
 

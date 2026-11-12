@@ -2,6 +2,9 @@
 
 package com.example.fee.restate
 
+import com.example.fee.config.RestateProperties
+import com.example.fee.record.TransactionFeeRecordClient
+import com.example.fee.workflow.FeeWorkflowClient
 import dev.restate.client.Client
 import dev.restate.serde.jackson.JacksonSerdeFactory
 import org.springframework.context.annotation.Bean
@@ -30,4 +33,24 @@ class RestateConfig {
     @Bean
     fun transactionFeeRecordClients(restateIngressClient: Client): TransactionFeeRecordClients =
         TransactionFeeRecordClients { transactionId -> TransactionFeeRecordClient.fromClient(restateIngressClient, transactionId) }
+}
+
+/**
+ * Creates the generated ingress client of `FeeWorkflow` for one workflow key. Generated clients are bound to a key, so
+ * `FeeService` gets this factory instead of a client, and tests replace it with a mock.
+ */
+fun interface FeeWorkflowClients {
+
+    /** The ingress client of the workflow `FeeWorkflow/{workflowKey}`. */
+    fun forKey(workflowKey: String): FeeWorkflowClient.IngressClient
+}
+
+/**
+ * Creates the generated ingress client of `TransactionFeeRecord` for one `transaction_id`. Generated clients are bound
+ * to a key, so `FeeService` gets this factory instead of a client, and tests replace it with a mock.
+ */
+fun interface TransactionFeeRecordClients {
+
+    /** The ingress client of the virtual object `TransactionFeeRecord/{transactionId}`. */
+    fun forKey(transactionId: String): TransactionFeeRecordClient.IngressClient
 }

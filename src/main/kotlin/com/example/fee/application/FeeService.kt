@@ -2,16 +2,17 @@
 
 package com.example.fee.application
 
+import com.example.fee.config.RestateProperties
 import com.example.fee.contract.FeeRequest
+import com.example.fee.contract.FeeResponse
 import com.example.fee.contract.FeeStatusResponse
-import com.example.fee.restate.FeeOutcome
-import com.example.fee.restate.FeeRecord
-import com.example.fee.restate.FeeRecordStatus
+import com.example.fee.record.FeeRecord
+import com.example.fee.record.FeeRecordStatus
 import com.example.fee.restate.FeeWorkflowClients
-import com.example.fee.restate.FeeWorkflowInput
-import com.example.fee.restate.RestateProperties
 import com.example.fee.restate.TransactionFeeRecordClients
-import com.example.fee.validation.TransactionIdValidator
+import com.example.fee.validation.rule.TransactionIdValidator
+import com.example.fee.workflow.FeeOutcome
+import com.example.fee.workflow.FeeWorkflowInput
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
 import java.util.concurrent.CompletableFuture
@@ -123,4 +124,20 @@ class FeeService(
     private companion object {
         private val log = LoggerFactory.getLogger(FeeService::class.java)
     }
+}
+
+/**
+ * What `FeeService` returns for an accepted `POST /transaction/fee`; every other result is a [FeeException].
+ * HTTP only, never stored.
+ */
+sealed interface FeeSubmission {
+
+    /** The fee was charged, now or by an earlier run for the same payload: 200 with [response]. */
+    data class Completed(val response: FeeResponse) : FeeSubmission
+
+    /**
+     * The workflow is still running after `restate.attach-timeout`: 202 with `Location: /transaction/fee/{transactionId}`,
+     * where the caller polls the status. Resubmitting the same payload attaches to the same run, so it charges once.
+     */
+    data class Processing(val transactionId: String) : FeeSubmission
 }

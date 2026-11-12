@@ -1,15 +1,15 @@
 package com.example.fee.validation
 
+import com.example.fee.config.BankTransferFeeProperties
+import com.example.fee.config.CashWithdrawalFeeProperties
+import com.example.fee.config.MerchantPaymentFeeProperties
+import com.example.fee.config.MobileTopUpFeeProperties
 import com.example.fee.contract.FeeRequest
-import com.example.fee.fee.BankTransferFeeProperties
-import com.example.fee.fee.BankTransferFeeRule
-import com.example.fee.fee.CashWithdrawalFeeProperties
-import com.example.fee.fee.CashWithdrawalFeeRule
 import com.example.fee.fee.FeeCalculator
-import com.example.fee.fee.MerchantPaymentFeeProperties
-import com.example.fee.fee.MerchantPaymentFeeRule
-import com.example.fee.fee.MobileTopUpFeeProperties
-import com.example.fee.fee.MobileTopUpFeeRule
+import com.example.fee.fee.rule.BankTransferFeeRule
+import com.example.fee.fee.rule.CashWithdrawalFeeRule
+import com.example.fee.fee.rule.MerchantPaymentFeeRule
+import com.example.fee.fee.rule.MobileTopUpFeeRule
 import java.math.BigDecimal
 
 /** The reference request of the challenge: passes every check. */

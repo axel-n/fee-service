@@ -22,49 +22,9 @@ class TestCoverageAuditTest {
     private data class CoveredElsewhere(val symbol: String, val tests: List<String>, val reason: String)
 
     // Keyed by the production file's path below src/main/kotlin/com/example/fee. Each listed test must exist and name
-    // the symbol, so an entry can't silently outlive the test it points to.
-    private val coveredElsewhere = mapOf(
-        "domain/Transaction.kt" to CoveredElsewhere(
-            symbol = "Transaction",
-            tests = listOf("domain/TransactionMapperTest.kt"),
-            reason = "a data class without logic; the mapper test asserts every field it holds",
-        ),
-        "restate/FeeWorkflowClients.kt" to CoveredElsewhere(
-            symbol = "FeeWorkflowClients",
-            tests = listOf("restate/RestateConfigTest.kt", "application/FeeServiceTest.kt"),
-            reason = "a fun interface; RestateConfig's factory bean is tested for service, key and handler",
-        ),
-        "restate/TransactionFeeRecordClients.kt" to CoveredElsewhere(
-            symbol = "TransactionFeeRecordClients",
-            tests = listOf("restate/RestateConfigTest.kt", "application/FeeServiceTest.kt"),
-            reason = "a fun interface; RestateConfig's factory bean is tested for service, key and handler",
-        ),
-        "restate/RestateAdminTypes.kt" to CoveredElsewhere(
-            symbol = "ServiceDescription",
-            tests = listOf("restate/RestateAdminClientTest.kt", "restate/RestateRegistrarTest.kt"),
-            reason = "response types only; the client test reads Restate 1.8.1's real JSON, extra fields included",
-        ),
-        "fee/FeeRule.kt" to CoveredElsewhere(
-            symbol = "FeeRule",
-            tests = listOf("fee/FeeCalculatorTest.kt"),
-            reason = "an extension-point interface; every implementation has its own test",
-        ),
-        "restate/StepHook.kt" to CoveredElsewhere(
-            symbol = "StepHook",
-            tests = listOf("restate/FeeWorkflowTest.kt", "restate/NoOpStepHookTest.kt"),
-            reason = "an interface; the workflow test checks the calls around every step, CrashRecoveryIT the crashes",
-        ),
-        "validation/TransactionValidator.kt" to CoveredElsewhere(
-            symbol = "TransactionValidator",
-            tests = listOf("validation/RequestValidatorTest.kt"),
-            reason = "an extension-point interface; every implementation has its own test",
-        ),
-        "wallet/WalletGateway.kt" to CoveredElsewhere(
-            symbol = "WalletGateway",
-            tests = listOf("restate/FeeWorkflowTest.kt"),
-            reason = "an interface; FakeWalletGatewayTest tests the implementation, the ITs a programmable one",
-        ),
-    )
+    // the symbol, so an entry can't silently outlive the test it points to. Empty since D75: an interface or a type
+    // without logic shares the file (and so the test file) of the type it serves.
+    private val coveredElsewhere = emptyMap<String, CoveredElsewhere>()
 
     private val baseDir: Path = Path.of(System.getProperty("basedir") ?: ".")
     private val mainRoot = baseDir.resolve("src/main/kotlin/com/example/fee")

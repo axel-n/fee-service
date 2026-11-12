@@ -88,15 +88,21 @@ reachable, the app still starts, logs a WARN and keeps retrying in the backgroun
 ## Architecture
 
 ```
-api/          TransactionFeeController, ApiExceptionHandler      HTTP only, errors as RFC 7807 ProblemDetail
-application/  FeeService, WorkflowKey, PayloadHash, FeeException thin gateway: key → submit/attach → HTTP result
-restate/      FeeWorkflow, TransactionFeeRecord, ClaimDecider,   the workflow, the record, endpoint lifecycle,
-              RestateEndpointLifecycle, RestateRegistrar, …      self-registration, configuration
-validation/   TransactionValidator beans, ordered by @Order      run inside the workflow (VALIDATE)
-fee/          FeeRule beans built from building blocks           run inside the workflow (CALCULATE)
-domain/       Transaction, enums, TransactionMapper              pure Kotlin
-contract/     FeeRequest, FeeResponse, FeeStatusResponse         the JSON shared by HTTP and Restate
-wallet/       WalletGateway, FakeWalletGateway                   the charge (an in-memory fake)
+config/            RestateProperties, FeeProperties, FakeWalletProperties   every @ConfigurationProperties class: one file per
+                                                                            top-level section of application.yml
+api/               TransactionFeeController, ApiExceptionHandler            HTTP only, errors as RFC 7807 ProblemDetail
+application/       FeeService, WorkflowKey, FeeException                    thin gateway: key → submit/attach → HTTP result
+workflow/          FeeWorkflow, its durable types, StepHook                 the Restate workflow: every business step
+record/            TransactionFeeRecord, FeeRecord, ClaimDecider            the Restate virtual object: one fee per transaction_id
+restate/           RestateEndpointLifecycle, RestateRegistrar, …            Restate plumbing: endpoint, self-registration, clients
+validation/        TransactionValidator, RequestValidator, ValidationError  run inside the workflow (VALIDATE)
+validation/rule/   one TransactionValidator bean per check, by @Order
+fee/               FeeRule, FeeCalculator                                   run inside the workflow (CALCULATE)
+fee/formula/       PercentageFee, FlatFee, …                                the building blocks
+fee/rule/          one FeeRule bean per transaction type
+domain/            Transaction and its enums, TransactionMapper             pure Kotlin
+contract/          FeeRequest, FeeResponse, FeeStatusResponse               the JSON shared by HTTP and Restate
+wallet/            WalletGateway, FakeWalletGateway                         the charge (an in-memory fake)
 ```
 
 The controller calls only `FeeService`, `FeeService` holds no business logic, and every business step runs inside
