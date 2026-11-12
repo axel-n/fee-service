@@ -33,7 +33,7 @@ class ClaimDecider {
 
 /**
  * What a claim on `TransactionFeeRecord` decided, as [ClaimDecider] computes it. Returned by the `claim` handler and
- * journaled in the workflow, so it is durable (D35): the type ids are the explicit `@JsonSubTypes` names, never class
+ * journaled in the workflow, so it is durable: the type ids are the explicit `@JsonSubTypes` names, never class
  * names, and renaming one breaks in-flight workflows. Compare the field-less results with `==`, `is` or `when`.
  */
 @JsonTypeInfo(use = JsonTypeInfo.Id.NAME, property = "@type")

@@ -1,4 +1,4 @@
-@file:Suppress("DEPRECATION") // the generated clients of the ctx-based codegen API of SDK 2.9.3 (D29)
+@file:Suppress("DEPRECATION") // the generated clients of the ctx-based codegen API of SDK 2.9.3
 
 package com.example.fee.it
 
@@ -21,9 +21,9 @@ import java.math.BigDecimal
 import java.util.UUID
 
 /**
- * The same payload after Restate forgot the first run (workflow retention, 1 day on 1.8.1, D30). The workflow key no
+ * The same payload after Restate forgot the first run (workflow retention, 1 day on 1.8.1). The workflow key no
  * longer finds the old run, so a new workflow starts, and the permanent record stops it at CLAIM: `AlreadyCompleted` →
- * the stored response, no second charge (D47, D50).
+ * the stored response, no second charge.
  *
  * Waiting a day is not an option, so the tests reach CLAIM the two ways a forgotten run does: a new workflow key for the
  * charged payload, and the old run purged through the admin API, then the same payload sent through the app again.
@@ -118,7 +118,7 @@ class RetentionExpiredIT @Autowired constructor(
         return record
     }
 
-    // Resubmitting a known key is PREVIOUSLY_ACCEPTED with the run's id, its input ignored (D30), so this starts nothing
+    // Resubmitting a known key is PREVIOUSLY_ACCEPTED with the run's id, its input ignored, so this starts nothing
     private fun invocationIdOf(request: FeeRequest): String {
         val sent = FeeWorkflowClient.fromClient(TestIngress.client, StoredWorkflows.keyOf(request))
             .submit(FeeWorkflowInput(request, payloadHashOf(request)))

@@ -10,7 +10,7 @@ import org.springframework.core.annotation.Order
 import org.springframework.stereotype.Component
 
 /**
- * `state` must be a supported [TransactionState]: only `SETTLED - PENDING FEE` is processed (D12) (422).
+ * `state` must be a supported [TransactionState]: only `SETTLED - PENDING FEE` is processed (422).
  * Relies on [RequiredFieldsValidator] for presence.
  */
 @Component

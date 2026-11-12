@@ -1,8 +1,7 @@
-@file:Suppress("DEPRECATION") // the ctx-based codegen API of SDK 2.9.3 (D29)
+@file:Suppress("DEPRECATION") // the ctx-based codegen API of SDK 2.9.3
 
 package com.example.fee.workflow
 
-import com.example.fee.config.FakeWalletProperties
 import com.example.fee.contract.FeeRequest
 import com.example.fee.contract.FeeResponse
 import com.example.fee.domain.Asset
@@ -38,7 +37,6 @@ import org.mockito.Mockito.doAnswer
 import org.mockito.Mockito.doThrow
 import org.mockito.Mockito.mock
 import java.math.BigDecimal
-import java.time.Duration
 import java.util.Optional
 
 /**
@@ -47,7 +45,7 @@ import java.util.Optional
  */
 class FeeWorkflowTest {
 
-    private val wallet = FakeWalletGateway(FakeWalletProperties(Duration.ZERO))
+    private val wallet = FakeWalletGateway()
     private val hook = RecordingStepHook()
 
     private val expectedResponse = FeeResponse(

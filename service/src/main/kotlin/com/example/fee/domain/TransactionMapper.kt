@@ -7,8 +7,8 @@ import org.springframework.stereotype.Component
  * Turns a validated [FeeRequest] into a [Transaction] (the workflow's MAP step). Pure and deterministic, so it runs
  * outside `ctx.run` and simply runs again on replay.
  *
- * Never throws (D10). It runs only after validation passed, so every field is present and parseable; should that ever
- * not hold, it returns `null` instead of inventing a value (D39).
+ * Never throws. It runs only after validation passed, so every field is present and parseable; should that ever
+ * not hold, it returns `null` instead of inventing a value.
  */
 @Component
 class TransactionMapper {

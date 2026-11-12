@@ -10,8 +10,8 @@ import java.net.http.HttpResponse
 import java.time.Duration
 
 /**
- * What the ITs read from Restate's admin API (1.8.1, D31) to check what the app did, independent of the app's own
- * `RestateAdminClient`.
+ * The ITs' calls to Restate's admin API (1.8.1): registering the endpoint, the way the README tells an operator to,
+ * and reading or purging what the app did. The app itself never calls the admin API.
  */
 class RestateAdminApi(private val adminUrl: String, private val timeout: Duration = Duration.ofSeconds(10)) {
 
@@ -21,6 +21,19 @@ class RestateAdminApi(private val adminUrl: String, private val timeout: Duratio
     /** A deployment as `GET /deployments` lists it. */
     data class Deployment(val id: String, val uri: String?, val services: Map<String, Int>)
 
+    /**
+     * `POST /deployments` with `force`: Restate discovers the services at [uri] and registers them, or updates a known
+     * deployment in place when they changed. The endpoint must be listening.
+     */
+    fun register(uri: String) {
+        val body = mapper.writeValueAsString(mapOf("uri" to uri, "force" to true))
+        send(
+            HttpRequest.newBuilder(URI("$adminUrl/deployments"))
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(body)),
+        )
+    }
+
     fun deployments(): List<Deployment> =
         get("/deployments")["deployments"].map { deployment ->
             Deployment(
@@ -29,22 +42,6 @@ class RestateAdminApi(private val adminUrl: String, private val timeout: Duratio
                 services = deployment["services"].associate { it["name"].asText() to it["revision"].asInt() },
             )
         }
-
-    /** The deployments registered for [uri]; Restate stores URIs with a trailing slash (D31). */
-    fun deploymentsFor(uri: String): List<Deployment> =
-        deployments().filter { it.uri?.trimEnd('/') == uri.trimEnd('/') }
-
-    /** The names of the services Restate knows, with the id of the deployment that serves each. */
-    fun services(): Map<String, String> =
-        get("/services")["services"].associate { it["name"].asText() to it["deployment_id"].asText() }
-
-    /** Removes the deployments of [uri], so Restate no longer knows the endpoint, as if it were fresh (D31: needs force). */
-    fun deleteDeploymentsFor(uri: String) {
-        deploymentsFor(uri).forEach { deployment ->
-            val id = URLEncoder.encode(deployment.id, Charsets.UTF_8)
-            send(HttpRequest.newBuilder(URI("$adminUrl/deployments/$id?force=true")).DELETE())
-        }
-    }
 
     /**
      * Purges a completed invocation: its journal, output and, for a workflow, its state and key, as if retention had

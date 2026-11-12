@@ -29,6 +29,6 @@ class TestClock : Clock() {
 
     override fun getZone(): ZoneId = ZoneOffset.UTC
 
-    // A zone change would only shift the reading of instant(), which the validator does in UTC itself (D26)
+    // A zone change would only shift the reading of instant(), which the validator does in UTC itself
     override fun withZone(zone: ZoneId): Clock = this
 }

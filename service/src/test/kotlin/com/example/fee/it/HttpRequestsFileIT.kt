@@ -19,7 +19,7 @@ import java.util.UUID
 
 /**
  * Runs `http/requests.http` top to bottom against the app under test and checks each `# Expect:` line, so the examples
- * stay true (task 9.2). `host` points at the test app and `run` is fresh, so the file's ids are this run's alone.
+ * stay true. `host` points at the test app and `run` is fresh, so the file's ids are this run's alone.
  * Afterwards every charged transaction was charged once, by one CHARGE closure, duplicate and conflict included.
  */
 class HttpRequestsFileIT @Autowired constructor(

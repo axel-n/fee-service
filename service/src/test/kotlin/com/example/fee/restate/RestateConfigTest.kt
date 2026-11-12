@@ -1,4 +1,4 @@
-@file:Suppress("DEPRECATION") // the ctx-based codegen API of SDK 2.9.3 (D29)
+@file:Suppress("DEPRECATION") // the ctx-based codegen API of SDK 2.9.3
 
 package com.example.fee.restate
 
@@ -24,11 +24,8 @@ class RestateConfigTest {
 
     private fun properties(ingressUrl: String) = RestateProperties(
         ingressUrl = ingressUrl,
-        adminUrl = "http://localhost:9070",
         endpointPort = 9080,
-        advertisedUrl = "http://localhost:9080",
         attachTimeout = Duration.ofSeconds(10),
-        registration = RestateProperties.Registration(true, 10, Duration.ofSeconds(2)),
     )
 
     private fun sentRequest(client: Client): Request<*, *> {

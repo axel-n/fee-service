@@ -11,7 +11,7 @@ import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 
 /**
- * The shape of `http/requests.http` (task 9.2) and of its parser, without the app. [HttpRequestsFileIT] runs the file.
+ * The shape of `http/requests.http` and of its parser, without the app. [HttpRequestsFileIT] runs the file.
  */
 class HttpRequestsFileTest {
 

@@ -6,8 +6,8 @@ package com.example.fee.contract.error
  * [FeeProblem] and gets the exception back with [FeeProblem.toException].
  *
  * In the service, `FeeService` throws these at the gateway, built from the workflow's `FeeOutcome` or from a Restate
- * call that failed; the workflow itself never throws them (D9). No Spring here: [status] is the plain HTTP status code,
- * so a consumer needs nothing but this module (D76).
+ * call that failed; the workflow itself never throws them. No Spring here: [status] is the plain HTTP status code,
+ * so a consumer needs nothing but this module.
  *
  * Not durable (they never cross Restate's serde), but published: other services compile against them, so renaming a
  * class or a [FeeErrorCode] breaks those clients.
@@ -43,7 +43,7 @@ enum class FeeErrorCode(val status: Int) {
 }
 
 /**
- * The request was rejected by validation (D11): [Kind.INVALID] is a malformed request (400), [Kind.UNSUPPORTED] one the
+ * The request was rejected by validation: [Kind.INVALID] is a malformed request (400), [Kind.UNSUPPORTED] one the
  * service doesn't support (422). It names the request [field], the rejected [value] as sent (`null` when the field is
  * missing), and a readable message that lists the allowed values.
  */
@@ -62,14 +62,14 @@ class ValidationException(
     }
 }
 
-/** [transactionId] is claimed by another payload, either already charged or still in progress (D8, D47): 409. */
+/** [transactionId] is claimed by another payload, either already charged or still in progress: 409. */
 class DuplicateTransactionException(val transactionId: String) : FeeException(
     "Transaction '$transactionId' was already charged or is being processed with a different payload",
 ) {
     override val code: FeeErrorCode get() = FeeErrorCode.DUPLICATE_TRANSACTION
 }
 
-/** The wallet declined the charge for [transactionId] with [reason]; the id may be retried (D47, D51): 422. */
+/** The wallet declined the charge for [transactionId] with [reason]; the id may be retried: 422. */
 class ChargeFailedException(val transactionId: String, val reason: String) : FeeException(
     "The fee for transaction '$transactionId' could not be charged: $reason",
 ) {
@@ -78,7 +78,7 @@ class ChargeFailedException(val transactionId: String, val reason: String) : Fee
 
 /**
  * `GET /transaction/fee/{id}` found no fee record for [transactionId]: it was never submitted, was rejected by
- * validation, or its run hasn't reached CLAIM yet (D59): 404.
+ * validation, or its run hasn't reached CLAIM yet: 404.
  */
 class TransactionNotFoundException(val transactionId: String) : FeeException(
     "No fee record for transaction '$transactionId'",

@@ -61,7 +61,5 @@ POST /transaction/fee
 - **Kotlin:** Use Kotlin for the implementation of services.
 - **Restate:** Use Restate for workflow creation and execution.
 - **Documentation:** Include a comprehensive Readme explaining architecture, setup, and execution.
-- **Testing:** Have unit tests included (bonus points for using BDDs that describe the test cases in the form of
-  scenarios and features).
-- **Extensibility (Optional):** Introduce additional transaction types and implement appropriate fees for them if time
-  permits.
+- **Testing:** Have unit tests included (bonus points for using BDDs that describe the test cases in the form of scenarios and features).
+- **Extensibility (Optional):** Introduce additional transaction types and implement appropriate fees for them if time permits.

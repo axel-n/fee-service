@@ -6,7 +6,7 @@ import java.util.concurrent.locks.LockSupport
 
 /**
  * Bounded polling: checks [condition] every [interval] until it holds, and fails naming [description] after [timeout].
- * For state the test can only observe from outside (a registration status, the admin API, a log line), never a fixed wait.
+ * For state the test can only observe from outside (the admin API, a stored record, a log line), never a fixed wait.
  */
 fun awaitUntil(
     description: String,

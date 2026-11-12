@@ -1,4 +1,4 @@
-@file:Suppress("DEPRECATION") // the generated client of the ctx-based codegen API of SDK 2.9.3 (D29)
+@file:Suppress("DEPRECATION") // the generated client of the ctx-based codegen API of SDK 2.9.3
 
 package com.example.fee.it
 

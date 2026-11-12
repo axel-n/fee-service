@@ -12,7 +12,7 @@ import kotlin.io.path.readText
 import kotlin.io.path.relativeTo
 
 /**
- * Enforces AGENTS.md's "every production class gets a test" (task 7.13) in every module (D76). A production file `X.kt`
+ * Enforces AGENTS.md's "every production class gets a test" in every module. A production file `X.kt`
  * needs `XTest.kt` in the same package of the same module, or an `XIT.kt`, or an entry in [coveredElsewhere] naming the
  * tests that exercise it and why it has no test of its own. Reads the source trees from the project root
  * ([ProjectLayout]).
@@ -22,8 +22,8 @@ class TestCoverageAuditTest {
     private data class CoveredElsewhere(val symbol: String, val tests: List<String>, val reason: String)
 
     // Keyed by "<module>/<path below src/main/kotlin/com/example/fee>", tests by the same form below src/test. Each
-    // listed test must exist and name the symbol, so an entry can't silently outlive the test it points to. Empty since
-    // D75: an interface or a type without logic shares the file (and so the test file) of the type it serves.
+    // listed test must exist and name the symbol, so an entry can't silently outlive the test it points to. Empty, because
+    // an interface or a type without logic shares the file (and so the test file) of the type it serves.
     private val coveredElsewhere = emptyMap<String, CoveredElsewhere>()
 
     private val modules = listOf("api", "service")

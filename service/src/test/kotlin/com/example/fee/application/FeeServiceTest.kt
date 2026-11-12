@@ -1,4 +1,4 @@
-@file:Suppress("DEPRECATION") // the ctx-based codegen API of SDK 2.9.3 (D29)
+@file:Suppress("DEPRECATION") // the ctx-based codegen API of SDK 2.9.3
 
 package com.example.fee.application
 
@@ -85,11 +85,8 @@ class FeeServiceTest {
         recordClients,
         RestateProperties(
             ingressUrl = "http://localhost:8080",
-            adminUrl = "http://localhost:9070",
             endpointPort = 9080,
-            advertisedUrl = "http://localhost:9080",
             attachTimeout = attachTimeout,
-            registration = RestateProperties.Registration(true, 10, Duration.ofSeconds(2)),
         ),
     )
 

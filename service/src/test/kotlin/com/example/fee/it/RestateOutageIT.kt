@@ -17,8 +17,8 @@ import java.util.concurrent.CompletableFuture
 import java.util.concurrent.TimeUnit
 
 /**
- * Restate goes away and comes back. The outage is a frozen Restate container (SIGSTOP, D27): connections are accepted,
- * nothing answers. A request that Restate never acknowledged gets a 503 and can be sent again safely (D58); a workflow
+ * Restate goes away and comes back. The outage is a frozen Restate container (SIGSTOP): connections are accepted,
+ * nothing answers. A request that Restate never acknowledged gets a 503 and can be sent again safely; a workflow
  * that was already running when Restate froze completes once it thaws, with one charge.
  */
 class RestateOutageIT @Autowired constructor(
@@ -58,7 +58,7 @@ class RestateOutageIT @Autowired constructor(
         restate.thaw()
         val resubmitted = api.submit(bodyOf(request))
 
-        // then: the resubmission is charged; a submit Restate read only after the thaw is the same workflow (D8)
+        // then: the resubmission is charged; a submit Restate read only after the thaw is the same workflow
         assertThat(resubmitted.status).describedAs("resubmission status, body %s", resubmitted.body).isEqualTo(200)
         assertThat(resubmitted.body["transaction_id"].asText()).isEqualTo(transactionId)
         assertThat(resubmitted.body["fee"].decimalValue()).isEqualByComparingTo(BigDecimal("1.50"))

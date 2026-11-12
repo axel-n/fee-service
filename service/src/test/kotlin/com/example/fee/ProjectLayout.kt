@@ -4,8 +4,8 @@ import java.nio.file.Path
 
 /**
  * Where the tests find the project's files. Surefire and Failsafe run them in the service module's directory (their
- * `basedir`, also an IDE's default); the files shared by the whole project (`http/`, `demo/`) and the api module sit
- * in the root above it (D76).
+ * `basedir`, also an IDE's default); the files shared by the whole project (`http/`) and the api module sit
+ * in the root above it.
  */
 object ProjectLayout {
 

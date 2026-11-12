@@ -18,8 +18,8 @@ import java.util.concurrent.TimeUnit
 
 /**
  * Duplicates end to end. The same payload is the same workflow key, so Restate runs it once and every caller attaches to
- * that run (D8, D30). A different payload for the same `transaction_id` is a new workflow, and the CLAIM on
- * `TransactionFeeRecord/{transaction_id}` stops it: `Conflict` → 409 (D47). Idempotency is asserted by charge count.
+ * that run. A different payload for the same `transaction_id` is a new workflow, and the CLAIM on
+ * `TransactionFeeRecord/{transaction_id}` stops it: `Conflict` → 409. Idempotency is asserted by charge count.
  */
 class DuplicatesIT @Autowired constructor(
     private val wallet: TestWalletGateway,

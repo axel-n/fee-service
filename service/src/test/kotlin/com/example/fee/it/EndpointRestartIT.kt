@@ -17,7 +17,7 @@ import java.util.concurrent.CompletableFuture
 import java.util.concurrent.TimeUnit
 
 /**
- * The endpoint stops while a workflow is inside its CHARGE `ctx.run` and starts again on the same port (D16, D32). The
+ * The endpoint stops while a workflow is inside its CHARGE `ctx.run` and starts again on the same port. The
  * step was not journaled, so Restate retries the invocation on the restarted endpoint and the closure runs again, while
  * the call from before the stop is still waiting in the wallet. Once released, both calls finish, the wallet's idempotency
  * key keeps it to one charge, and the workflow completes.

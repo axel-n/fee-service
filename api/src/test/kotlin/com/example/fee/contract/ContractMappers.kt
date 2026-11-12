@@ -7,7 +7,7 @@ import dev.restate.serde.jackson.JacksonSerdeFactory
 import org.springframework.http.converter.json.Jackson2ObjectMapperBuilder
 
 /**
- * The two mappers the contract meets: Spring's for HTTP and Restate's own for the journal and state (D35).
+ * The two mappers the contract meets: Spring's for HTTP and Restate's own for the journal and state.
  * Parameterized tests run against both, so a field name or number format that only one of them honours fails.
  */
 enum class ContractMapper {

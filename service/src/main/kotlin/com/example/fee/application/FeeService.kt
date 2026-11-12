@@ -1,4 +1,4 @@
-@file:Suppress("DEPRECATION") // the ctx-based codegen API of SDK 2.9.3, kept on purpose (D29)
+@file:Suppress("DEPRECATION") // the ctx-based codegen API of SDK 2.9.3, kept on purpose
 
 package com.example.fee.application
 
@@ -27,17 +27,17 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
 
 /**
- * The thin gateway between the API and `FeeWorkflow` (D7): it checks the `transaction_id` it needs for the key, builds
+ * The thin gateway between the API and `FeeWorkflow`: it checks the `transaction_id` it needs for the key, builds
  * the [WorkflowKey], submits the workflow and attaches to it, and maps the [FeeOutcome] to a `COMPLETED`
- * [FeeStatusResponse] or a [FeeException] (D77). Every business decision is made inside the workflow.
+ * [FeeStatusResponse] or a [FeeException]. Every business decision is made inside the workflow.
  *
  * It always submits, then attaches: a resubmitted payload gets `PREVIOUSLY_ACCEPTED`, its input is ignored, and the
- * attach returns the first run's result, so the same payload is charged once (D8, D30). Submit and attach together wait
+ * attach returns the first run's result, so the same payload is charged once. Submit and attach together wait
  * at most `restate.attach-timeout`. A run still going by then is a [FeeInProgressException]; a submit Restate didn't
  * acknowledge by then, or a Restate call that failed, is a [WorkflowUnavailableException], because resending the same
- * payload is safe (D58).
+ * payload is safe.
  *
- * [status] reads the permanent fee record of a `transaction_id` for `GET /transaction/fee/{id}` (D59).
+ * [status] reads the permanent fee record of a `transaction_id` for `GET /transaction/fee/{id}`.
  */
 @Service
 class FeeService(
@@ -107,7 +107,7 @@ class FeeService(
         is FeeOutcome.Failed -> throw ChargeFailedException(transactionId, outcome.reason)
     }
 
-    // FeeRecord guarantees the response exactly when COMPLETED and the reason exactly when FAILED (D47).
+    // FeeRecord guarantees the response exactly when COMPLETED and the reason exactly when FAILED.
     private fun toStatus(transactionId: String, record: FeeRecord): FeeStatusResponse = when (record.status) {
         FeeRecordStatus.IN_PROGRESS -> FeeStatusResponse.inProgress(transactionId)
         FeeRecordStatus.COMPLETED -> FeeStatusResponse.completed(
@@ -119,7 +119,7 @@ class FeeService(
         )
     }
 
-    // ValidationError is the workflow's durable type, ValidationException the published contract (D76): same fields.
+    // ValidationError is the workflow's durable type, ValidationException the published contract: same fields.
     private fun rejected(error: ValidationError): ValidationException {
         val kind = when (error.kind) {
             ValidationError.Kind.INVALID -> ValidationException.Kind.INVALID
@@ -144,7 +144,7 @@ class FeeService(
 /**
  * Thrown by [FeeService.submit] when the workflow is still running after `restate.attach-timeout`. It isn't a failure, so
  * it isn't a [FeeException]: `ApiExceptionHandler` answers 202 with `Location: /transaction/fee/{transactionId}`, where
- * the caller polls the status, and the `IN_PROGRESS` status as body (D59, D77). Resubmitting the same payload attaches to
+ * the caller polls the status, and the `IN_PROGRESS` status as body. Resubmitting the same payload attaches to
  * the same run, so it charges once. HTTP only, never stored.
  */
 class FeeInProgressException(val transactionId: String) :

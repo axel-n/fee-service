@@ -8,7 +8,7 @@ import java.util.concurrent.atomic.AtomicInteger
 /**
  * The step hook of the shared IT app (it replaces `NoOpStepHook`, see [IntegrationTestBeans]). A test arms it for one
  * `transaction_id` with [crashOnce]; the first time that workflow reaches the armed boundary, the hook throws
- * [SimulatedCrash], a plain exception, so Restate retries the invocation from the top and replays the journal (D33).
+ * [SimulatedCrash], a plain exception, so Restate retries the invocation from the top and replays the journal.
  *
  * It also counts its calls, so a test can see that the handler ran again. Hook calls are not step executions: the hooks
  * run on every replay, the `ctx.run` closures only once. Unarmed, it does nothing, so other ITs are unaffected.

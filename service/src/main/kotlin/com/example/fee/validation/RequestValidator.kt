@@ -5,7 +5,7 @@ import org.springframework.core.annotation.AnnotationAwareOrderComparator
 import org.springframework.stereotype.Component
 
 /**
- * Runs every [TransactionValidator] in `@Order` order and stops at the first error (D11).
+ * Runs every [TransactionValidator] in `@Order` order and stops at the first error.
  *
  * Spring injects the list already sorted, but the list is sorted again here, so a hand-built list (unit tests, a
  * future caller) runs in the same order. Called inside the workflow's VALIDATE `ctx.run`.

@@ -22,7 +22,7 @@ import java.math.BigDecimal
 
 /**
  * Every type that crosses Restate's serde (handler input and output, `ctx.run` results, VO state), round-tripped through
- * the serde the generated code uses (D35), declared as the handlers declare it. Equality covers `BigDecimal` scale too.
+ * the serde the generated code uses, declared as the handlers declare it. Equality covers `BigDecimal` scale too.
  */
 class DurableTypesSerdeTest {
 

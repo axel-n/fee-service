@@ -4,9 +4,9 @@ import org.springframework.boot.context.properties.ConfigurationProperties
 import java.math.BigDecimal
 
 // Every @ConfigurationProperties class lives in this package, one file per top-level section of application.yml
-// (D75). This file is the `fee:` section: one class per transaction type, so a new type adds a class here (D23).
+//. This file is the `fee:` section: one class per transaction type, so a new type adds a class here.
 
-/** The numbers of `MobileTopUpFeeRule`, from `fee.mobile-top-up` (D23). A missing or invalid value fails startup. */
+/** The numbers of `MobileTopUpFeeRule`, from `fee.mobile-top-up`. A missing or invalid value fails startup. */
 @ConfigurationProperties(MobileTopUpFeeProperties.PREFIX)
 class MobileTopUpFeeProperties(rate: BigDecimal?) {
 
@@ -17,7 +17,7 @@ class MobileTopUpFeeProperties(rate: BigDecimal?) {
     }
 }
 
-/** The numbers of `BankTransferFeeRule`, from `fee.bank-transfer` (D23). A missing or invalid value fails startup. */
+/** The numbers of `BankTransferFeeRule`, from `fee.bank-transfer`. A missing or invalid value fails startup. */
 @ConfigurationProperties(BankTransferFeeProperties.PREFIX)
 class BankTransferFeeProperties(rate: BigDecimal?, min: BigDecimal?) {
 
@@ -31,7 +31,7 @@ class BankTransferFeeProperties(rate: BigDecimal?, min: BigDecimal?) {
     }
 }
 
-/** The numbers of `MerchantPaymentFeeRule`, from `fee.merchant-payment` (D23). A missing or invalid value fails startup. */
+/** The numbers of `MerchantPaymentFeeRule`, from `fee.merchant-payment`. A missing or invalid value fails startup. */
 @ConfigurationProperties(MerchantPaymentFeeProperties.PREFIX)
 class MerchantPaymentFeeProperties(rate: BigDecimal?, fixed: BigDecimal?) {
 
@@ -45,7 +45,7 @@ class MerchantPaymentFeeProperties(rate: BigDecimal?, fixed: BigDecimal?) {
     }
 }
 
-/** The numbers of `CashWithdrawalFeeRule`, from `fee.cash-withdrawal` (D23). A missing or invalid value fails startup. */
+/** The numbers of `CashWithdrawalFeeRule`, from `fee.cash-withdrawal`. A missing or invalid value fails startup. */
 @ConfigurationProperties(CashWithdrawalFeeProperties.PREFIX)
 class CashWithdrawalFeeProperties(fixed: BigDecimal?) {
 
@@ -57,7 +57,7 @@ class CashWithdrawalFeeProperties(fixed: BigDecimal?) {
     }
 }
 
-// The checks every *FeeProperties class above runs in init (D23): a missing or invalid fee number fails startup with a
+// The checks every *FeeProperties class above runs in init: a missing or invalid fee number fails startup with a
 // message that names the configuration key, without the Bean Validation starter.
 
 /** [value] of the configuration key [key] as a rate: present and in [0, 1). */

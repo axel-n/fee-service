@@ -11,8 +11,8 @@ import java.time.Clock
 class FeeServiceApplication {
 
     /**
-     * The only source of "now" (D20). UTC rather than the host's zone, so a `created_at` without a zone is judged
-     * the same way on every machine (D26).
+     * The only source of "now". UTC rather than the host's zone, so a `created_at` without a zone is judged
+     * the same way on every machine.
      */
     @Bean
     fun clock(): Clock = Clock.systemUTC()

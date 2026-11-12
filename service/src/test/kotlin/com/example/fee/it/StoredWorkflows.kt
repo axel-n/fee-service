@@ -1,4 +1,4 @@
-@file:Suppress("DEPRECATION") // the generated client of the ctx-based codegen API of SDK 2.9.3 (D29)
+@file:Suppress("DEPRECATION") // the generated client of the ctx-based codegen API of SDK 2.9.3
 
 package com.example.fee.it
 
@@ -11,7 +11,7 @@ import com.example.fee.workflow.WorkflowStep
 
 /**
  * Reads `FeeWorkflow` runs straight from the shared Restate's ingress, by the key the app derives from a request
- * (`{transaction_id}:{payloadHash}`, D8), so a test sees what the workflow itself returned.
+ * (`{transaction_id}:{payloadHash}`), so a test sees what the workflow itself returned.
  */
 object StoredWorkflows {
 
@@ -19,7 +19,7 @@ object StoredWorkflows {
     fun keyOf(request: FeeRequest): String =
         WorkflowKey.of(checkNotNull(request.transactionId), PayloadHash.of(request)).value
 
-    /** The step the workflow of [request] is at, `DONE` once it returned, `null` if it never started (D50). */
+    /** The step the workflow of [request] is at, `DONE` once it returned, `null` if it never started. */
     fun step(request: FeeRequest): WorkflowStep? = FeeWorkflowClient.fromClient(TestIngress.client, keyOf(request)).status()
 
     /** The outcome the workflow of [request] returned, or `null` while it has none yet. */

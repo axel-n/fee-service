@@ -1,39 +1,25 @@
-# The packaged defaults (D22): the only place they are written down. Override them with environment variables, a
+# The packaged defaults: the only place they are written down. Override them with environment variables, a
 # config/application.yml in the working directory, or command-line arguments (docs/design.md, "Configuration").
 # Renaming a key or a variable breaks existing override files and environments.
 
 spring:
   application:
     name: fee-service
-  # The HTTP client of RestateAdminClient (Spring Boot's RestClient.Builder, the only RestClient in the app). Without a read
-  # timeout a Restate that accepts connections but never answers would stall registration and its retries (D54).
-  http:
-    client:
-      connect-timeout: 5s
-      read-timeout: 30s
 
 server:
   port: 8081
 
 # Explicit placeholders: Spring's automatic mapping would expect RESTATE_INGRESSURL (dashes dropped).
+# The endpoint is registered with Restate once, outside the app (README, "Run").
 restate:
   # Restate ingress, used by FeeService to submit and attach to workflows
   ingress-url: ${RESTATE_INGRESS_URL:http://localhost:8080}
-  # Restate admin API, used by RestateRegistrar
-  admin-url: ${RESTATE_ADMIN_URL:http://localhost:9070}
-  # Port the Restate endpoint listens on; keep it consistent with the port in advertised-url
+  # Port the Restate endpoint listens on; Restate calls the workflow here, at the URL it was registered with
   endpoint-port: ${RESTATE_ENDPOINT_PORT:9080}
-  # The endpoint's URL as Restate reaches it, sent at registration. A new value registers a new deployment (open question 4)
-  advertised-url: ${RESTATE_ADVERTISED_URL:http://host.docker.internal:9080}
   # How long POST /transaction/fee waits for the workflow's result before answering 202
   attach-timeout: ${RESTATE_ATTACH_TIMEOUT:10s}
-  # Self-registration on startup (D15): the switch, the attempts before the WARN, and the wait between attempts
-  registration:
-    enabled: ${RESTATE_REGISTRATION_ENABLED:true}
-    max-attempts: ${RESTATE_REGISTRATION_MAX_ATTEMPTS:10}
-    backoff: ${RESTATE_REGISTRATION_BACKOFF:2s}
 
-# Fee numbers per transaction type (D23), read by the *FeeProperties classes; descriptions are built from them.
+# Fee numbers per transaction type, read by the *FeeProperties classes; descriptions are built from them.
 # Rates are fractions in [0, 1); min and fixed are amounts in the transaction's asset (USD or EUR, same numbers).
 # Quoted, so they reach BigDecimal as strings. A missing or invalid value fails startup.
 fee:
@@ -47,9 +33,3 @@ fee:
     fixed: "0.30"
   cash-withdrawal:
     fixed: "2.00"
-
-# The in-memory demo wallet (D24): how long it waits before it records a charge. 0s; raise it only for the demo, to kill
-# the app in the middle of CHARGE and watch Restate resume it with one charge.
-wallet:
-  fake:
-    delay: ${WALLET_FAKE_DELAY:0s}

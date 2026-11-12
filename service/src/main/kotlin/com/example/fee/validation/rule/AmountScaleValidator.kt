@@ -11,7 +11,7 @@ import org.springframework.stereotype.Component
 import java.math.BigDecimal
 
 /**
- * `amount` must have no more decimals than its asset allows (422, D11): `10.001` USD is rejected. Trailing zeros don't
+ * `amount` must have no more decimals than its asset allows (422): `10.001` USD is rejected. Trailing zeros don't
  * count, so `10.100` USD passes: it is the same amount as `10.10`.
  *
  * Runs after [AssetValidator] and relies on it: an unknown asset has no decimals to check against, so it passes here.

@@ -19,7 +19,7 @@ import java.util.UUID
 
 /**
  * Rejections end to end: every kind of validator rejects through the workflow's VALIDATE step, which returns
- * `FeeOutcome.Rejected` before CLAIM, so nothing is recorded or charged and the `transaction_id` is not used up (D8):
+ * `FeeOutcome.Rejected` before CLAIM, so nothing is recorded or charged and the `transaction_id` is not used up:
  * the same id with a corrected payload is a new workflow and is charged.
  */
 class RejectedIT @Autowired constructor(
@@ -119,7 +119,7 @@ class RejectedIT @Autowired constructor(
         // when
         val rejection = api.submit(bodyOf(rejected))
 
-        // then: the value in full, the message shortened to 64 characters (D44)
+        // then: the value in full, the message shortened to 64 characters
         assertThat(rejection.status).describedAs("POST status, body %s", rejection.body).isEqualTo(400)
         assertThat(rejection.body["field"].asText()).isEqualTo("transaction_id")
         assertThat(rejection.body["value"].asText()).isEqualTo(transactionId)

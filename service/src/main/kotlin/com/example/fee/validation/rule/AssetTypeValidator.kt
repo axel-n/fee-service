@@ -10,7 +10,7 @@ import org.springframework.core.annotation.Order
 import org.springframework.stereotype.Component
 
 /**
- * `asset_type` must be a supported [AssetType]: only `FIAT` (D13) (422). Relies on [RequiredFieldsValidator] for
+ * `asset_type` must be a supported [AssetType]: only `FIAT` (422). Relies on [RequiredFieldsValidator] for
  * presence.
  */
 @Component

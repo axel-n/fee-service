@@ -26,7 +26,7 @@ import java.util.concurrent.TimeUnit
  * A new instance per scenario (Cucumber's glue scope), so its fields are the scenario's state. Transaction ids written in
  * a feature are scoped to the scenario: `txn_001` is sent as `txn_001-<suffix>`, one random suffix per scenario, so
  * scenarios never share a fee record or a wallet charge, and every mention of `txn_001` in the scenario means the same
- * transaction (D69).
+ * transaction.
  *
  * A submission runs in the background and the `Then` steps wait for its response, so a scenario can act while the
  * request is still in flight (a restart, a concurrent submission). Every submission of the scenario is kept: the
@@ -135,7 +135,7 @@ class FeeSteps(
     }
 
     /**
-     * The response is the problem of a rejected field (D60): [field], the rejected [value] as sent, and the [message]
+     * The response is the problem of a rejected field: [field], the rejected [value] as sent, and the [message]
      * exactly, also as the problem's `detail`.
      */
     @Then("the request is rejected on field {string} with value {string} and message {string}")
@@ -147,7 +147,7 @@ class FeeSteps(
         assertThat(problem["detail"]?.asText()).describedAs("detail of %s", problem).isEqualTo(message)
     }
 
-    /** The response is the problem of a missing [field] (D60): its `value` is `null`, and the [message] is exact. */
+    /** The response is the problem of a missing [field]: its `value` is `null`, and the [message] is exact. */
     @Then("the request is rejected on missing field {string} with message {string}")
     fun theRequestIsRejectedOnMissingField(field: String, message: String) {
         val problem = response().body
@@ -209,7 +209,7 @@ class FeeSteps(
         assertThat(wallet.chargeCount(chargeKey)).isZero()
     }
 
-    /** Read from Restate itself, once the response is in: no fee record, so the `transaction_id` is not used up (D8). */
+    /** Read from Restate itself, once the response is in: no fee record, so the `transaction_id` is not used up. */
     @Then("no fee is recorded")
     fun noFeeIsRecorded() {
         response()

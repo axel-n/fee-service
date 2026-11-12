@@ -16,7 +16,7 @@ import java.util.UUID
 import java.util.stream.Stream
 
 /**
- * A crash at every step boundary (D17, D33): [FaultInjectingStepHook] throws once before or after a step, Restate retries
+ * A crash at every step boundary: [FaultInjectingStepHook] throws once before or after a step, Restate retries
  * the invocation from the top, replays the journaled steps and runs the rest. The caller still gets `Charged`, the wallet
  * is charged exactly once and the record is `COMPLETED`.
  *

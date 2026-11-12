@@ -23,7 +23,7 @@ class TransactionFeeController(private val feeService: FeeService) {
     /**
      * 200 with the `COMPLETED` status and the fee once charged. A run still going after `restate.attach-timeout` is a
      * [com.example.fee.application.FeeInProgressException], which `ApiExceptionHandler` answers with 202,
-     * `Location: /transaction/fee/{id}` and the `IN_PROGRESS` status; resending the same payload is safe (D8, D77).
+     * `Location: /transaction/fee/{id}` and the `IN_PROGRESS` status; resending the same payload is safe.
      */
     @PostMapping(consumes = [MediaType.APPLICATION_JSON_VALUE])
     fun submit(@RequestBody request: FeeRequest): FeeStatusResponse = feeService.submit(request)

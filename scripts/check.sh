@@ -22,7 +22,7 @@ case ${1:-} in
   *) echo "unknown option: $1 (see --help)" >&2; exit 2 ;;
 esac
 
-# Two Maven modules (D76): api (the published contract) and service (the app)
+# Two Maven modules: api (the published contract) and service (the app)
 MODULES=(api service)
 MAIN=service/src/main/kotlin
 TEST=service/src/test/kotlin
@@ -60,7 +60,7 @@ rule "Create BigDecimal from a String, never from a floating-point literal (hard
   "$(g 'BigDecimal\(\s*-?[0-9]+\.[0-9]' "${ALL_MAIN[@]}" "${ALL_TEST[@]}")"
 rule "The api module, domain, fee, validation and ClaimDecider are pure: no Restate imports" \
   "$(g '^import dev\.restate' "${ALL_MAIN[0]}" "$PKG/domain" "$PKG/fee" "$PKG/validation" "$PKG/record/ClaimDecider.kt")"
-# Other services depend on it, so it carries no framework: only Jackson and Kotlin (D76)
+# Other services depend on it, so it carries no framework: only Jackson and Kotlin
 rule "The api module is the published contract: no Spring imports, and nothing of the service" \
   "$(g '^import (org\.springframework|com\.example\.fee\.(api|application|config|domain|fee|record|restate|validation|wallet|workflow))\.' "${ALL_MAIN[0]}")"
 rule "Nothing outside api imports api" \
@@ -72,7 +72,7 @@ rule "No !! and no lateinit in production code" "$(g '!!|\blateinit\b' "${ALL_MA
 rule "No disabled tests: every test must run" "$(g '@(Disabled[A-Za-z]*|Ignore)\b' "${ALL_TEST[@]}")"
 mapfile -t POMS < <(existing pom.xml "${MODULES[@]/%//pom.xml}")
 if ((${#POMS[@]})); then
-  rule "Dependencies the project ruled out (AGENTS.md hard rule 1, decisions.md 'Not used')" \
+  rule "Dependencies the project ruled out (AGENTS.md hard rule 1)" \
     "$(grep -nE '<artifactId>(spring-boot-starter-(actuator|validation|data-jpa|jdbc)|lombok|mockito-kotlin|kotest[a-z-]*|sdk-testing|flyway[a-z-]*|postgresql|h2|spring-cloud-[a-z-]*)</artifactId>' "${POMS[@]}")"
 fi
 if ((violations == 0)); then echo "✓ no rule violations"; fi

@@ -15,7 +15,7 @@ import org.springframework.core.io.ClassPathResource
 import java.time.Duration
 
 /**
- * Checks the packaged `application.yml` (D22) without a Spring context. The environment variables are simulated, so the
+ * Checks the packaged `application.yml` without a Spring context. The environment variables are simulated, so the
  * real ones of the machine (the dev container sets `RESTATE_*`) can't change the result.
  */
 class PackagedConfigurationTest {
@@ -60,13 +60,8 @@ class PackagedConfigurationTest {
     @ParameterizedTest(name = "{0} defaults to {1}")
     @CsvSource(
         "restate.ingress-url, http://localhost:8080",
-        "restate.admin-url, http://localhost:9070",
         "restate.endpoint-port, 9080",
-        "restate.advertised-url, http://host.docker.internal:9080",
         "restate.attach-timeout, 10s",
-        "restate.registration.enabled, true",
-        "restate.registration.max-attempts, 10",
-        "restate.registration.backoff, 2s",
     )
     fun `restate setting has its packaged default when no variable is set`(key: String, expected: String) {
         // given
@@ -82,13 +77,8 @@ class PackagedConfigurationTest {
     @ParameterizedTest(name = "{1} overrides {0}")
     @CsvSource(
         "restate.ingress-url, RESTATE_INGRESS_URL, http://restate:8080",
-        "restate.admin-url, RESTATE_ADMIN_URL, http://restate:9070",
         "restate.endpoint-port, RESTATE_ENDPOINT_PORT, 19080",
-        "restate.advertised-url, RESTATE_ADVERTISED_URL, http://dev:19080",
         "restate.attach-timeout, RESTATE_ATTACH_TIMEOUT, 30s",
-        "restate.registration.enabled, RESTATE_REGISTRATION_ENABLED, false",
-        "restate.registration.max-attempts, RESTATE_REGISTRATION_MAX_ATTEMPTS, 3",
-        "restate.registration.backoff, RESTATE_REGISTRATION_BACKOFF, 500ms",
     )
     fun `restate setting is overridden by its readable environment variable`(
         key: String,
@@ -128,53 +118,22 @@ class PackagedConfigurationTest {
         // when
         val endpointPort = binder.bind("restate.endpoint-port", Int::class.java).get()
         val attachTimeout = binder.bind("restate.attach-timeout", Duration::class.java).get()
-        val enabled = binder.bind("restate.registration.enabled", Boolean::class.java).get()
-        val maxAttempts = binder.bind("restate.registration.max-attempts", Int::class.java).get()
-        val backoff = binder.bind("restate.registration.backoff", Duration::class.java).get()
 
         // then
         assertThat(endpointPort).isEqualTo(9080)
         assertThat(attachTimeout).isEqualTo(Duration.ofSeconds(10))
-        assertThat(enabled).isTrue()
-        assertThat(maxAttempts).isEqualTo(10)
-        assertThat(backoff).isEqualTo(Duration.ofSeconds(2))
     }
 
     @Test
-    fun `the admin API client gives up on a connect after 5s and on an answer after 30s`() {
+    fun `the app needs only the ingress url, the endpoint port and the attach timeout to work with Restate`() {
         // given
-        val binder = Binder.get(environment())
+        val yaml = packagedYaml()
 
         // when
-        val connectTimeout = binder.bind("spring.http.client.connect-timeout", Duration::class.java).get()
-        val readTimeout = binder.bind("spring.http.client.read-timeout", Duration::class.java).get()
+        val restateKeys = yaml.propertyNames.filter { it.startsWith("restate.") }
 
-        // then
-        assertThat(connectTimeout).isEqualTo(Duration.ofSeconds(5))
-        assertThat(readTimeout).isEqualTo(Duration.ofSeconds(30))
-    }
-
-    @Test
-    fun `fake wallet waits 0s by default`() {
-        // given
-        val binder = Binder.get(environment())
-
-        // when
-        val delay = binder.bind("wallet.fake.delay", Duration::class.java).get()
-
-        // then
-        assertThat(delay).isZero()
-    }
-
-    @Test
-    fun `WALLET_FAKE_DELAY overrides the fake wallet delay`() {
-        // given
-        val binder = Binder.get(environment(mapOf("WALLET_FAKE_DELAY" to "15s")))
-
-        // when
-        val delay = binder.bind("wallet.fake.delay", Duration::class.java).get()
-
-        // then
-        assertThat(delay).isEqualTo(Duration.ofSeconds(15))
+        // then: registration is a setup step outside the app, so no admin API settings
+        assertThat(restateKeys).containsExactlyInAnyOrder("restate.ingress-url", "restate.endpoint-port", "restate.attach-timeout")
+        assertThat(yaml.propertyNames.filter { it.startsWith("spring.http.client.") }).isEmpty()
     }
 }

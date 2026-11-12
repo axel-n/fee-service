@@ -1,4 +1,4 @@
-@file:Suppress("DEPRECATION") // the ctx-based codegen API of SDK 2.9.3, kept on purpose (D29)
+@file:Suppress("DEPRECATION") // the ctx-based codegen API of SDK 2.9.3, kept on purpose
 
 package com.example.fee.workflow
 
@@ -24,11 +24,11 @@ import dev.restate.sdk.common.TerminalException
 import org.springframework.stereotype.Component
 
 /**
- * Processes the fee of one payload (the workflow key is `{transaction_id}:{payloadHash}`, D8): VALIDATE → MAP → CLAIM →
- * CALCULATE → CHARGE → RECORD, each a journaled step wrapped by [StepHook] (D7, D17). On a retry Restate replays the
+ * Processes the fee of one payload (the workflow key is `{transaction_id}:{payloadHash}`): VALIDATE → MAP → CLAIM →
+ * CALCULATE → CHARGE → RECORD, each a journaled step wrapped by [StepHook]. On a retry Restate replays the
  * journaled steps instead of running them again, so the wallet is charged once.
  *
- * Business results are returned as [FeeOutcome] (D9), a declined charge too: it is recorded as failed and returned as
+ * Business results are returned as [FeeOutcome], a declined charge too: it is recorded as failed and returned as
  * [FeeOutcome.Failed]. The handler is deterministic: the clock, the fee numbers and the wallet are only touched inside
  * `ctx.run`.
  */
@@ -86,7 +86,7 @@ class FeeWorkflow(
     }
 
     // The state write and the hooks run on every replay too: the write is deterministic, and a hook that throws is how
-    // tests crash the workflow at a step boundary (D33).
+    // tests crash the workflow at a step boundary.
     private fun <T> step(ctx: WorkflowContext, step: WorkflowStep, action: () -> T): T {
         ctx.set(STEP, step)
         stepHook.before(step, ctx.key())
@@ -96,8 +96,8 @@ class FeeWorkflow(
     }
 
     // Returns the decline reason, or null once charged. A decline must become a TerminalException inside the closure: a
-    // plain exception escaping ctx.run is retried, a terminal one is journaled and rethrown on every replay (D33). Any
-    // other failure propagates: plain ones are retried, and other terminal ones (a cancellation) are not a decline (D51).
+    // plain exception escaping ctx.run is retried, a terminal one is journaled and rethrown on every replay. Any
+    // other failure propagates: plain ones are retried, and other terminal ones (a cancellation) are not a decline.
     private fun charge(ctx: WorkflowContext, transaction: Transaction, quote: FeeQuote): String? =
         try {
             ctx.run("charge", ChargeReceipt::class.java) {
@@ -114,7 +114,7 @@ class FeeWorkflow(
         }
 
     // Validation passed, so the mapper can't return null; if it does, that is a bug: a plain exception, retried until
-    // Restate pauses the invocation (D39).
+    // Restate pauses the invocation.
     private fun map(request: FeeRequest): Transaction =
         checkNotNull(transactionMapper.toTransaction(request)) {
             "Request for transaction '${request.transactionId}' passed validation but could not be mapped"
@@ -140,7 +140,7 @@ class FeeWorkflow(
          */
         internal const val CHARGE_DECLINED_CODE: Int = 422
 
-        /** The wallet's idempotency key: one charge per `transaction_id`, whichever payload or run asks (D46). */
+        /** The wallet's idempotency key: one charge per `transaction_id`, whichever payload or run asks. */
         internal fun chargeKey(transactionId: String): String = "fee-$transactionId"
     }
 }

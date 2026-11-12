@@ -13,9 +13,9 @@ import io.cucumber.java.en.When
 import org.assertj.core.api.Assertions.assertThat
 
 /**
- * The steps of failures during processing: a crash at a step boundary ([FaultInjectingStepHook], D64) and an endpoint
- * restart while the wallet holds the charge ([TestWalletGateway.blockCharges], D65). The scenario's transaction and its
- * submissions live in [FeeSteps] (injected, the same instance as the scenario's, D69), so its fee, wallet and record steps
+ * The steps of failures during processing: a crash at a step boundary ([FaultInjectingStepHook]) and an endpoint
+ * restart while the wallet holds the charge ([TestWalletGateway.blockCharges]). The scenario's transaction and its
+ * submissions live in [FeeSteps] (injected, the same instance as the scenario's), so its fee, wallet and record steps
  * check the recovered workflow.
  *
  * After every scenario the wallet lets go of what it held and the shared endpoint is running again, so a failed scenario
@@ -30,7 +30,7 @@ class RecoverySteps(
 
     private val blockedChargeKeys = mutableListOf<String>()
 
-    /** Arms one crash, a plain exception Restate retries (D33), at the [moment] (`before` / `after`) side of [step]. */
+    /** Arms one crash, a plain exception Restate retries, at the [moment] (`before` / `after`) side of [step]. */
     @Given("the service will crash {word} the {string} step")
     fun theServiceWillCrash(moment: String, step: String) {
         val phase = FaultInjectingStepHook.Phase.entries.singleOrNull { it.name.equals(moment, ignoreCase = true) }
@@ -57,7 +57,7 @@ class RecoverySteps(
 
     /**
      * Stops and starts the endpoint while the workflow is inside CHARGE, then waits until Restate has run CHARGE again
-     * on the restarted endpoint (it was not journaled, D32) before the wallet answers. Both calls then finish, and the
+     * on the restarted endpoint (it was not journaled) before the wallet answers. Both calls then finish, and the
      * wallet's idempotency key is all that keeps them to one charge.
      */
     @When("the service endpoint restarts")

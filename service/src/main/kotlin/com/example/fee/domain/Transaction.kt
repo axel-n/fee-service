@@ -37,13 +37,13 @@ enum class TransactionType(val value: String) {
     companion object {
         private val byValue = entries.filter { it != UNKNOWN }.associateBy { it.value }
 
-        /** Exact, case-sensitive match on [value]. Never throws: null or an unmatched string is [UNKNOWN] (D10). */
+        /** Exact, case-sensitive match on [value]. Never throws: null or an unmatched string is [UNKNOWN]. */
         fun fromValue(raw: String?): TransactionType = raw?.let(byValue::get) ?: UNKNOWN
     }
 }
 
 /**
- * The transaction states the service understands. Only [SETTLED_PENDING_FEE] is processed (D12); every other state
+ * The transaction states the service understands. Only [SETTLED_PENDING_FEE] is processed; every other state
  * is [UNKNOWN] and rejected by validation.
  *
  * [value] is the exact string of the request's `state` field.
@@ -58,16 +58,16 @@ enum class TransactionState(val value: String) {
     companion object {
         private val byValue = entries.filter { it != UNKNOWN }.associateBy { it.value }
 
-        /** Exact, case-sensitive match on [value]. Never throws: null or an unmatched string is [UNKNOWN] (D10). */
+        /** Exact, case-sensitive match on [value]. Never throws: null or an unmatched string is [UNKNOWN]. */
         fun fromValue(raw: String?): TransactionState = raw?.let(byValue::get) ?: UNKNOWN
     }
 }
 
 /**
- * The supported assets (D13). A new asset is a new value here, with its decimals and asset type.
+ * The supported assets. A new asset is a new value here, with its decimals and asset type.
  *
  * [value] is the exact string of the request's `asset` field. [decimals] is the scale amounts and fees are allowed
- * to have and are rounded to (`HALF_EVEN`, D3).
+ * to have and are rounded to (`HALF_EVEN`).
  */
 enum class Asset(val value: String, val decimals: Int, val assetType: AssetType) {
     USD("USD", 2, AssetType.FIAT),
@@ -83,13 +83,13 @@ enum class Asset(val value: String, val decimals: Int, val assetType: AssetType)
     companion object {
         private val byValue = entries.filter { it != UNKNOWN }.associateBy { it.value }
 
-        /** Exact, case-sensitive match on [value]. Never throws: null or an unmatched string is [UNKNOWN] (D10). */
+        /** Exact, case-sensitive match on [value]. Never throws: null or an unmatched string is [UNKNOWN]. */
         fun fromValue(raw: String?): Asset = raw?.let(byValue::get) ?: UNKNOWN
     }
 }
 
 /**
- * The asset types the service understands. Only [FIAT] is supported (D13).
+ * The asset types the service understands. Only [FIAT] is supported.
  *
  * [value] is the exact string of the request's `asset_type` field.
  */
@@ -103,7 +103,7 @@ enum class AssetType(val value: String) {
     companion object {
         private val byValue = entries.filter { it != UNKNOWN }.associateBy { it.value }
 
-        /** Exact, case-sensitive match on [value]. Never throws: null or an unmatched string is [UNKNOWN] (D10). */
+        /** Exact, case-sensitive match on [value]. Never throws: null or an unmatched string is [UNKNOWN]. */
         fun fromValue(raw: String?): AssetType = raw?.let(byValue::get) ?: UNKNOWN
     }
 }

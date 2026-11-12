@@ -7,7 +7,7 @@ import java.math.BigDecimal
 
 /**
  * Where the fee for a transaction stands: the body of `GET /transaction/fee/{id}` and of every `POST /transaction/fee`
- * that isn't an error (200 `COMPLETED`, 202 `IN_PROGRESS`, D77).
+ * that isn't an error (200 `COMPLETED`, 202 `IN_PROGRESS`).
  *
  * The [FeeResponse] fields are present once [Status.COMPLETED], [failureReason] once [Status.FAILED]; absent fields are
  * left out of the JSON. HTTP only and never stored, so its shape may change freely.

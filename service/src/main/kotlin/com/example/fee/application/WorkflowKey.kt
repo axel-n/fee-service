@@ -6,7 +6,7 @@ import java.security.MessageDigest
 import java.util.HexFormat
 
 /**
- * The key of a `FeeWorkflow` run: `{transaction_id}:{payloadHash}` (D8). The same payload gets the same key, so Restate
+ * The key of a `FeeWorkflow` run: `{transaction_id}:{payloadHash}`. The same payload gets the same key, so Restate
  * runs it once and a resubmission attaches to it; a changed payload gets a new key, so a rejected request doesn't use up
  * its `transaction_id`. Built only after the `transaction_id` pre-check, which already rules out `:`.
  */
@@ -28,13 +28,13 @@ value class WorkflowKey private constructor(val value: String) {
 }
 
 /**
- * The SHA-256 of a [FeeRequest]'s canonical form, as 64 lowercase hex digits: the second half of the workflow key (D8)
- * and the hash the fee record keeps to tell one payload from another (D47).
+ * The SHA-256 of a [FeeRequest]'s canonical form, as 64 lowercase hex digits: the second half of the workflow key
+ * and the hash the fee record keeps to tell one payload from another.
  *
  * The canonical form is built here, not by a JSON mapper, so no mapper setting can change it: the fields in a fixed
- * order, each text as sent (case-sensitive, untrimmed, D37), a missing field distinct from an empty one, and the amount
+ * order, each text as sent (case-sensitive, untrimmed), a missing field distinct from an empty one, and the amount
  * normalized, so `1000`, `1000.00` and `1E+3` hash alike. Hashes are stored in workflow keys and fee records, so changing
- * the canonical form is a breaking change: a resubmitted payload would get a new key and, once charged, a 409 (D56).
+ * the canonical form is a breaking change: a resubmitted payload would get a new key and, once charged, a 409.
  */
 @JvmInline
 value class PayloadHash(val value: String) {

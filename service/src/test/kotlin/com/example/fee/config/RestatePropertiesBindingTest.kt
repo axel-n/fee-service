@@ -44,13 +44,8 @@ class RestatePropertiesBindingTest {
         @JvmStatic
         fun overrides(): List<Arguments> = listOf(
             override("RESTATE_INGRESS_URL", "http://restate:8080", { it.ingressUrl }, "http://restate:8080"),
-            override("RESTATE_ADMIN_URL", "http://restate:9070", { it.adminUrl }, "http://restate:9070"),
             override("RESTATE_ENDPOINT_PORT", "19080", { it.endpointPort }, 19080),
-            override("RESTATE_ADVERTISED_URL", "http://dev:19080", { it.advertisedUrl }, "http://dev:19080"),
             override("RESTATE_ATTACH_TIMEOUT", "30s", { it.attachTimeout }, Duration.ofSeconds(30)),
-            override("RESTATE_REGISTRATION_ENABLED", "false", { it.registration.enabled }, false),
-            override("RESTATE_REGISTRATION_MAX_ATTEMPTS", "3", { it.registration.maxAttempts }, 3),
-            override("RESTATE_REGISTRATION_BACKOFF", "500ms", { it.registration.backoff }, Duration.ofMillis(500)),
         )
     }
 
@@ -67,13 +62,8 @@ class RestatePropertiesBindingTest {
 
         // then
         assertThat(properties.ingressUrl).isEqualTo("http://localhost:8080")
-        assertThat(properties.adminUrl).isEqualTo("http://localhost:9070")
         assertThat(properties.endpointPort).isEqualTo(9080)
-        assertThat(properties.advertisedUrl).isEqualTo("http://host.docker.internal:9080")
         assertThat(properties.attachTimeout).isEqualTo(Duration.ofSeconds(10))
-        assertThat(properties.registration.enabled).isTrue()
-        assertThat(properties.registration.maxAttempts).isEqualTo(10)
-        assertThat(properties.registration.backoff).isEqualTo(Duration.ofSeconds(2))
     }
 
     @ParameterizedTest(name = "{0}={1} overrides its placeholder")
@@ -104,8 +94,8 @@ class RestatePropertiesBindingTest {
 
         // then
         assertThat(properties.ingressUrl).isEqualTo("http://restate:8080")
-        assertThat(properties.adminUrl).isEqualTo("http://localhost:9070")
-        assertThat(properties.registration.maxAttempts).isEqualTo(10)
+        assertThat(properties.endpointPort).isEqualTo(9080)
+        assertThat(properties.attachTimeout).isEqualTo(Duration.ofSeconds(10))
     }
 
     @Test
@@ -122,15 +112,12 @@ class RestatePropertiesBindingTest {
     }
 
     @Test
-    fun `a missing registration section fails binding with a message naming the key`() {
+    fun `a missing restate setting fails binding with a message naming the key`() {
         // given
         val yaml = """
             restate:
               ingress-url: http://localhost:8080
-              admin-url: http://localhost:9070
               endpoint-port: 9080
-              advertised-url: http://localhost:9080
-              attach-timeout: 10s
         """.trimIndent()
         val environment = environment(resource = ByteArrayResource(yaml.toByteArray()))
 
@@ -138,7 +125,7 @@ class RestatePropertiesBindingTest {
         assertThatThrownBy { bind(environment) }
             .isInstanceOf(BindException::class.java)
             .rootCause()
-            .hasMessageStartingWith("restate.registration is missing")
+            .hasMessageStartingWith("restate.attach-timeout is missing")
     }
 
     @Test
@@ -155,12 +142,12 @@ class RestatePropertiesBindingTest {
     @Test
     fun `an invalid variable fails binding with a readable message`() {
         // given
-        val environment = environment(mapOf("RESTATE_ADMIN_URL" to "restate:9070"))
+        val environment = environment(mapOf("RESTATE_INGRESS_URL" to "restate:8080"))
 
         // when / then
         assertThatThrownBy { bind(environment) }
             .isInstanceOf(BindException::class.java)
             .rootCause()
-            .hasMessage("restate.admin-url must be an absolute http or https URL, was 'restate:9070'")
+            .hasMessage("restate.ingress-url must be an absolute http or https URL, was 'restate:8080'")
     }
 }

@@ -23,20 +23,20 @@ import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExcep
 import org.springframework.web.util.UriComponentsBuilder
 
 /**
- * Turns every failure of the API into an RFC 7807 `ProblemDetail` (D19, D60): a [FeeException] answers with its own
+ * Turns every failure of the API into an RFC 7807 `ProblemDetail`: a [FeeException] answers with its own
  * status, and Spring MVC's own errors (a body that isn't JSON, a wrong media type, an unknown path) keep theirs through
  * [ResponseEntityExceptionHandler], so clients see one error shape. Clients read it as the api module's `FeeProblem`.
  *
- * A [FeeException] adds its `code` (D76). A rejected field adds `field`, `value` (as sent, `null` when missing) and
+ * A [FeeException] adds its `code`. A rejected field adds `field`, `value` (as sent, `null` when missing) and
  * `message`, which names the allowed values for a 422. A failure about one transaction adds `transaction_id`, a
  * declined charge also `reason`.
  *
- * The one exception that isn't a failure, [FeeInProgressException], is answered with the fee's status instead (D77).
+ * The one exception that isn't a failure, [FeeInProgressException], is answered with the fee's status instead.
  */
 @RestControllerAdvice
 class ApiExceptionHandler : ResponseEntityExceptionHandler() {
 
-    /** A run still going after `restate.attach-timeout`: 202, where to poll, and the `IN_PROGRESS` status (D59). */
+    /** A run still going after `restate.attach-timeout`: 202, where to poll, and the `IN_PROGRESS` status. */
     @ExceptionHandler(FeeInProgressException::class)
     fun handleInProgress(exception: FeeInProgressException): ResponseEntity<FeeStatusResponse> =
         ResponseEntity
@@ -72,7 +72,7 @@ class ApiExceptionHandler : ResponseEntityExceptionHandler() {
     fun handleFeeException(exception: FeeException): ProblemDetail = problem(exception)
 
     /**
-     * A body Jackson can't read is a malformed request (400, D11). Where Jackson knows the field, the problem names it
+     * A body Jackson can't read is a malformed request (400). Where Jackson knows the field, the problem names it
      * like a validation error does, instead of Spring's generic "Failed to read request".
      */
     override fun handleHttpMessageNotReadable(

@@ -14,7 +14,7 @@ import java.util.UUID
 
 /**
  * The wallet fails transiently: a plain exception escaping the CHARGE `ctx.run` is not journaled, so Restate retries it
- * (D33) until the wallet answers. The caller still gets `Charged`, the wallet is charged once, and the steps journaled
+ * until the wallet answers. The caller still gets `Charged`, the wallet is charged once, and the steps journaled
  * before CHARGE (VALIDATE, CALCULATE) are not run again.
  */
 class TransientWalletFailureIT @Autowired constructor(

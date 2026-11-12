@@ -1,16 +1,22 @@
 package com.example.fee.it
 
 import com.example.fee.fee.FeeRule
+import org.springframework.boot.context.event.ApplicationReadyEvent
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Primary
+import org.springframework.context.event.EventListener
 
 /**
- * The test beans of the shared IT context (D61), added by [RestateIntegrationTest] next to the app's own configuration.
+ * The test beans of the shared IT context, added by [RestateIntegrationTest] next to the app's own configuration.
  *
- * Deliberately without `@Configuration` / `@TestConfiguration`: apps started by [startApp] component-scan the test
- * classpath without Spring's test filter, and they must stay the plain app.
+ * Deliberately without `@Configuration` / `@TestConfiguration`, so a component scan of the test classpath never picks it
+ * up and the app stays the plain app everywhere else.
  */
 class IntegrationTestBeans {
+
+    // Registers the shared app's endpoint once it listens, as the README asks of whoever starts the app
+    @Bean
+    fun endpointRegistration(): EndpointRegistration = EndpointRegistration()
 
     // @Primary: FakeWalletGateway stays a bean, but the workflow gets this one
     @Bean
@@ -35,4 +41,16 @@ class IntegrationTestBeans {
     @Bean
     @Primary
     fun testClock(): TestClock = TestClock()
+}
+
+/**
+ * Registers the run's endpoint with the shared Restate once the shared app is ready: by then `RestateEndpointLifecycle`
+ * listens, so Restate can discover the services.
+ */
+class EndpointRegistration {
+
+    @EventListener(ApplicationReadyEvent::class)
+    fun register() {
+        RestateTestEnvironment.registerEndpoint()
+    }
 }

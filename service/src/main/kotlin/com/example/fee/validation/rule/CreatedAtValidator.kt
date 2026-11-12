@@ -14,8 +14,8 @@ import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
 
 /**
- * `created_at` must be in the request format ([CreatedAtFormat]) and not later than now, read as UTC (D26) (400).
- * Reads the [Clock], which is why VALIDATE runs inside `ctx.run`: the result is journaled (D11, D20).
+ * `created_at` must be in the request format ([CreatedAtFormat]) and not later than now, read as UTC (400).
+ * Reads the [Clock], which is why VALIDATE runs inside `ctx.run`: the result is journaled.
  * Relies on [RequiredFieldsValidator] for presence.
  */
 @Component
@@ -30,7 +30,7 @@ class CreatedAtValidator(private val clock: Clock) : TransactionValidator {
                 "Invalid $FIELD ${ValueDisplay.quoted(raw)}. Allowed: 'yyyy-MM-dd HH:mm:ss' with 0 to 9 fraction " +
                     "digits, e.g. '$EXAMPLE'",
             )
-        // UTC explicitly, so a Clock in another zone (a test, a misconfigured bean) can't shift the check (D26).
+        // UTC explicitly, so a Clock in another zone (a test, a misconfigured bean) can't shift the check.
         val now = LocalDateTime.ofInstant(clock.instant(), ZoneOffset.UTC)
         if (!createdAt.isAfter(now)) return null
         return error(

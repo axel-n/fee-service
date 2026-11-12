@@ -7,7 +7,7 @@ name: fee-service
 
 services:
   restate:
-    # TODO pin a version once spike 0.2 (tasks.md) confirms which server version works with SDK 2.9.3
+    # TODO pin 1.8.1, the version the tests use (RestateTestEnvironment) with SDK 2.9.3
     image: docker.restate.dev/restatedev/restate:latest
     container_name: fee-service-restate
     ports:
@@ -47,7 +47,7 @@ services:
     environment:
       HOME: /home/${USER}
       # The dev Restate above. Restate calls the app's endpoint at dev:9080 over this network, so 9080 isn't published.
-      # Tests ignore these and start their own Restate (D18).
+      # Tests ignore these and start their own Restate.
       RESTATE_INGRESS_URL: http://restate:8080
       RESTATE_ADMIN_URL: http://restate:9070
       RESTATE_ADVERTISED_URL: http://dev:9080

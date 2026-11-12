@@ -16,7 +16,7 @@ import java.util.concurrent.TimeUnit
 /**
  * The steps of duplicate submissions: the same transaction sent again, sent by several callers at once, and the
  * conflict a changed payload meets. The scenario's request and its submissions live in [FeeSteps] (injected, the same
- * instance as the scenario's, D69), so the fee, wallet and record steps there check these submissions too.
+ * instance as the scenario's), so the fee, wallet and record steps there check these submissions too.
  */
 class IdempotencySteps(
     private val fee: FeeSteps,

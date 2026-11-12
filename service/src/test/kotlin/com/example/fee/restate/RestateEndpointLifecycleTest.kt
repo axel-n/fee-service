@@ -183,11 +183,8 @@ class RestateEndpointLifecycleTest {
         transactionFeeRecord = TransactionFeeRecord(ClaimDecider()),
         properties = RestateProperties(
             ingressUrl = "http://localhost:8080",
-            adminUrl = "http://localhost:9070",
             endpointPort = endpointPort,
-            advertisedUrl = "http://localhost:$endpointPort",
             attachTimeout = Duration.ofSeconds(10),
-            registration = RestateProperties.Registration(true, 10, Duration.ofSeconds(2)),
         ),
     )
 
@@ -204,7 +201,7 @@ class RestateEndpointLifecycleTest {
         }
 
     private companion object {
-        // The manifest version Restate 1.8.1 asks for first (D28); the SDK answers it on HTTP/1.1 too.
+        // The manifest version Restate 1.8.1 asks for first; the SDK answers it on HTTP/1.1 too.
         const val DISCOVERY_MEDIA_TYPE = "application/vnd.restate.endpointmanifest.v3+json"
 
         fun freePort(): Int = ServerSocket(0).use { it.localPort }

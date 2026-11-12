@@ -6,9 +6,9 @@ import java.math.BigDecimal
 
 /**
  * Why a request was rejected: the request [field], the rejected [value] as sent (`null` when the field is missing),
- * a readable [message], and the [kind] that decides the HTTP status (D11).
+ * a readable [message], and the [kind] that decides the HTTP status.
  *
- * Journaled as the result of VALIDATE and carried by `FeeOutcome.Rejected`, so this JSON shape is durable (D21, D35):
+ * Journaled as the result of VALIDATE and carried by `FeeOutcome.Rejected`, so this JSON shape is durable:
  * renaming or removing a field is breaking, adding a nullable one is safe.
  */
 data class ValidationError(
@@ -51,7 +51,7 @@ object ValueDisplay {
     /** Longer values are cut to this many characters in messages, followed by `…`. */
     const val MAX_MESSAGE_LENGTH = 64
 
-    /** The amount as JSON carries it: plain (`1000`, `-1.50`), scientific only beyond the serializer's bound (D38). */
+    /** The amount as JSON carries it: plain (`1000`, `-1.50`), scientific only beyond the serializer's bound. */
     fun value(amount: BigDecimal): String =
         if (amount.scale() in -PlainBigDecimalSerializer.MAX_PLAIN_SCALE..PlainBigDecimalSerializer.MAX_PLAIN_SCALE) {
             amount.toPlainString()

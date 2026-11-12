@@ -14,8 +14,8 @@ import java.util.UUID
 
 /**
  * The wallet declines the charge: inside the CHARGE `ctx.run` the decline becomes a `TerminalException`, which Restate
- * journals instead of retrying (D33, D51). The workflow records the fee as `FAILED` and returns `Failed`, which the API
- * answers with 422. Resending the same payload attaches to that finished run (D8, D30), so the caller gets the same
+ * journals instead of retrying. The workflow records the fee as `FAILED` and returns `Failed`, which the API
+ * answers with 422. Resending the same payload attaches to that finished run, so the caller gets the same
  * `Failed` and the wallet is not asked again.
  */
 class WalletDeclineIT @Autowired constructor(

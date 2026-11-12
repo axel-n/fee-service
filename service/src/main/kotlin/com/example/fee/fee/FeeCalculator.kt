@@ -5,7 +5,7 @@ import com.example.fee.domain.TransactionType
 import org.springframework.stereotype.Component
 
 /**
- * Prices a transaction with the one [FeeRule] of its type (D14). The rules are indexed once, when the bean is built, and
+ * Prices a transaction with the one [FeeRule] of its type. The rules are indexed once, when the bean is built, and
  * the index is checked there: a duplicate rule, a missing rule, or a rule for [TransactionType.UNKNOWN] fails startup,
  * so a new type can't ship without its rule.
  *

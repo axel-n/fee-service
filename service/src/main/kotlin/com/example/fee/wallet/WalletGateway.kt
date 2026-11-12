@@ -9,7 +9,7 @@ import java.math.BigDecimal
  * replaces [FakeWalletGateway] without touching the workflow.
  *
  * Implementations must be **idempotent by [idempotencyKey]**: an interrupted `ctx.run` runs again after a restart
- * (D32), and the second call must not charge twice. A repeated key returns the receipt of the first charge.
+ *, and the second call must not charge twice. A repeated key returns the receipt of the first charge.
  */
 interface WalletGateway {
 
@@ -24,7 +24,7 @@ interface WalletGateway {
 
 /**
  * The wallet's confirmation of a charge. It may be journaled as CHARGE's `ctx.run` result, so its JSON shape is
- * durable (D21, D35): renaming or removing a field is breaking, adding a nullable one is safe.
+ * durable: renaming or removing a field is breaking, adding a nullable one is safe.
  */
 data class ChargeReceipt(
     @JsonProperty("charge_id") val chargeId: String,

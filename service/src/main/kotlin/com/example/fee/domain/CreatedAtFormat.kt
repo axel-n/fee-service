@@ -9,7 +9,7 @@ import java.time.temporal.ChronoField
 
 /**
  * The format of the request's `created_at`: `2023-08-30 15:42:17.610059`, a space between date and time, 0 to 9
- * fraction digits, no zone (read as UTC, D26). One place, so validation and mapping can't disagree on it.
+ * fraction digits, no zone (read as UTC). One place, so validation and mapping can't disagree on it.
  */
 object CreatedAtFormat {
     private val formatter: DateTimeFormatter = DateTimeFormatterBuilder()

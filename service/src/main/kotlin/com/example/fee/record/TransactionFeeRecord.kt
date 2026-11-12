@@ -1,4 +1,4 @@
-@file:Suppress("DEPRECATION") // the ctx-based codegen API of SDK 2.9.3, kept on purpose (D29)
+@file:Suppress("DEPRECATION") // the ctx-based codegen API of SDK 2.9.3, kept on purpose
 
 package com.example.fee.record
 
@@ -46,7 +46,7 @@ class TransactionFeeRecord(private val claimDecider: ClaimDecider) {
     fun get(ctx: SharedObjectContext): FeeRecord? = ctx.get(RECORD).orElse(null)
 
     // Only the workflow holding the claim calls complete or fail, so anything but IN_PROGRESS is a bug: a plain exception,
-    // retried until Restate pauses the invocation, which can be resumed once the bug is fixed (like D39 and D42).
+    // retried until Restate pauses the invocation, which can be resumed once the bug is fixed (like a null from TransactionMapper or a type without a FeeRule).
     private fun inProgress(ctx: ObjectContext, handler: String): FeeRecord {
         val record = ctx.get(RECORD).orElse(null)
         checkNotNull(record) { "$handler on transaction '${ctx.key()}' without a claim" }

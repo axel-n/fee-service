@@ -5,12 +5,12 @@ import com.fasterxml.jackson.databind.annotation.JsonSerialize
 import java.math.BigDecimal
 
 /**
- * The fee charged for a transaction. HTTP clients get it inside a [FeeStatusResponse] (D77).
+ * The fee charged for a transaction. HTTP clients get it inside a [FeeStatusResponse].
  *
  * [asset] and [type] are the contract strings (`"USD"`, `"Mobile Top Up"`), not the domain enums, so the stored shape
  * doesn't depend on enum names. [rate] is the configured rate that produced [fee] (`0` for a flat fee).
  *
- * Stored permanently in `TransactionFeeRecord`, so this JSON shape is stored state (D21): renaming or removing a field
+ * Stored permanently in `TransactionFeeRecord`, so this JSON shape is stored state: renaming or removing a field
  * breaks existing records; adding a nullable field is safe.
  */
 data class FeeResponse(

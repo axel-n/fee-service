@@ -4,7 +4,7 @@
     <modelVersion>4.0.0</modelVersion>
 
     <!-- Boot 3.5, not 4.x: Boot 4 moves Spring MVC to Jackson 3 and starter-web to starter-webmvc, while the Restate SDK
-         uses Jackson 2 (decisions.md D25) -->
+         uses Jackson 2 -->
     <parent>
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-starter-parent</artifactId>
@@ -12,7 +12,7 @@
         <relativePath/>
     </parent>
 
-    <!-- The parent and aggregator of the two modules (D76): api is the contract other services depend on, service is the
+    <!-- The parent and aggregator of the two modules: api is the contract other services depend on, service is the
          app. Shared versions and plugin settings live here, so both modules compile and test the same way -->
     <groupId>com.example</groupId>
     <artifactId>fee-service-parent</artifactId>
@@ -30,7 +30,7 @@
         <java.version>25</java.version>
         <restate.version>2.9.3</restate.version>
         <cucumber.version>7.34.9</cucumber.version>
-        <!-- Overrides of Boot's managed versions, aligned with what Restate SDK 2.9.3 is built against (D25).
+        <!-- Overrides of Boot's managed versions, aligned with what Restate SDK 2.9.3 is built against.
              Kotlin: the compiler must read the SDK's Kotlin 2.3 metadata, and Boot 3.5 would pin 1.9 -->
         <kotlin.version>2.3.21</kotlin.version>
         <jackson-bom.version>2.22.4</jackson-bom.version>

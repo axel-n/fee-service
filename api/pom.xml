@@ -10,7 +10,7 @@
     </parent>
 
     <!-- What other services depend on to call the fee service: the request and response bodies, the exceptions and the
-         problem body of its errors (D76). Only Jackson and Kotlin at compile scope: no Spring, no Restate -->
+         problem body of its errors. Only Jackson and Kotlin at compile scope: no Spring, no Restate -->
     <artifactId>fee-service-api</artifactId>
     <name>fee-service-api</name>
     <description>The HTTP contract of fee-service: request and response DTOs, exceptions and the error body</description>
@@ -41,7 +41,7 @@
             <artifactId>spring-boot-starter-test</artifactId>
             <scope>test</scope>
         </dependency>
-        <!-- The two mappers the contract meets (ContractMapper, D35): Spring's for HTTP, Restate's for the journal -->
+        <!-- The two mappers the contract meets (ContractMapper): Spring's for HTTP, Restate's for the journal -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-json</artifactId>

@@ -14,12 +14,12 @@ import java.util.concurrent.ExecutionException
 
 /**
  * Serves the Spring-built [FeeWorkflow] and [TransactionFeeRecord] beans as a Restate endpoint on
- * `restate.endpoint-port` (D16, D34). It is the only place that starts or stops the endpoint, so tests stop and start it
+ * `restate.endpoint-port`. It is the only place that starts or stops the endpoint, so tests stop and start it
  * to simulate a crash or a restart.
  *
  * Each start gets its own Vert.x instance. Stop closes the server and then that instance, which frees the port and
- * leaves no Vert.x threads behind (D32). Spring stops it before it destroys the context's beans. Stop logs a failure
- * instead of throwing, so the shutdown carries on. Open connections drop on stop, and Restate retries them (D32).
+ * leaves no Vert.x threads behind. Spring stops it before it destroys the context's beans. Stop logs a failure
+ * instead of throwing, so the shutdown carries on. Open connections drop on stop, and Restate retries them.
  */
 @Component
 class RestateEndpointLifecycle(
@@ -63,7 +63,7 @@ class RestateEndpointLifecycle(
 
     /**
      * A listening server and its own Vert.x instance. `io.vertx:vertx-core` is only a runtime dependency of the SDK, so
-     * Vert.x is reached by reflection (D32, open question 7).
+     * Vert.x is reached by reflection rather than declared as a compile dependency.
      */
     private class RunningServer(private val vertx: Any, private val httpServer: Any, val port: Int) {
 

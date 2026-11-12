@@ -16,7 +16,7 @@ import java.util.concurrent.CompletableFuture
 import java.util.concurrent.TimeUnit
 
 /**
- * `GET /transaction/fee/{id}` while a workflow is held inside its CHARGE `ctx.run` (D59): the record claimed at CLAIM is
+ * `GET /transaction/fee/{id}` while a workflow is held inside its CHARGE `ctx.run`: the record claimed at CLAIM is
  * `IN_PROGRESS`, and the `POST` that outlasts `restate.attach-timeout` answers 202 with a `Location` pointing at that
  * status. Once the wallet lets the charge go, the same `GET` shows the `COMPLETED` fee, charged once.
  */

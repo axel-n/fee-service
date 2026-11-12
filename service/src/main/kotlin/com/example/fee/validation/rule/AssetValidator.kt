@@ -10,7 +10,7 @@ import org.springframework.core.annotation.Order
 import org.springframework.stereotype.Component
 
 /**
- * `asset` must be a supported [Asset]: `USD` or `EUR` (D13) (422). [AmountScaleValidator] relies on it, because the
+ * `asset` must be a supported [Asset]: `USD` or `EUR` (422). [AmountScaleValidator] relies on it, because the
  * allowed decimals belong to the asset. Relies on [RequiredFieldsValidator] for presence.
  */
 @Component

@@ -4,7 +4,7 @@ import com.example.fee.contract.FeeRequest
 
 /**
  * One check of an incoming [FeeRequest]. Every bean of this type runs inside the workflow's VALIDATE step, in the
- * order of its `@Order` and fail-fast: the first error decides the response (D11).
+ * order of its `@Order` and fail-fast: the first error decides the response.
  *
  * To add a check, add a `@Component @Order(ValidationOrder.X)` class implementing this interface, with a new constant
  * in [ValidationOrder]. Structural checks ([ValidationError.Kind.INVALID], 400) are ordered before business checks
@@ -25,7 +25,7 @@ interface TransactionValidator {
 /**
  * The `@Order` of each [TransactionValidator], spaced by 100 so a new check fits between two others. `@Order` needs
  * compile-time constants, hence an object of `const val`s. Every structural check (400) comes before every business
- * check (422), and a check comes after the ones it relies on (D11).
+ * check (422), and a check comes after the ones it relies on.
  */
 object ValidationOrder {
 

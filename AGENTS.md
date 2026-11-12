@@ -7,19 +7,18 @@ Instructions for AI coding agents (and humans) working on **fee-service**.
 A Kotlin + Spring Boot service for a backend technology challenge (requirements: `requirements.md`).
 `POST /transaction/fee` hands the request to a Restate workflow. The workflow validates, calculates, charges and records
 the fee as journaled steps, so processing survives crashes and restarts without charging twice. The result is persisted
-in Restate state, and the app registers its Restate endpoint itself on startup.
+in Restate state. The app calls Restate only through the ingress; registering its endpoint with Restate is a one-time
+setup step outside the app.
 
-- **The plan lives in three files.** Read them before starting any work. Together they are the source of truth:
-  - `docs/design.md`: goal, fee table, how Restate is used, class design, wiring, call graph, extension points, recovery guarantees.
-  - `docs/decisions.md`: the decisions D1–D24 and the open questions.
-  - `tasks.md`: the ordered task checklist.
-- If a change conflicts with the design or a decision, stop and ask; don't silently deviate. When a decision changes,
-  update `docs/decisions.md` (and `docs/design.md` if the design changes) in the same change.
+- **The design is the source of truth:** `docs/design.md` (goal, fee table, how Restate is used, class design, wiring,
+  call graph, extension points, recovery guarantees). Read it before starting any work.
+- If a change conflicts with the design or these rules, stop and ask; don't silently deviate. When the design changes,
+  update `docs/design.md` in the same change.
 
 ## Stack (fixed: don't change without asking)
 
 - Kotlin, JDK 25 (or 21 if the toolchain requires it), **Maven 3.9+**, the system `mvn` (no wrapper; the dev image in `dev-setup/` pins the version)
-- Two Maven modules under the root `pom.xml` (D76): **`api/`** (`fee-service-api`, the HTTP contract other services depend on)
+- Two Maven modules under the root `pom.xml`: **`api/`** (`fee-service-api`, the HTTP contract other services depend on)
   and **`service/`** (`fee-service`, the app). Run `mvn` from the root
 - Spring Boot (`spring-boot-starter-web` only)
 - Restate **Java SDK 2.9.3** (`dev.restate:sdk-java-http`, `sdk-api-gen` through kapt), used from Kotlin. The Restate server runs
@@ -49,13 +48,11 @@ Follow the call graph in `docs/design.md`:
 - `contract`, `domain`, `fee`, `validation` and `ClaimDecider` are **pure Kotlin** (no Restate imports) and unit-tested without Restate.
 - The request/response DTOs live in `contract` and the exceptions with the error body in `contract.error`, both in the **api
   module**, which every layer may import. The api module is published to other services: only Jackson and Kotlin, no Spring,
-  no Restate, and nothing of the service (D76). Nothing outside `api` imports `api` (the service's HTTP package).
-- Restate is reached only through the generated clients (ingress in `FeeService`, `ctx` in `FeeWorkflow`) and through
-  `RestateAdminClient` (registration).
-- The endpoint is started and stopped only by `RestateEndpointLifecycle`. Registration is done only by `RestateRegistrar`.
-  A registration failure **must not fail startup**: log a WARN, keep retrying in the background, and update `RegistrationStatus`.
-  The app is meant to run on Kubernetes later, where `RegistrationStatus` becomes an Actuator readiness indicator. Keep the
-  `TODO(k8s)` comment, and don't add Actuator until that's approved.
+  no Restate, and nothing of the service. Nothing outside `api` imports `api` (the service's HTTP package).
+- Restate is reached only through the generated clients (ingress in `FeeService`, `ctx` in `FeeWorkflow`). The app never
+  calls Restate's admin API: registration is done outside the app (README), so `restate.*` holds only the ingress URL,
+  the endpoint port and the attach timeout. Don't add Restate settings or admin calls without asking.
+- The endpoint is started and stopped only by `RestateEndpointLifecycle`. Don't add Actuator until that's approved.
 - Nothing calls upward, and no layer is skipped.
 
 ### Restate workflow code
@@ -93,17 +90,17 @@ Follow the call graph in `docs/design.md`:
 - Constructor injection only (no field injection). Every dependency should be mockable or replaceable.
 - Inject `Clock` instead of calling `LocalDateTime.now()` / `Instant.now()` directly.
 - Tunable values (fee numbers, URLs, ports, timeouts) come from `application.yml` through `@ConfigurationProperties` classes and are
-  never hardcoded. Defaults live only in the packaged `application.yml` (D22). Renaming a key breaks existing override files and
+  never hardcoded. Defaults live only in the packaged `application.yml`. Renaming a key breaks existing override files and
   environment variables; call it out.
 - **Every `@ConfigurationProperties` class lives in `config`**, one file per top-level section of `application.yml`, never next to
-  the bean that uses it (D75).
-- Package and file layout (D75): a package holds one kind of class, and an extension point's implementations get a sub-package
+  the bean that uses it.
+- Package and file layout: a package holds one kind of class, and an extension point's implementations get a sub-package
   (`fee.rule`, `fee.formula`, `validation.rule`). A file holds one main type plus the small types and helpers that exist only to
   serve it (its result and field types, its default implementation, internal helpers). Don't create a file for a lone data class,
   enum or helper function that belongs to another type. A test file mirrors its production file, one test class per production class.
 - JSON uses snake_case through `@JsonProperty` on DTOs; `BigDecimal` is serialized as a plain number.
 - Errors are subclasses of the sealed `FeeException` (api module, each with a `FeeErrorCode`) and are mapped to `ProblemDetail`
-  in `ApiExceptionHandler`. A new property of an error goes into `FeeProblem` too, so clients can read it (D76).
+  in `ApiExceptionHandler`. A new property of an error goes into `FeeProblem` too, so clients can read it.
 - Small classes with one responsibility. Comment only *why*, not *what*. Add KDoc to public extension points (`FeeRule`, `TransactionValidator`).
 
 ## Testing
@@ -118,8 +115,9 @@ Follow the call graph in `docs/design.md`:
 - Money assertions use `compareTo` / `isEqualByComparingTo`, so `1.5` equals `1.50`.
 - Assert idempotency by charge count (`chargeCount(key)`), not just by the response.
 - **Workflow and recovery tests are first-class.** Every workflow change must keep these passing: crash at each step boundary
-  (`FaultInjectingStepHook`), endpoint restart (`RestateEndpointLifecycle.stop/start`), Restate outage (container frozen with SIGSTOP, D27), transient
-  and declined wallet calls, and startup self-registration. All of them run in `RestateTestEnvironment` (one shared Testcontainers Restate).
+  (`FaultInjectingStepHook`), endpoint restart (`RestateEndpointLifecycle.stop/start`), Restate outage (container frozen with SIGSTOP), transient
+  and declined wallet calls. All of them run in `RestateTestEnvironment` (one shared Testcontainers Restate, which registers
+  the shared app's endpoint once it is ready).
 - **Tests never use fixed ports.** Restate container ports come from `getMappedPort`, the API runs on `RANDOM_PORT`, and the endpoint
   port is a free port picked per run. Every `restate.*` setting is set by `@DynamicPropertySource`. A Restate or app already running
   on the machine must not affect the tests.
@@ -130,10 +128,9 @@ Follow the call graph in `docs/design.md`:
 ```bash
 mvn test             # unit tests only (fast, no Docker)
 mvn verify           # + Testcontainers and Cucumber (needs Docker)
-mvn spring-boot:run      # from the root: starts the app (service module), its endpoint, and registers it with Restate
+mvn spring-boot:run      # from the root: starts the app (service module) and its endpoint; register it once (README, "Run")
 mvn -pl api -am install  # puts fee-service-api (and the parent pom it needs) in the local repository for other services
 scripts/check.sh     # the gate: rules + mvn clean verify, every test must actually run (--fast, --unit: see --help)
-scripts/task-runner.sh   # implements tasks.md task by task (see "Task automation")
 ```
 
 Settings change without a rebuild: environment variables (`RESTATE_INGRESS_URL=…`) or a `config/application.yml` in the working
@@ -142,44 +139,18 @@ directory (see Configuration in `docs/design.md`).
 The dev environment is described in `dev-setup/README.md`: `podman compose` starts the dev Restate and the dev container, which
 has nested podman so Testcontainers runs inside it.
 
-Run `scripts/check.sh` before reporting a task as done. Without a container engine run `scripts/check.sh --unit`, and say
+Run `scripts/check.sh` before reporting a change as done. Without a container engine run `scripts/check.sh --unit`, and say
 explicitly that the ITs didn't run.
 
 ## Workflow for agents
 
-1. Pick the next unchecked task in `tasks.md` (in order unless the user says otherwise).
-2. Implement it with tests, keeping the change small and focused.
-3. Run `scripts/check.sh` and report the results honestly, including failures.
-4. Tick the checkbox in `tasks.md` (in a task-runner session the runner ticks it after its own gate). Record any new decision
-   or open question in `docs/decisions.md`.
-5. Commits (only when asked): imperative subject ≤ 72 chars, one task per commit where practical.
+1. Implement the change with tests, keeping it small and focused.
+2. Run `scripts/check.sh` and report the results honestly, including failures.
+3. Update `docs/design.md` (and the README) when the design or the behaviour changes.
+4. Commits (only when asked): imperative subject ≤ 72 chars, one change per commit where practical.
 
-## Task automation
+## How it was built
 
-`scripts/task-runner.sh` (run it in the dev container) works through `tasks.md` so that the system is stable after every task:
-
-- **Order:** `tasks.md` is in dependency order (see its header): each task builds only on the tasks above it. The runner goes top to
-  bottom, refuses a `--task` that would skip an unchecked task (unless `--out-of-order`), and tells each session which later tasks
-  of its section are not its job. Keep that property when you add or move a task.
-- **Clean context:** every task runs in a fresh, non-interactive Claude Code session with no earlier conversation, no auto-memory
-  and no MCP servers. Its prompt is the task's section plus the procedure in `.claude/skills/implement-task/SKILL.md`, and
-  the runner puts the context every task needs into it (`docs/design.md`, `docs/decisions.md`, the file list, the approved
-  dependencies, the environment), so sessions don't spend tokens reading or exploring it again.
-  To do the same by hand: `/clear`, then `/implement-task [id]`.
-- **Checkpoint and gate:** the runner snapshots the tree first. It accepts the result only if `scripts/check.sh` passes and its guards
-  hold: protected files untouched (`tasks.md`, `AGENTS.md`, `requirements.md`, `scripts/`, `.claude/skills/`, `dev-setup/`), no
-  unapproved dependency, and no fewer tests than before. A failure goes back to the agent (`--fix-attempts`). A result that still
-  fails is rolled back, and the run stops.
-- **People decide:** a runner session can't ask questions, so the agent reports `blocked`. The runner rolls back, shows the question
-  and stops; answer it with `--note "…"` or a decision in `docs/decisions.md`, then rerun. The run also halts after a task that
-  changed `docs/` or created `pom.xml`, so a person reviews it.
-- **Unattended:** `scripts/autopilot.sh` (`status`, `log`, `stop`) runs `--autonomous` with Opus, detached from the terminal. Nothing
-  waits for a person: the agent decides within the hard rules and records each such decision in `docs/decisions.md` as
-  "(autonomous decision, review)"; usage limits are waited out until they reset, API errors with backoff; a rejected task starts
-  over from its checkpoint (`--task-retries`). It stops only when everything is done, or a task still fails after its retries
-  (rolled back). Afterwards read `.task-runs/summary.md` and grep `docs/decisions.md` for "autonomous decision".
-- **Dependencies:** the modules of the stack above (Spring Boot web/test, Kotlin, Jackson, the Restate SDK, JUnit 5, Mockito,
-  Testcontainers, Cucumber) count as approved; any other dependency is rejected unless the run has `--allow-new-deps`.
-- For each accepted task the runner ticks the checkbox and writes `.task-runs/<id>/latest/report.md` and
-  `.task-runs/<id>/commit-msg.txt`. git runs on the host: `--pause` waits after each task so you can commit it. `--undo` rolls
-  back the last accepted task.
+The service was built task by task with `scripts/task-runner.sh` and `scripts/autopilot.sh`, one fresh Claude Code
+session per task, gated by `scripts/check.sh` (see `docs/ai-usage.md`). The task checklist and the decision log that
+drove it were removed once every task was done; the runner needs a new `tasks.md` to run again.

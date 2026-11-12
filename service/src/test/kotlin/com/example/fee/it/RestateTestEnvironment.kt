@@ -11,10 +11,10 @@ import java.net.ServerSocket
 import java.time.Duration
 
 /**
- * The one Restate every IT of a test run shares: a `restatedev/restate` container (the version pinned by D28), started on
+ * The one Restate every IT of a test run shares: a `restatedev/restate` container (pinned to 1.8.1, the version the SDK was verified against), started on
  * first use and removed by Testcontainers when the JVM exits.
  *
- * Only random ports, so a Restate or an app already running on the machine can't interfere (D18):
+ * Only random ports, so a Restate or an app already running on the machine can't interfere:
  * - the container's ingress and admin ports are mapped by Testcontainers to free host ports;
  * - the endpoint port is a free host port picked once per run, before the container starts, and exposed to the container
  *   as `host.testcontainers.internal:<port>`. It stays the same for the whole run, so an endpoint stopped and started
@@ -47,26 +47,30 @@ object RestateTestEnvironment {
 
     val adminUrl: String = "http://${container.host}:${container.getMappedPort(ADMIN_PORT)}"
 
-    /** The endpoint's URL as Restate reaches it, sent at registration. */
+    /** The endpoint's URL as Restate reaches it, the one [registerEndpoint] registers. */
     val advertisedUrl: String = "http://host.testcontainers.internal:$endpointPort"
 
-    /** Calls to the admin API that the app itself never makes (listing services, deleting deployments). */
+    /** The admin API, which the app itself never calls: registration, introspection, purging. */
     val admin: RestateAdminApi = RestateAdminApi(adminUrl)
 
     /**
-     * Every `restate.*` setting of an app under test. Set through `@DynamicPropertySource` or as command-line arguments,
-     * both of which win over environment variables (`RESTATE_INGRESS_URL`, …) and config files, so a developer's local
-     * settings can't point the tests at another Restate.
+     * Registers the run's endpoint with Restate, the setup step the README asks of whoever runs the app. Restate
+     * discovers the services by calling the endpoint, so it must be listening. It keeps the registration for the whole
+     * run, also across endpoint restarts, because the URL stays the same.
+     */
+    fun registerEndpoint() {
+        admin.register(advertisedUrl)
+    }
+
+    /**
+     * Every `restate.*` setting of an app under test. Set through `@DynamicPropertySource`, which wins over environment
+     * variables (`RESTATE_INGRESS_URL`, …) and config files, so a developer's local settings can't point the tests at
+     * another Restate.
      */
     fun restateProperties(): Map<String, String> = mapOf(
         "restate.ingress-url" to ingressUrl,
-        "restate.admin-url" to adminUrl,
         "restate.endpoint-port" to endpointPort.toString(),
-        "restate.advertised-url" to advertisedUrl,
         "restate.attach-timeout" to "30s",
-        "restate.registration.enabled" to "true",
-        "restate.registration.max-attempts" to "3",
-        "restate.registration.backoff" to "1s",
     )
 
     fun registerProperties(registry: DynamicPropertyRegistry) {
@@ -74,7 +78,7 @@ object RestateTestEnvironment {
     }
 
     /**
-     * Freezes the Restate server with SIGSTOP (D27): connections are still accepted, but nothing answers until [thaw].
+     * Freezes the Restate server with SIGSTOP: connections are still accepted, but nothing answers until [thaw].
      */
     fun freeze() = signal("SIGSTOP")
 

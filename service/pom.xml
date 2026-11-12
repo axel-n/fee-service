@@ -9,7 +9,7 @@
         <version>0.0.1-SNAPSHOT</version>
     </parent>
 
-    <!-- The app: the Spring Boot API, the Restate workflow and its endpoint (D76) -->
+    <!-- The app: the Spring Boot API, the Restate workflow and its endpoint -->
     <artifactId>fee-service</artifactId>
     <name>fee-service</name>
     <description>Transaction fee service: Kotlin, Spring Boot and a Restate workflow</description>
@@ -188,7 +188,7 @@
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
                 <configuration>
-                    <!-- mvn spring-boot:run starts the app in the project root, as before the module split (D76), so
+                    <!-- mvn spring-boot:run starts the app in the project root, as before the module split, so
                          a config/application.yml there still overrides the packaged defaults -->
                     <workingDirectory>${project.basedir}/..</workingDirectory>
                 </configuration>

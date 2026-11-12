@@ -8,9 +8,9 @@ import java.math.BigDecimal
  * The body of `POST /transaction/fee`, exactly as the client sent it.
  *
  * Every field is nullable and the enums and the date stay strings, so any well-formed JSON object reaches validation,
- * which then explains what is wrong instead of a generic parse error (D10, D11).
+ * which then explains what is wrong instead of a generic parse error.
  *
- * Journaled as the workflow input, so this JSON shape is stored state (D21): renaming or removing a field breaks
+ * Journaled as the workflow input, so this JSON shape is stored state: renaming or removing a field breaks
  * in-flight workflows; adding a nullable field is safe.
  */
 data class FeeRequest(

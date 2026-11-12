@@ -6,8 +6,8 @@ import org.springframework.test.context.DynamicPropertyRegistry
 import org.springframework.test.context.DynamicPropertySource
 
 /**
- * The base of every IT that boots the app with `@SpringBootTest`: the real app against [RestateTestEnvironment], so
- * registration on startup runs for real. The HTTP API is on a random port (`@LocalServerPort`).
+ * The base of every IT that boots the app with `@SpringBootTest`: the real app against [RestateTestEnvironment], its
+ * endpoint registered once it listens ([EndpointRegistration]). The HTTP API is on a random port (`@LocalServerPort`).
  *
  * Only the packaged configuration is loaded (`spring.config.location=classpath:/`), so a local `config/application.yml`
  * can't change the fees under test, and every `restate.*` setting comes from `@DynamicPropertySource`.

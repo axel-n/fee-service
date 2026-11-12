@@ -10,11 +10,8 @@ GET  /transaction/fee/{id}     → the stored fee record: IN_PROGRESS, COMPLETED
 
 - [Requirements](requirements.md): the challenge
 - [Design](docs/design.md): goal, fee table, how Restate is used, class design, wiring, call graph, guarantees
-- [Decisions](docs/decisions.md): the decision log (D1…) and the open questions
-- [Tasks](tasks.md): the implementation checklist
 - [Dev environment](dev-setup/README.md): the dev Restate and the dev container (`podman compose`)
-- [How AI was used](docs/ai-usage.md): the plan files, the spike, the task runner and its gate, what a person reviews
-- [Live demo](docs/demo.md): `demo/demo.sh`, self-registration → a fee → resubmit → `kill -9` mid-charge → recovery → the journal
+- [How AI was used](docs/ai-usage.md): the task runner and its gate, what a person reviews
 
 ## What it does
 
@@ -82,9 +79,10 @@ again**, so the wallet is not charged twice. RECORD then runs, and the waiting c
 *while* the wallet call is running, that step was not journaled yet, so it runs again; the wallet's idempotency key
 (`fee-{transaction_id}`) keeps it to one charge.
 
-**Startup.** The app starts its Restate endpoint on port 9080 and then registers it with Restate's admin API: it registers
-a missing endpoint, re-registers one whose services changed, and leaves an up-to-date one alone. If Restate isn't
-reachable, the app still starts, logs a WARN and keeps retrying in the background. Until then, requests get 503.
+**Startup.** The app starts its Restate endpoint on port 9080 and needs nothing else from Restate to start. It calls
+Restate only through the ingress (`restate.ingress-url`). Restate calls the workflow through the endpoint, once the
+endpoint is registered with it: a one-time setup step (see [Run](#run)), not something the app does. Until then, or while
+Restate is down, requests get 503.
 
 ## Architecture
 
@@ -98,13 +96,13 @@ Two Maven modules under the root `pom.xml` (the parent, `fee-service-parent`):
 The packages of the service module:
 
 ```
-config/            RestateProperties, FeeProperties, FakeWalletProperties   every @ConfigurationProperties class: one file per
+config/            RestateProperties, FeeProperties                         every @ConfigurationProperties class: one file per
                                                                             top-level section of application.yml
 api/               TransactionFeeController, ApiExceptionHandler            HTTP only, errors as RFC 7807 ProblemDetail
 application/       FeeService, WorkflowKey                                  thin gateway: key → submit/attach → HTTP result
 workflow/          FeeWorkflow, its durable types, StepHook                 the Restate workflow: every business step
 record/            TransactionFeeRecord, FeeRecord, ClaimDecider            the Restate virtual object: one fee per transaction_id
-restate/           RestateEndpointLifecycle, RestateRegistrar, …            Restate plumbing: endpoint, self-registration, clients
+restate/           RestateEndpointLifecycle, RestateConfig                  Restate plumbing: the endpoint, the ingress clients
 validation/        TransactionValidator, RequestValidator, ValidationError  run inside the workflow (VALIDATE)
 validation/rule/   one TransactionValidator bean per check, by @Order
 fee/               FeeRule, FeeCalculator                                   run inside the workflow (CALCULATE)
@@ -119,8 +117,7 @@ The controller calls only `FeeService`, `FeeService` holds no business logic, an
 injected rule and validator lists work behind the workflow too.
 
 The full class design, the wiring, the call graph and the idempotency and recovery guarantees are in
-[`docs/design.md`](docs/design.md). Why each choice was made, and what is still open, is in
-[`docs/decisions.md`](docs/decisions.md).
+[`docs/design.md`](docs/design.md).
 
 ## Setup
 
@@ -141,8 +138,7 @@ The full class design, the wiring, the call graph and the idempotency and recove
      docker.restate.dev/restatedev/restate:1.8.1
    ```
 
-   Restate must reach the app's endpoint at `restate.advertised-url` (default `http://host.docker.internal:9080`; the
-   `--add-host` makes that name work on Linux too).
+   The `--add-host` lets Restate reach the app on the host as `host.docker.internal`, on Linux too.
 
 2. Start the app:
 
@@ -150,23 +146,28 @@ The full class design, the wiring, the call graph and the idempotency and recove
    mvn spring-boot:run
    ```
 
-   The API listens on port **8081**, the Restate endpoint on **9080**. Registration is automatic; look for
-   `RestateRegistrar : Restate endpoint http://…:9080: registered …` (or `already registered`) in the log.
+   The API listens on port **8081**, the Restate endpoint on **9080** (`Restate endpoint listening on port 9080` in the log).
 
-Inside the dev container the Restate addresses come from environment variables (`RESTATE_INGRESS_URL=http://restate:8080`,
-`RESTATE_ADMIN_URL=http://restate:9070`, `RESTATE_ADVERTISED_URL=http://dev:9080`), so `mvn spring-boot:run` works unchanged.
+3. Register the endpoint with Restate (once), under the URL Restate reaches the app at. Restate calls that URL to
+   discover the workflow and the virtual object:
 
-### Watch a crash recovery yourself
+   ```bash
+   curl -X POST http://localhost:9070/deployments -H 'content-type: application/json' \
+     -d '{"uri": "http://host.docker.internal:9080", "force": true}'
+   ```
 
-`demo/demo.sh` does all of this step by step and checks each claim. See [`docs/demo.md`](docs/demo.md). By hand: the
-fake wallet can wait before it charges, which leaves time to kill the app in the middle of CHARGE:
+   (or `restate deployments register http://host.docker.internal:9080` with the Restate CLI). Restate keeps the
+   registration across app restarts. Run it again only when the endpoint's URL changes or after a change to a handler's
+   signature: `force` makes Restate pick up the changed services.
 
-1. Start the app with `WALLET_FAKE_DELAY=20s mvn spring-boot:run`.
-2. Send a request (see below) and kill the app (`kill -9`) while it waits.
-3. Start the app again. Restate retries the invocation on the new process (the log shows `Invocation started` again):
-   VALIDATE, CLAIM and CALCULATE come from the journal, and only CHARGE and RECORD run.
-4. Send the same payload again: it attaches to the same workflow and returns the same fee. `GET /transaction/fee/{id}`
-   shows `COMPLETED`.
+Inside the dev container the ingress URL comes from an environment variable (`RESTATE_INGRESS_URL=http://restate:8080`),
+so `mvn spring-boot:run` works unchanged. Restate reaches the app there as `http://dev:9080`, so register that URL with
+`http://restate:9070` (the container also sets `RESTATE_ADMIN_URL` and `RESTATE_ADVERTISED_URL` to these two):
+
+```bash
+curl -X POST "$RESTATE_ADMIN_URL/deployments" -H 'content-type: application/json' \
+  -d "{\"uri\": \"$RESTATE_ADVERTISED_URL\", \"force\": true}"
+```
 
 ## Configuration
 
@@ -179,16 +180,9 @@ app starts from (or `--spring.config.additional-location=file:/etc/fee-service/`
 |-----|----------------------|---------|------------|
 | `server.port` | `SERVER_PORT` | `8081` | HTTP API port |
 | `restate.ingress-url` | `RESTATE_INGRESS_URL` | `http://localhost:8080` | Restate ingress, used by `FeeService` |
-| `restate.admin-url` | `RESTATE_ADMIN_URL` | `http://localhost:9070` | Restate admin API, used for registration |
-| `restate.endpoint-port` | `RESTATE_ENDPOINT_PORT` | `9080` | port the Restate endpoint listens on |
-| `restate.advertised-url` | `RESTATE_ADVERTISED_URL` | `http://host.docker.internal:9080` | the endpoint's URL as Restate reaches it |
+| `restate.endpoint-port` | `RESTATE_ENDPOINT_PORT` | `9080` | port the Restate endpoint listens on, where Restate calls the workflow |
 | `restate.attach-timeout` | `RESTATE_ATTACH_TIMEOUT` | `10s` | how long `POST` waits for the result before answering 202 |
-| `restate.registration.enabled` | `RESTATE_REGISTRATION_ENABLED` | `true` | self-registration on startup |
-| `restate.registration.max-attempts` | `RESTATE_REGISTRATION_MAX_ATTEMPTS` | `10` | attempts before the WARN (retries continue) |
-| `restate.registration.backoff` | `RESTATE_REGISTRATION_BACKOFF` | `2s` | wait between registration attempts |
-| `spring.http.client.connect-timeout`, `.read-timeout` | `SPRING_HTTP_CLIENT_CONNECTTIMEOUT`, `…_READTIMEOUT` | `5s`, `30s` | timeouts of the admin API calls |
 | `fee.<type>.rate`, `.min`, `.fixed` | (use a file) | see [Fee table](#fee-table) | fee numbers per transaction type |
-| `wallet.fake.delay` | `WALLET_FAKE_DELAY` | `0s` | the fake wallet's wait before it charges (demo only) |
 
 Fees are easiest to change in a file next to the app. It needs only the keys that change:
 
@@ -209,9 +203,8 @@ never go stale.
 | Change | Effect |
 |--------|--------|
 | Fee numbers | Safe. A workflow that already passed CALCULATE keeps its journaled fee; everything else uses the new numbers. Completed records are never recalculated: resending a charged payload returns the original response |
-| `restate.ingress-url`, `admin-url`, `attach-timeout`, `registration.*`, `server.port`, timeouts, `wallet.fake.delay` | Safe |
-| `restate.advertised-url` | Registers a new deployment. Invocations in flight stay on the old URL and keep retrying it, so let them finish first |
-| `restate.endpoint-port` | Safe if the port in `advertised-url` changes with it (unless something forwards between the two) |
+| `restate.ingress-url`, `attach-timeout`, `server.port` | Safe |
+| `restate.endpoint-port` (or the app's host) | Register the new URL with Restate; it becomes a new deployment. Invocations in flight stay on the old URL and keep retrying it, so let them finish first |
 
 Renaming a key or a variable breaks existing override files and environments.
 
@@ -310,7 +303,7 @@ scripts/check.sh      # the project's gate: rule checks + mvn clean verify, and 
 
 - **Unit tests** (`*Test`) cover every production class: each validator and its messages, each fee rule and building
   block (rounding, minimums, `BigDecimal` comparisons), the claim rules, the payload hash, the serde of every durable type,
-  the gateway's HTTP mapping, the registrar's retries. `TestCoverageAuditTest` fails when a production file has no test.
+  the gateway's HTTP mapping, the packaged configuration. `TestCoverageAuditTest` fails when a production file has no test.
 - **BDD features** ([`service/src/test/resources/features/`](service/src/test/resources/features)) describe the behaviour end to end against
   a real Restate: fee calculation per type and asset, validation, transaction state (rejected → corrected), idempotency
   and workflow recovery.
@@ -329,8 +322,6 @@ What the recovery tests prove (each asserts the wallet's **charge count**, not j
 | `DeterminismIT` | A validation result is journaled: moving the clock between a crash and the retry doesn't change it |
 | `DuplicatesIT`, `idempotency.feature` | The same payload, sequentially or 10 callers at once, is charged once; different payloads for one id charge one and conflict the rest |
 | `RetentionExpiredIT` | After Restate dropped a finished run, the same payload returns the stored response without charging again |
-| `StartupRegistrationIT` | A fresh Restate gets the endpoint registered on startup; a second start changes nothing; an app started while Restate is down starts with a WARN and registers once Restate is back |
-
 ## Fee table
 
 The defaults in the packaged `application.yml`, changeable with a restart (see [Configuration](#configuration)). Fixed
@@ -369,21 +360,19 @@ order or the JSON of `FeeRequest`/`FeeResponse` is a breaking change for in-flig
 - An amount may not have more decimals than its asset (`10.001 USD` is 422); trailing zeros don't count, and `1000` and
   `1000.00` are the same payload.
 - `fee` is returned at the asset's scale (`1.50`, which equals the challenge's `1.5`); `amount` is echoed as sent.
-- The same `transaction_id` with a different payload after a charge is a **409** (open question 1); a rejected payload
+- The same `transaction_id` with a different payload after a charge is a **409**; a rejected payload
   doesn't use up the id.
 - The wallet is an in-memory fake, idempotent by key. Its charges are lost on restart; the fee records in Restate are not.
 - Bank Transfer has a minimum and no maximum.
 
 ## Future work
 
-- **Kubernetes:** expose `RegistrationStatus` as an Actuator **readiness** indicator (not ready until the endpoint is
-  registered; a disabled registration counts as ready) and add a **liveness** probe. Actuator is not added yet; it needs
-  approval as a dependency.
+- **Kubernetes:** register the endpoint as a deploy step (a Job, or the Restate operator) and add **readiness** and
+  **liveness** probes. Actuator is not added yet; it needs approval as a dependency.
 - **Graceful shutdown of the endpoint:** stopping it today closes open connections, and Restate retries the interrupted
   invocations (safe, but noisy). Stop accepting new invocations and drain the running ones first.
 - **Deployments per version:** register each release under its own URL and let the old one drain instead of re-registering
-  with `force` (open question 4).
-- **Cancelled, killed or paused workflows** leave the record `IN_PROGRESS`, so the id gets 409 until an operator acts
-  (open question 5).
-- A real wallet integration; the Restate SDK's newer handler API before an upgrade removes the current one (D29); Spring
-  Boot 4 with Jackson 3 (D25).
+  with `force`.
+- **Cancelled, killed or paused workflows** leave the record `IN_PROGRESS`, so the id gets 409 until an operator acts.
+- A real wallet integration; the Restate SDK's newer handler API before an upgrade removes the current one; Spring
+  Boot 4 with Jackson 3.

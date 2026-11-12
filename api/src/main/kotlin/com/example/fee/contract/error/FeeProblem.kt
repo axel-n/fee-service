@@ -5,7 +5,7 @@ import com.fasterxml.jackson.annotation.JsonInclude
 import com.fasterxml.jackson.annotation.JsonProperty
 
 /**
- * The body of every error response of the fee service: an RFC 7807 problem (`application/problem+json`, D19, D60).
+ * The body of every error response of the fee service: an RFC 7807 problem (`application/problem+json`).
  *
  * [type], [title], [status], [detail] and [instance] are always there. The service's own failures add [code] (a
  * [FeeErrorCode] name) and the properties of their [FeeException]: a rejected request [field], [value] and [message];

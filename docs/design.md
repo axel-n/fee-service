@@ -1,7 +1,6 @@
 # fee-service — Design
 
-What the service does and how it is built. Decisions (`D1`…) and open questions: [`decisions.md`](decisions.md).
-Task checklist: [`../tasks.md`](../tasks.md). Agent and contributor rules: [`../AGENTS.md`](../AGENTS.md).
+What the service does and how it is built. Agent and contributor rules: [`../AGENTS.md`](../AGENTS.md).
 
 ## Goal
 
@@ -15,8 +14,8 @@ Principles:
 - **Minimal layers, minimal dependencies.** Anything `requirements.md` does not require is left out.
 - **Easy to extend.** A new validation or fee rule is one new class.
 - **Easy to test.** Constructor injection everywhere. Restart and recovery are tested explicitly.
-- **Self-registering.** On startup the app registers its Restate endpoint if Restate doesn't know it yet.
-- **Configurable without rebuilding.** Fee numbers and Restate addresses come from external configuration, and a restart applies them.
+- **Only the Restate connection it needs.** The app calls only the Restate ingress; registering its endpoint is a one-time setup step.
+- **Configurable without rebuilding.** Fee numbers and the Restate ingress URL come from external configuration, and a restart applies them.
 
 Reference example (Mobile Top Up, 0.15%):
 
@@ -38,7 +37,7 @@ Request                                     Response
 ## Fee table
 
 The numbers below are the defaults in the packaged `application.yml`. They can be changed with a restart, without a rebuild
-(see [Configuration](#configuration), D22, D23). Fixed amounts are in the transaction's asset (USD or EUR, same numbers).
+(see [Configuration](#configuration)). Fixed amounts are in the transaction's asset (USD or EUR, same numbers).
 Fees are rounded `HALF_EVEN` to 2 decimals. Bank Transfer has a minimum and, for now, no maximum.
 
 Descriptions are **built from the configured numbers and the transaction's asset** (`{asset}` below), so they never go stale.
@@ -72,7 +71,7 @@ Spring app: TransactionFeeController → FeeService           (thin gateway, no 
    │  1. transaction_id present and well-formed?  (needed to build the key; otherwise 400)
    │  2. key = txn_001:<payloadHash>
    │  3. submit FeeWorkflow/<key>/run, then attach  (a duplicate gets PREVIOUSLY_ACCEPTED
-   │     and the first run's result, D30; no result within attach-timeout → 202)
+   │     and the first run's result, no result within attach-timeout → 202)
    ▼
 Restate server (external Docker) ── journals every step ───────────────────────────┐
    │ invokes the app's endpoint (port 9080)                                         │
@@ -91,16 +90,18 @@ FeeWorkflow.run(input)                                                          
 a new instance) receives the journal. VALIDATE, CLAIM, CALCULATE and CHARGE are **replayed from the journal and not
 executed again**, so the wallet is not charged twice. RECORD then runs, and the waiting HTTP caller gets the result.
 
-**Startup.** `RestateEndpointLifecycle` starts the endpoint on port 9080. `RestateRegistrar` then makes sure Restate
-knows this endpoint (it registers it if missing and re-registers it if the services changed). Only then is the app fully ready.
-Restate ignores changed services when a known URI is re-registered without `force`, so the registrar detects a change itself.
-It asks Restate to discover the endpoint in a dry run and compares that with the registered deployment (D31).
+**Startup.** `RestateEndpointLifecycle` starts the endpoint on port 9080. The app talks to Restate only through the ingress
+(`restate.ingress-url`); Restate talks to the app through this endpoint. Restate sends work only to a registered endpoint, so
+whoever runs the app registers it once with Restate's admin API:
+`POST <admin>/deployments {"uri":"<endpoint URL as Restate reaches it>","force":true}`. Restate then discovers the services by
+calling the endpoint, and keeps the registration across app restarts while the URL stays the same. After a change to a
+handler's signature, register again: `force` updates the deployment in place, without it Restate keeps the old services.
 
 ---
 
 ## Class design
 
-Two Maven modules under the root `pom.xml` (`fee-service-parent`), D76:
+Two Maven modules under the root `pom.xml` (`fee-service-parent`):
 
 | Module | Artifact | Holds |
 |--------|----------|-------|
@@ -110,33 +111,32 @@ Two Maven modules under the root `pom.xml` (`fee-service-parent`), D76:
 Base package: `com.example.fee`. The tree lists **files**. A package holds one kind of class, and an extension point's
 implementations get their own sub-package (`fee.rule`, `fee.formula`, `validation.rule`). A file holds one main type plus the
 small types and helpers that exist only to serve it: its result and field types, its default implementation, its internal
-helpers. Every `@ConfigurationProperties` class lives in `config`, one file per top-level section of `application.yml` (D75).
+helpers. Every `@ConfigurationProperties` class lives in `config`, one file per top-level section of `application.yml`.
 A test file mirrors its production file, with one test class per production class.
 
 ```
 com.example.fee
 ├── FeeServiceApplication.kt            @SpringBootApplication + @ConfigurationPropertiesScan + main(); Clock bean
 │
-├── config/                             every @ConfigurationProperties class: what application.yml and its overrides can set (D75)
-│   ├── RestateProperties.kt            restate.*: ingressUrl, adminUrl, endpointPort, advertisedUrl, attachTimeout, registration.{enabled, maxAttempts, backoff}
-│   ├── FeeProperties.kt                fee.*: MobileTopUpFeeProperties, BankTransferFeeProperties, MerchantPaymentFeeProperties,
-│   │                                   CashWithdrawalFeeProperties: one class per type, fee.<type>.{rate, min, fixed} as the formula needs;
-│   │                                   init checks requiredRate / requiredAmount fail startup on a bad value (D23, D41)
-│   └── FakeWalletProperties.kt         wallet.fake: delay (D24, D46)
+├── config/                             every @ConfigurationProperties class: what application.yml and its overrides can set
+│   ├── RestateProperties.kt            restate.*: ingressUrl, endpointPort, attachTimeout
+│   └── FeeProperties.kt                fee.*: MobileTopUpFeeProperties, BankTransferFeeProperties, MerchantPaymentFeeProperties,
+│                                       CashWithdrawalFeeProperties: one class per type, fee.<type>.{rate, min, fixed} as the formula needs;
+│                                       init checks requiredRate / requiredAmount fail startup on a bad value
 │
 ├── api/                                HTTP only
-│   ├── TransactionFeeController.kt     POST /transaction/fee (200, or 202 + Location), GET /transaction/fee/{id}; both answer FeeStatusResponse (D77) → calls only FeeService
-│   └── ApiExceptionHandler.kt          @RestControllerAdvice: FeeException (+ its `code`) and Spring MVC errors → ProblemDetail (D60, D76);
-│                                       FeeInProgressException → 202 + Location + FeeStatusResponse IN_PROGRESS (D77)
+│   ├── TransactionFeeController.kt     POST /transaction/fee (200, or 202 + Location), GET /transaction/fee/{id}; both answer FeeStatusResponse → calls only FeeService
+│   └── ApiExceptionHandler.kt          @RestControllerAdvice: FeeException (+ its `code`) and Spring MVC errors → ProblemDetail;
+│                                       FeeInProgressException → 202 + Location + FeeStatusResponse IN_PROGRESS
 │
-├── contract/                           [api module] DTOs shared by HTTP and Restate (pure Kotlin + Jackson annotations, snake_case), D21
+├── contract/                           [api module] DTOs shared by HTTP and Restate (pure Kotlin + Jackson annotations, snake_case)
 │   ├── FeeRequest.kt                   all fields nullable; enums/dates as String, amount as BigDecimal. Journaled as the workflow input
 │   ├── FeeResponse.kt                  transaction_id, amount, asset, type, fee, rate, description. Stored permanently in TransactionFeeRecord;
-│   │                                   HTTP clients get it only inside FeeStatusResponse (D77)
+│   │                                   HTTP clients get it only inside FeeStatusResponse
 │   ├── FeeStatusResponse.kt            POST and GET body: transaction_id, status, the FeeResponse fields once COMPLETED, failure_reason once FAILED
 │   │                                   (HTTP only, never stored)
-│   ├── PlainBigDecimalSerializer.kt    BigDecimal as a plain JSON number (D38)
-│   └── error/                          [api module] what the API answers instead of a fee (D76)
+│   ├── PlainBigDecimalSerializer.kt    BigDecimal as a plain JSON number
+│   └── error/                          [api module] what the API answers instead of a fee
 │       ├── FeeException.kt             sealed, Spring-free: ValidationException(field, value, message, kind) (400/422), DuplicateTransactionException (409),
 │       │                               ChargeFailedException (422), TransactionNotFoundException (404, GET), WorkflowUnavailableException (503);
 │       │                               + FeeErrorCode: the problem's `code`, with its HTTP status. Gateway only: the workflow returns FeeOutcome
@@ -146,7 +146,7 @@ com.example.fee
 ├── application/                        thin gateway to Restate
 │   ├── FeeService.kt                   FeeService: key pre-check → WorkflowKey → submit/attach (bounded by attachTimeout) → FeeOutcome →
 │   │                                   FeeStatusResponse COMPLETED (200) or FeeException (a ValidationError becomes a ValidationException here);
-│   │                                   FeeInProgressException(transactionId): no result within attachTimeout → 202 (not a FeeException, D77)
+│   │                                   FeeInProgressException(transactionId): no result within attachTimeout → 202 (not a FeeException)
 │   └── WorkflowKey.kt                  WorkflowKey (value class "{transactionId}:{payloadHash}") + PayloadHash: SHA-256 of the canonical FeeRequest
 │                                       (amount normalized: 1000 == 1000.00)
 │
@@ -170,7 +170,7 @@ com.example.fee
 ├── domain/                             pure Kotlin
 │   ├── Transaction.kt                  data class Transaction + the enums of its fields: TransactionType, TransactionState, Asset (with its
 │   │                                   decimals and AssetType), AssetType; each with value, UNKNOWN and fromValue()
-│   ├── TransactionMapper.kt            FeeRequest → Transaction? (after validation; never throws; null if unvalidated, D39)
+│   ├── TransactionMapper.kt            FeeRequest → Transaction? (after validation, never throws, null if unvalidated)
 │   └── CreatedAtFormat.kt              parseOrNull(created_at): the one created_at format, shared with CreatedAtValidator
 │
 ├── fee/
@@ -183,9 +183,9 @@ com.example.fee
 │       └── MobileTopUpFeeRule.kt, BankTransferFeeRule.kt, MerchantPaymentFeeRule.kt, CashWithdrawalFeeRule.kt
 │
 ├── workflow/                           the FeeWorkflow Restate service
-│   ├── FeeWorkflow.kt                  @Component @Workflow run(FeeWorkflowInput): FeeOutcome; @Shared status(): WorkflowStep? (D50)
+│   ├── FeeWorkflow.kt                  @Component @Workflow run(FeeWorkflowInput): FeeOutcome; @Shared status(): WorkflowStep?
 │   │                                   ctor: RequestValidator, TransactionMapper, FeeCalculator, WalletGateway, StepHook
-│   │                                   (the ctx-based codegen API of SDK 2.9.3, deprecated but kept, D29)
+│   │                                   (the ctx-based codegen API of SDK 2.9.3, deprecated but kept)
 │   ├── FeeWorkflowTypes.kt             its durable types: FeeWorkflowInput (request, payloadHash); FeeOutcome (sealed: Charged(response),
 │   │                                   Rejected(error), Conflict(transactionId), Failed(reason)); WorkflowStep (VALIDATE … RECORD, DONE)
 │   └── StepHook.kt                     interface before(step, key)/after(step, key) + NoOpStepHook, the default @Component
@@ -199,24 +199,18 @@ com.example.fee
 │                                       (sealed: New, AlreadyCompleted(response), InProgress, Conflict)
 │   (generated by sdk-api-gen: TransactionFeeRecordClient, TransactionFeeRecordHandlers)
 │
-├── restate/                            Restate plumbing: the endpoint, registration, the ingress clients
+├── restate/                            Restate plumbing: the endpoint and the ingress clients
 │   ├── RestateEndpointLifecycle.kt     SmartLifecycle: binds the FeeWorkflow and TransactionFeeRecord beans, starts/stops the endpoint server (port 9080)
-│   │                                   on its own Vert.x instance, reached by reflection (vertx-core is runtime-only, D32)
-│   ├── RestateRegistrar.kt             ApplicationReadyEvent: ensure the deployment is registered (missing → register, changed → force);
-│   │                                   retries on Boot's TaskScheduler every `backoff`, WARN + FAILING after maxAttempts (D55);
-│   │                                   "changed" = dry-run discovery differs from the registered services (D31)
-│   ├── RegistrationStatus.kt           bean: PENDING / REGISTERED / FAILING + last error; the future readiness indicator (D15)
-│   ├── RestateAdminClient.kt           Spring RestClient wrapper: listDeployments(), deployment(id), register(uri, force, dryRun);
-│   │                                   failures → RestateAdminException; plus its response types (D54)
+│   │                                   on its own Vert.x instance, reached by reflection (vertx-core is runtime-only)
 │   └── RestateConfig.kt                @Configuration: ingress Client bean; the keyed client factories FeeWorkflowClients and
-│                                       TransactionFeeRecordClients (fun interface forKey(key) → generated IngressClient, D52), because
+│                                       TransactionFeeRecordClients (fun interface forKey(key) → generated IngressClient), because
 │                                       generated clients are created per key and FeeService must be testable with mocks
 │
 └── wallet/
     ├── WalletGateway.kt                interface charge(idempotencyKey, amount, asset): ChargeReceipt + ChargeReceipt (data class) +
     │                                   ChargeDeclinedException (business failure; rethrown as TerminalException inside the CHARGE ctx.run
     │                                   → FeeOutcome.Failed)
-    └── FakeWalletGateway.kt            @Component, in-memory, idempotent by key, chargeCount(key); waits wallet.fake.delay first (demo, D24); logs each wait and charge (D74)
+    └── FakeWalletGateway.kt            @Component, in-memory, idempotent by key, chargeCount(key); logs each charge
 ```
 
 ### Wiring: Spring builds, Restate invokes
@@ -228,8 +222,8 @@ com.example.fee
   `@Shared`) appear only on the two handler classes.
 - Handler beans are singletons shared by all invocations, so they hold no mutable state. Per-invocation state lives in `ctx`.
 - Everything that crosses Restate's serde (handler inputs and outputs, `ctx.run` results, VO state) is part of the durable contract.
-  That includes `FeeWorkflowInput`, `FeeOutcome`, `ValidationError`, `ClaimResult`, `FeeRecord`, and the `contract` DTOs inside them (D21).
-  Restate serializes them with its own Jackson mapper, not Spring's (D35), and that mapper rejects unknown properties.
+  That includes `FeeWorkflowInput`, `FeeOutcome`, `ValidationError`, `ClaimResult`, `FeeRecord`, and the `contract` DTOs inside them.
+  Restate serializes them with its own Jackson mapper, not Spring's, and that mapper rejects unknown properties.
   Sealed types need `@JsonTypeInfo` with **explicit `@JsonSubTypes` names**, so the stored type ids don't depend on class names.
   Subtypes without fields are `data object`: deserialization returns a new instance that is `==` to the object but not `===`, so compare with `==`, `is` or `when`.
 
@@ -241,7 +235,7 @@ TransactionFeeController ──▶ FeeService (only)
 FeeService
   ├─▶ TransactionIdValidator.validate(request)   key pre-check only (400 if bad)
   ├─▶ PayloadHash.of(request) → WorkflowKey
-  ├─▶ FeeWorkflowClient(ingress).submit(key, input) → attach  (also when PREVIOUSLY_ACCEPTED, D30)
+  ├─▶ FeeWorkflowClient(ingress).submit(key, input) → attach  (also when PREVIOUSLY_ACCEPTED)
   └─▶ FeeOutcome → FeeStatusResponse | throw FeeException   (still running → throw FeeInProgressException)
       (GET /{id} → TransactionFeeRecordClient(ingress).get(id) → FeeStatusResponse)
 
@@ -255,7 +249,7 @@ FeeWorkflow.run(ctx, input)          StepHook.before/after around every step
   ├─ CHARGE    ctx.run ─▶ WalletGateway   (decline → TerminalException, thrown inside the closure)
   └─ RECORD    ─▶ TransactionFeeRecordClient(ctx).complete(response) | fail(reason)
 
-Startup: RestateEndpointLifecycle.start() → (ApplicationReadyEvent) RestateRegistrar ─▶ RestateAdminClient
+Startup: RestateEndpointLifecycle.start()   (registering the endpoint with Restate is a setup step outside the app)
 Errors:  ApiExceptionHandler ◀── Spring, for FeeException
 ```
 
@@ -263,9 +257,9 @@ Rules:
 1. **The controller calls only `FeeService`. `FeeService` contains no business logic;** it routes and maps.
 2. **Every business step runs inside `FeeWorkflow`.** Non-deterministic work (clock, wallet, I/O) goes inside `ctx.run`. So does
    reading configuration that affects a decision (the fee numbers), so a restart with new values can't make a replay diverge.
-3. **Restate is reached only through the generated clients** (ingress clients in `FeeService`, `ctx` clients in the workflow) and through `RestateAdminClient` for registration.
+3. **Restate is reached only through the generated clients** (ingress clients in `FeeService`, `ctx` clients in the workflow). The app never calls the admin API.
 4. **`contract`, `domain`, `fee`, `validation` and `ClaimDecider` are pure.** They are unit-tested without Restate. The api module
-   (`contract`, `contract.error`) is published to other services, so it imports neither Spring nor anything of the service (D76).
+   (`contract`, `contract.error`) is published to other services, so it imports neither Spring nor anything of the service.
 5. **The workflow returns `FeeOutcome` for business results** and throws only for infrastructure problems (which Restate retries) or for `TerminalException` (charge declined).
 
 ### Extension points
@@ -279,13 +273,13 @@ Rules:
 | a workflow step | a `WorkflowStep` value + a step in `FeeWorkflow` wrapped with `StepHook` (recovery tests then cover it) |
 | a real wallet | a `WalletGateway` implementation that replaces the fake |
 | a tunable value | a field in the matching `@ConfigurationProperties` class in `config` (a new top-level section gets its own file there) + its default in `application.yml` (+ a `${ENV_VAR:…}` placeholder for an operational setting) |
-| an error the API answers with | in the api module: a `FeeException` subclass + its `FeeErrorCode` value, its properties in `FeeProblem` and a branch in `toException()`; in the service: an `@ExceptionHandler` in `ApiExceptionHandler` that adds those properties (D76) |
+| an error the API answers with | in the api module: a `FeeException` subclass + its `FeeErrorCode` value, its properties in `FeeProblem` and a branch in `toException()`; in the service: an `@ExceptionHandler` in `ApiExceptionHandler` that adds those properties |
 
 ---
 
 ## Configuration
 
-Every tunable value comes from Spring Boot's externalized configuration, so changing it needs **a restart, not a rebuild** (D22).
+Every tunable value comes from Spring Boot's externalized configuration, so changing it needs **a restart, not a rebuild**.
 The packaged `application.yml` holds the defaults and is the only place they are written down. Kotlin code doesn't repeat them.
 Overrides, highest priority first:
 
@@ -302,14 +296,9 @@ because a restart is enough.
 |-----|----------------------|------------|
 | `server.port` | `SERVER_PORT` | HTTP API port |
 | `restate.ingress-url` | `RESTATE_INGRESS_URL` | Restate ingress, used by `FeeService` |
-| `restate.admin-url` | `RESTATE_ADMIN_URL` | Restate admin API, used by `RestateRegistrar` |
-| `restate.endpoint-port` | `RESTATE_ENDPOINT_PORT` | port the Restate endpoint listens on |
-| `restate.advertised-url` | `RESTATE_ADVERTISED_URL` | the endpoint's URL as Restate reaches it; sent at registration |
+| `restate.endpoint-port` | `RESTATE_ENDPOINT_PORT` | port the Restate endpoint listens on; Restate calls it at the URL it was registered with |
 | `restate.attach-timeout` | `RESTATE_ATTACH_TIMEOUT` | how long `POST` waits for the result before answering 202 |
-| `restate.registration.enabled`, `.max-attempts`, `.backoff` | `RESTATE_REGISTRATION_ENABLED`, `…_MAX_ATTEMPTS`, `…_BACKOFF` | registration switch and retry (D15) |
-| `spring.http.client.connect-timeout`, `.read-timeout` | `SPRING_HTTP_CLIENT_CONNECTTIMEOUT`, `…_READTIMEOUT` | timeouts of the admin API calls (D54) |
 | `fee.<type>.rate`, `.min`, `.fixed` | (use a file) | fee numbers per transaction type, see the [fee table](#fee-table) |
-| `wallet.fake.delay` | `WALLET_FAKE_DELAY` | how long the fake wallet waits before it charges; `0s`, raised only for the demo (D24) |
 
 The `restate.*` keys use explicit placeholders in `application.yml`, e.g. `ingress-url: ${RESTATE_INGRESS_URL:http://localhost:8080}`.
 Spring's automatic mapping would drop the dashes (`RESTATE_INGRESSURL`). The placeholders keep the variable names readable and list
@@ -330,9 +319,8 @@ Money values are quoted so they reach `BigDecimal` as strings. A missing or inva
 | Change | Effect |
 |--------|--------|
 | Fee numbers | A workflow that already passed CALCULATE keeps its journaled fee. Every other workflow, and every new request, uses the new numbers. Completed records are never recalculated: resubmitting the same payload returns the original response |
-| `restate.ingress-url`, `admin-url`, `attach-timeout`, `registration.*`, `server.port` | Safe |
-| `restate.advertised-url` | Restate treats the new URL as a new deployment and the registrar registers it. In-flight invocations stay pinned to the old URL and keep retrying it, so let them finish first (open question 4) |
-| `restate.endpoint-port` | Keep it consistent with the port in `advertised-url`, unless something forwards between the two |
+| `restate.ingress-url`, `attach-timeout`, `server.port` | Safe |
+| The endpoint's URL (another host or `endpoint-port`) | Register the new URL with Restate; it becomes a new deployment. In-flight invocations stay pinned to the old URL and keep retrying it, so let them finish first |
 
 ---
 
@@ -346,11 +334,10 @@ Money values are quoted so they reach `BigDecimal` as strings. A missing or inva
 | Same id, different payloads, concurrently | Both workflows CLAIM on the same Virtual Object (exclusive) → one `New`, the other `InProgress`/`Conflict` → 409 |
 | Same payload after workflow retention expired | New workflow → CLAIM → `AlreadyCompleted(response)` → same response, no charge |
 | App crashes at any step boundary | Restate retries; journaled steps are replayed, not re-executed → **1 charge**, record `COMPLETED` |
-| Endpoint stops while a `ctx.run` is running (e.g. CHARGE) | The step was not journaled, so it runs again after the restart. The wallet is idempotent by key → **1 charge** (D32) |
-| Endpoint keeps failing (70 attempts, about an hour at the default retry policy) | Restate **pauses** the invocation; the record stays `IN_PROGRESS` until an operator resumes or kills it (D33, open question 5) |
+| Endpoint stops while a `ctx.run` is running (e.g. CHARGE) | The step was not journaled, so it runs again after the restart. The wallet is idempotent by key → **1 charge** |
+| Endpoint keeps failing (70 attempts, about an hour at the default retry policy) | Restate **pauses** the invocation; the record stays `IN_PROGRESS` until an operator resumes or kills it |
 | Wallet fails transiently | `ctx.run` is retried by Restate → eventually charged once |
 | Wallet declines | `TerminalException` → record `FAILED` → `FeeOutcome.Failed` → 422 |
 | Restate unreachable | `FeeService` → 503 |
-| Restate doesn't know our endpoint at startup | `RestateRegistrar` registers it |
-| Restate admin unreachable at startup | the app starts anyway with a WARN; the background retry registers it once Restate is up; until then requests get 503 |
+| Restate doesn't know our endpoint | Requests get 503 until it is registered (README, "Run"); registering it once is enough, restarts keep it |
 | App restarted with changed fee numbers | Workflows past CALCULATE keep the journaled fee; completed records keep their response; new workflows use the new numbers |
