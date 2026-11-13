@@ -156,7 +156,7 @@ else
     for m in "${MODULES[@]}"; do
       read -r ran _ < <(sum_reports "$m/target/surefire-reports")
       if [[ -n $(find "$m/src/test" -name '*Test.kt' 2>/dev/null) ]] && ((ran == 0)); then
-        problems+=("*Test classes exist in $m, but Surefire ran none of them: maven-surefire-plugin must be declared in $m/pom.xml")
+        problems+=("*Test classes exist in $m, but Surefire ran none of them: check maven-surefire-plugin in the root pom.xml")
       fi
       read -r ran _ < <(sum_reports "$m/target/failsafe-reports")
       if [[ $mode == full && -n $(find "$m/src/test" -name '*IT.kt' 2>/dev/null) ]] && ((ran == 0)); then

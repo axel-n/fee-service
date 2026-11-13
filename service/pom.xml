@@ -9,7 +9,8 @@
         <version>0.0.1-SNAPSHOT</version>
     </parent>
 
-    <!-- The app: the Spring Boot API, the Restate workflow and its endpoint -->
+    <!-- The app: the Spring Boot API, the Restate workflow and its endpoint. The Kotlin stdlib, kotlin-reflect and
+         Jackson's Kotlin module come from the api module, the test starter from the parent -->
     <artifactId>fee-service</artifactId>
     <name>fee-service</name>
     <description>Transaction fee service: Kotlin, Spring Boot and a Restate workflow</description>
@@ -27,24 +28,8 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-web</artifactId>
         </dependency>
-        <dependency>
-            <groupId>com.fasterxml.jackson.module</groupId>
-            <artifactId>jackson-module-kotlin</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.jetbrains.kotlin</groupId>
-            <artifactId>kotlin-reflect</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.jetbrains.kotlin</groupId>
-            <artifactId>kotlin-stdlib</artifactId>
-        </dependency>
-        <!-- Coroutines: the Restate handlers, FeeService and the controller are suspend functions -->
-        <dependency>
-            <groupId>org.jetbrains.kotlinx</groupId>
-            <artifactId>kotlinx-coroutines-core</artifactId>
-        </dependency>
-        <!-- Spring MVC runs a suspend controller method through Reactor: without it, the method isn't invoked -->
+        <!-- Spring MVC runs a suspend controller method through Reactor: without it, the method isn't invoked. It brings
+             kotlinx-coroutines-core, for the suspend Restate handlers, FeeService and controller -->
         <dependency>
             <groupId>org.jetbrains.kotlinx</groupId>
             <artifactId>kotlinx-coroutines-reactor</artifactId>
@@ -53,21 +38,12 @@
         <dependency>
             <groupId>dev.restate</groupId>
             <artifactId>sdk-kotlin-http</artifactId>
-            <version>${restate.version}</version>
-            <exclusions>
-                <!-- The SDK logs through log4j-api. Without log4j-core, Boot's log4j-to-slf4j routes it to Logback -->
-                <exclusion>
-                    <groupId>org.apache.logging.log4j</groupId>
-                    <artifactId>log4j-core</artifactId>
-                </exclusion>
-            </exclusions>
         </dependency>
         <!-- Jackson for everything Restate stores, instead of the Kotlin SDK's default kotlinx-serialization: the
              durable types and the api contract are Jackson-annotated, and stored records keep their JSON -->
         <dependency>
             <groupId>dev.restate</groupId>
             <artifactId>sdk-serde-jackson</artifactId>
-            <version>${restate.version}</version>
         </dependency>
 
         <!-- ContractMapper, for the tests of the durable types -->
@@ -77,17 +53,7 @@
             <type>test-jar</type>
             <scope>test</scope>
         </dependency>
-        <!-- JUnit 5, Mockito, AssertJ, MockRestServiceServer -->
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-test</artifactId>
-            <scope>test</scope>
-        </dependency>
-        <dependency>
-            <groupId>org.testcontainers</groupId>
-            <artifactId>testcontainers</artifactId>
-            <scope>test</scope>
-        </dependency>
+        <!-- Brings testcontainers itself -->
         <dependency>
             <groupId>org.testcontainers</groupId>
             <artifactId>junit-jupiter</artifactId>
@@ -117,39 +83,28 @@
 
     <build>
         <plugins>
-            <!-- The spring plugin opens @Component classes: Spring needs that, and so do the Restate SDK's client
-                 proxies, which subclass the handler classes -->
-            <plugin>
-                <groupId>org.jetbrains.kotlin</groupId>
-                <artifactId>kotlin-maven-plugin</artifactId>
-                <configuration>
-                    <compilerPlugins>
-                        <plugin>spring</plugin>
-                    </compilerPlugins>
-                </configuration>
-                <dependencies>
-                    <dependency>
-                        <groupId>org.jetbrains.kotlin</groupId>
-                        <artifactId>kotlin-maven-allopen</artifactId>
-                        <version>${kotlin.version}</version>
-                    </dependency>
-                </dependencies>
-            </plugin>
-            <plugin>
-                <groupId>com.github.gantsign.maven</groupId>
-                <artifactId>ktlint-maven-plugin</artifactId>
-            </plugin>
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-dependency-plugin</artifactId>
-            </plugin>
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-surefire-plugin</artifactId>
-            </plugin>
+            <!-- Integration and BDD tests (*IT), mvn verify. Boot's parent binds integration-test and verify -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-failsafe-plugin</artifactId>
+                <configuration>
+                    <includes>
+                        <include>**/*IT.java</include>
+                    </includes>
+                </configuration>
+            </plugin>
+            <!-- The Restate SDK loads its native state machine: java -jar grants it native access through the manifest,
+                 so the JDK doesn't warn -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-jar-plugin</artifactId>
+                <configuration>
+                    <archive>
+                        <manifestEntries>
+                            <Enable-Native-Access>ALL-UNNAMED</Enable-Native-Access>
+                        </manifestEntries>
+                    </archive>
+                </configuration>
             </plugin>
             <plugin>
                 <groupId>org.springframework.boot</groupId>
@@ -158,6 +113,8 @@
                     <!-- mvn spring-boot:run starts the app in the project root, as before the module split, so
                          a config/application.yml there still overrides the packaged defaults -->
                     <workingDirectory>${project.basedir}/..</workingDirectory>
+                    <!-- spring-boot:run starts a classpath JVM, which doesn't read the manifest above -->
+                    <jvmArguments>--enable-native-access=ALL-UNNAMED</jvmArguments>
                 </configuration>
             </plugin>
         </plugins>

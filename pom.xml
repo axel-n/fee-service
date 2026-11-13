@@ -13,7 +13,8 @@
     </parent>
 
     <!-- The parent and aggregator of the two modules: api is the contract other services depend on, service is the
-         app. Shared versions and plugin settings live here, so both modules compile and test the same way -->
+         app. Every version, and every dependency and plugin both modules use, is declared here once: a module declares
+         only what it alone uses, without a version. Nothing is declared that already comes transitively -->
     <groupId>com.example</groupId>
     <artifactId>fee-service-parent</artifactId>
     <version>0.0.1-SNAPSHOT</version>
@@ -46,8 +47,13 @@
         <ktlint-maven-plugin.version>3.7.1</ktlint-maven-plugin.version>
         <!-- mvn spring-boot:run from the root runs only the app: service sets it back to false -->
         <spring-boot.run.skip>true</spring-boot.run.skip>
+        <!-- The JVM of every test run: Surefire and Failsafe both read this property. Mockito loads as an agent instead
+             of self-attaching, which recent JDKs warn about and will refuse; @{…} is read when the tests start, after
+             dependency:properties has set the jar's path. Native access: the Restate SDK loads its native state machine -->
+        <argLine>-javaagent:@{org.mockito:mockito-core:jar} -Xshare:off --enable-native-access=ALL-UNNAMED</argLine>
     </properties>
 
+    <!-- Versions of what Boot's parent doesn't manage -->
     <dependencyManagement>
         <dependencies>
             <dependency>
@@ -62,6 +68,23 @@
                 <type>test-jar</type>
             </dependency>
             <dependency>
+                <groupId>dev.restate</groupId>
+                <artifactId>sdk-kotlin-http</artifactId>
+                <version>${restate.version}</version>
+                <exclusions>
+                    <!-- The SDK logs through log4j-api. Without log4j-core, Boot's log4j-to-slf4j routes it to Logback -->
+                    <exclusion>
+                        <groupId>org.apache.logging.log4j</groupId>
+                        <artifactId>log4j-core</artifactId>
+                    </exclusion>
+                </exclusions>
+            </dependency>
+            <dependency>
+                <groupId>dev.restate</groupId>
+                <artifactId>sdk-serde-jackson</artifactId>
+                <version>${restate.version}</version>
+            </dependency>
+            <dependency>
                 <groupId>io.cucumber</groupId>
                 <artifactId>cucumber-bom</artifactId>
                 <version>${cucumber.version}</version>
@@ -71,75 +94,82 @@
         </dependencies>
     </dependencyManagement>
 
+    <!-- Both modules have unit tests. The Kotlin stdlib needs no declaration: it comes with jackson-module-kotlin
+         (api) and through api (service) -->
+    <dependencies>
+        <!-- JUnit 5, Mockito, AssertJ, MockRestServiceServer -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
     <build>
         <sourceDirectory>${project.basedir}/src/main/kotlin</sourceDirectory>
         <testSourceDirectory>${project.basedir}/src/test/kotlin</testSourceDirectory>
-        <pluginManagement>
-            <plugins>
-                <plugin>
-                    <groupId>org.jetbrains.kotlin</groupId>
-                    <artifactId>kotlin-maven-plugin</artifactId>
-                    <configuration>
-                        <args>
-                            <arg>-Xjsr305=strict</arg>
-                            <!-- @JsonProperty on a constructor property must reach the parameter, or Jackson can't
-                                 bind the snake_case names of the contract -->
-                            <arg>-Xannotation-default-target=param-property</arg>
-                        </args>
-                    </configuration>
-                </plugin>
-                <!-- Sets ${org.mockito:mockito-core:jar}, so the tests load Mockito as an agent instead of
-                     self-attaching, which recent JDKs warn about and will refuse -->
-                <plugin>
-                    <groupId>org.apache.maven.plugins</groupId>
-                    <artifactId>maven-dependency-plugin</artifactId>
-                    <executions>
-                        <execution>
-                            <goals>
-                                <goal>properties</goal>
-                            </goals>
-                        </execution>
-                    </executions>
-                </plugin>
-                <!-- ktlint (ktlint_official style, main and test sources): a format problem fails every build,
-                     mvn test included. mvn ktlint:format fixes what it can -->
-                <plugin>
-                    <groupId>com.github.gantsign.maven</groupId>
-                    <artifactId>ktlint-maven-plugin</artifactId>
-                    <version>${ktlint-maven-plugin.version}</version>
-                    <executions>
-                        <execution>
-                            <id>ktlint-check</id>
-                            <phase>validate</phase>
-                            <goals>
-                                <goal>check</goal>
-                            </goals>
-                        </execution>
-                    </executions>
-                </plugin>
-                <!-- Unit tests (*Test), mvn test -->
-                <plugin>
-                    <groupId>org.apache.maven.plugins</groupId>
-                    <artifactId>maven-surefire-plugin</artifactId>
-                    <configuration>
-                        <includes>
-                            <include>**/*Test.java</include>
-                        </includes>
-                        <argLine>-javaagent:${org.mockito:mockito-core:jar} -Xshare:off</argLine>
-                    </configuration>
-                </plugin>
-                <!-- Integration and BDD tests (*IT), mvn verify. Boot's parent binds integration-test and verify -->
-                <plugin>
-                    <groupId>org.apache.maven.plugins</groupId>
-                    <artifactId>maven-failsafe-plugin</artifactId>
-                    <configuration>
-                        <includes>
-                            <include>**/*IT.java</include>
-                        </includes>
-                        <argLine>-javaagent:${org.mockito:mockito-core:jar} -Xshare:off</argLine>
-                    </configuration>
-                </plugin>
-            </plugins>
-        </pluginManagement>
+        <!-- Run in both modules -->
+        <plugins>
+            <!-- The spring plugin opens @Component classes: Spring needs that, and so do the Restate SDK's client
+                 proxies, which subclass the handler classes. The api module has no such classes, so it changes nothing
+                 there -->
+            <plugin>
+                <groupId>org.jetbrains.kotlin</groupId>
+                <artifactId>kotlin-maven-plugin</artifactId>
+                <configuration>
+                    <args>
+                        <arg>-Xjsr305=strict</arg>
+                    </args>
+                    <compilerPlugins>
+                        <plugin>spring</plugin>
+                    </compilerPlugins>
+                </configuration>
+                <dependencies>
+                    <dependency>
+                        <groupId>org.jetbrains.kotlin</groupId>
+                        <artifactId>kotlin-maven-allopen</artifactId>
+                        <version>${kotlin.version}</version>
+                    </dependency>
+                </dependencies>
+            </plugin>
+            <!-- ktlint (ktlint_official style, main and test sources): a format problem fails every build,
+                 mvn test included. mvn ktlint:format fixes what it can -->
+            <plugin>
+                <groupId>com.github.gantsign.maven</groupId>
+                <artifactId>ktlint-maven-plugin</artifactId>
+                <version>${ktlint-maven-plugin.version}</version>
+                <executions>
+                    <execution>
+                        <id>ktlint-check</id>
+                        <phase>validate</phase>
+                        <goals>
+                            <goal>check</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+            <!-- Sets org.mockito:mockito-core:jar, the agent path in argLine -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-dependency-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>properties</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+            <!-- Unit tests (*Test), mvn test -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <includes>
+                        <include>**/*Test.java</include>
+                    </includes>
+                </configuration>
+            </plugin>
+        </plugins>
     </build>
 </project>

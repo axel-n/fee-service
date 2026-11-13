@@ -16,69 +16,30 @@
     <description>The HTTP contract of fee-service: request and response DTOs, exceptions and the error body</description>
 
     <dependencies>
-        <dependency>
-            <groupId>com.fasterxml.jackson.core</groupId>
-            <artifactId>jackson-annotations</artifactId>
-        </dependency>
-        <!-- @JsonSerialize and PlainBigDecimalSerializer -->
-        <dependency>
-            <groupId>com.fasterxml.jackson.core</groupId>
-            <artifactId>jackson-databind</artifactId>
-        </dependency>
-        <!-- The DTOs are Kotlin data classes without a no-arg constructor: a consumer's mapper needs the Kotlin module -->
+        <!-- The DTOs are Kotlin data classes without a no-arg constructor: a consumer's mapper needs the Kotlin module.
+             It brings jackson-databind, jackson-annotations, kotlin-reflect and the Kotlin stdlib, here and to the
+             service -->
         <dependency>
             <groupId>com.fasterxml.jackson.module</groupId>
             <artifactId>jackson-module-kotlin</artifactId>
         </dependency>
-        <dependency>
-            <groupId>org.jetbrains.kotlin</groupId>
-            <artifactId>kotlin-stdlib</artifactId>
-        </dependency>
 
-        <!-- JUnit 5, Mockito, AssertJ -->
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-test</artifactId>
-            <scope>test</scope>
-        </dependency>
         <!-- The two mappers the contract meets (ContractMapper): Spring's for HTTP, Restate's for the journal -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-json</artifactId>
             <scope>test</scope>
         </dependency>
+        <!-- Brings Restate's common (Slice) too -->
         <dependency>
             <groupId>dev.restate</groupId>
             <artifactId>sdk-serde-jackson</artifactId>
-            <version>${restate.version}</version>
-            <scope>test</scope>
-        </dependency>
-        <dependency>
-            <groupId>dev.restate</groupId>
-            <artifactId>common</artifactId>
-            <version>${restate.version}</version>
             <scope>test</scope>
         </dependency>
     </dependencies>
 
     <build>
         <plugins>
-            <plugin>
-                <groupId>org.jetbrains.kotlin</groupId>
-                <artifactId>kotlin-maven-plugin</artifactId>
-            </plugin>
-            <plugin>
-                <groupId>com.github.gantsign.maven</groupId>
-                <artifactId>ktlint-maven-plugin</artifactId>
-            </plugin>
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-dependency-plugin</artifactId>
-            </plugin>
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-surefire-plugin</artifactId>
-            </plugin>
             <!-- The test-jar shares ContractMapper with the service's tests of its durable types -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
