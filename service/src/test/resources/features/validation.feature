@@ -3,7 +3,7 @@ Feature: Request validation
   the response. A malformed request (a missing field, a transaction_id that can't be a key, an amount of 0 or less, a
   created_at in the wrong format or in the future) is rejected with 400 before any unsupported value is looked at; a
   well-formed request asking for something unsupported (an asset other than USD and EUR, an asset type other than FIAT,
-  an unknown transaction type, more decimals than the asset allows) is rejected with 422.
+  an unknown transaction type, more decimals than the asset allows, an amount above 3000000000) is rejected with 422.
   Each rejection names the field, echoes the value as sent and explains what is allowed. A rejection is neither charged
   nor recorded.
 
@@ -174,6 +174,12 @@ Feature: Request validation
       | txn_469 | Bank Transfer    | 0.005    | EUR   | FIAT       | amount | 0.005    | Amount 0.005 has 3 decimals. EUR allows 2    |
       | txn_470 | Merchant Payment | 1.123456 | USD   | FIAT       | amount | 1.123456 | Amount 1.123456 has 6 decimals. USD allows 2 |
 
+    Examples: An amount of at most 3000000000, in every asset
+      | id      | type             | amount        | asset | asset_type | field  | value         | message                                                              |
+      | txn_472 | Mobile Top Up    | 3000000000.01 | USD   | FIAT       | amount | 3000000000.01 | Amount 3000000000.01 is above the maximum. Allowed: up to 3000000000 |
+      | txn_473 | Bank Transfer    | 3000000001    | EUR   | FIAT       | amount | 3000000001    | Amount 3000000001 is above the maximum. Allowed: up to 3000000000    |
+      | txn_474 | Cash Withdrawal  | 10000000000   | USD   | FIAT       | amount | 10000000000   | Amount 10000000000 is above the maximum. Allowed: up to 3000000000   |
+
   Scenario: Trailing zeros are not decimals
     Given a "Mobile Top Up" transaction "txn_471" of 1000 "USD" "FIAT" in state "SETTLED - PENDING FEE"
     And the transaction's "amount" is changed to "10.100"
@@ -182,6 +188,22 @@ Feature: Request validation
     And the fee is 0.02 with rate 0.0015 and description "Standard fee rate of 0.15%"
     And the fee was charged exactly once
     And the fee is recorded as completed
+
+  Scenario: An amount of exactly the maximum is accepted
+    Given a "Mobile Top Up" transaction "txn_475" of 3000000000.00 "USD" "FIAT" in state "SETTLED - PENDING FEE"
+    When the transaction is submitted to "/transaction/fee"
+    Then the response status is 200
+    And the fee is 4500000.00 with rate 0.0015 and description "Standard fee rate of 0.15%"
+    And the fee was charged exactly once
+    And the fee is recorded as completed
+
+  Scenario: Too many decimals are reported before an amount above the maximum
+    Given a "Mobile Top Up" transaction "txn_476" of 3000000000.001 "USD" "FIAT" in state "SETTLED - PENDING FEE"
+    When the transaction is submitted to "/transaction/fee"
+    Then the response status is 422
+    And the request is rejected on field "amount" with value "3000000000.001" and message "Amount 3000000000.001 has 3 decimals. USD allows 2"
+    And the fee was not charged
+    And no fee is recorded
 
   Scenario: A malformed request is rejected with 400 even when it is also unsupported
     Given a "Crypto Purchase" transaction "txn_481" of 1000 "GBP" "CRYPTO" in state "PENDING"

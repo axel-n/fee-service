@@ -99,6 +99,9 @@ Follow the call graph in `docs/design.md`:
 
 - Idiomatic Kotlin: `val` over `var`, data classes for values, sealed types for closed hierarchies, no `!!`, no `lateinit`
   in production code.
+- Number literals of 1000 or more are grouped by thousands with underscores, in main and test code: `1_000`, `65_535`,
+  `3_000_000_000L`. Strings can't take underscores (JSON, `BigDecimal("…")`), so a whole `BigDecimal` constant is written
+  `3_000_000_000.toBigDecimal()`; a fraction stays `BigDecimal("0.0015")`.
 - Constructor injection only (no field injection). Every dependency should be mockable or replaceable.
 - Inject `Clock` instead of calling `LocalDateTime.now()` / `Instant.now()` directly.
 - Tunable values (fee numbers, URLs, ports, timeouts) come from `application.yml` through `@ConfigurationProperties` classes and are

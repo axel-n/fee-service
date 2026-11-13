@@ -43,4 +43,5 @@ object ValidationOrder {
 
     /** After [ASSET]: the allowed decimals belong to the asset. */
     const val AMOUNT_SCALE = 900
+    const val MAX_AMOUNT = 1_000
 }

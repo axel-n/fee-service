@@ -16,7 +16,8 @@ POST /transaction/fee          → 200 with the fee (or 202 while it is still ru
 
 `POST /transaction/fee` receives a transaction and hands it to the `FeeWorkflow` in Restate. The workflow:
 
-1. **validates** the request (required fields, formats, only `SETTLED - PENDING FEE`, only `USD`/`EUR` `FIAT`, a known type),
+1. **validates** the request (required fields, formats, only `SETTLED - PENDING FEE`, only `USD`/`EUR` `FIAT`, a known type,
+   an amount up to 3,000,000,000),
 2. **claims** the `transaction_id`, so one transaction is charged at most once, whatever the payloads and callers,
 3. **calculates** the fee with the rule of the transaction's type,
 4. **charges and records** the fee: it is stored permanently in Restate state as the transaction's charged fee.
@@ -339,6 +340,8 @@ order or the JSON of `FeeRequest`/`FeeResponse` is a breaking change for in-flig
 - `created_at` is `yyyy-MM-dd HH:mm:ss[.fraction]` without a zone, read as **UTC**, and may not be in the future.
 - `transaction_id` is 1–64 ASCII letters, digits, `_` or `-`, because it becomes part of Restate keys.
 - An amount may not have more decimals than its asset (`10.001 USD` is 422); trailing zeros don't count.
+- An amount may not exceed 3,000,000,000 in its asset (`3000000000.01 USD` is 422); the bound is a constant
+  (`MaxAmountValidator.MAX_AMOUNT`), the same number for USD and EUR.
 - `fee` is returned at the asset's scale (`1.50`, which equals the challenge's `1.5`); `amount` is echoed as sent.
 - One `transaction_id` is processed once: sending it again, with any payload, returns the first run's response (the fee or
   the rejection) without charging again. A rejected id can be charged once Restate drops its run (1 day by default).

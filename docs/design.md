@@ -162,7 +162,8 @@ com.example.fee
 │       ├── AssetValidator.kt           @Order(600)  → 422
 │       ├── AssetTypeValidator.kt       @Order(700)  → 422
 │       ├── TransactionTypeValidator.kt @Order(800)  → 422   (FeeCalculator.supports)
-│       └── AmountScaleValidator.kt     @Order(900)  → 422   (a rule of the asset: needs its decimals, so it runs after AssetValidator)
+│       ├── AmountScaleValidator.kt     @Order(900)  → 422   (a rule of the asset: needs its decimals, so it runs after AssetValidator)
+│       └── MaxAmountValidator.kt       @Order(1000) → 422   (amount ≤ 3000000000, same number in every asset)
 │
 ├── domain/                             pure Kotlin
 │   ├── Transaction.kt                  data class Transaction + the enums of its fields: TransactionType, TransactionState, Asset (with its

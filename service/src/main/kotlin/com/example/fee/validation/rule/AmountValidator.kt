@@ -10,7 +10,7 @@ import org.springframework.stereotype.Component
 
 /**
  * `amount` must be greater than zero (400). Its decimals are a rule of the asset and are checked later by the 422
- * `AmountScaleValidator`. Relies on [RequiredFieldsValidator] for presence.
+ * `AmountScaleValidator`, its upper bound by the 422 `MaxAmountValidator`. Relies on [RequiredFieldsValidator] for presence.
  */
 @Component
 @Order(ValidationOrder.AMOUNT)

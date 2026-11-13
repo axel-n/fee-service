@@ -6,6 +6,7 @@ import com.example.fee.validation.rule.AmountValidator
 import com.example.fee.validation.rule.AssetTypeValidator
 import com.example.fee.validation.rule.AssetValidator
 import com.example.fee.validation.rule.CreatedAtValidator
+import com.example.fee.validation.rule.MaxAmountValidator
 import com.example.fee.validation.rule.RequiredFieldsValidator
 import com.example.fee.validation.rule.StateValidator
 import com.example.fee.validation.rule.TransactionIdValidator
@@ -21,7 +22,7 @@ import java.time.Clock
 import java.time.Instant
 import java.time.ZoneOffset
 
-/** [RequestValidator] with the 9 production validators, built as Spring builds them but in shuffled order. */
+/** [RequestValidator] with the 10 production validators, built as Spring builds them but in shuffled order. */
 class RequestValidatorAllChecksTest {
 
     private val clock = Clock.fixed(Instant.parse("2023-08-30T16:00:00Z"), ZoneOffset.UTC)
@@ -36,11 +37,12 @@ class RequestValidatorAllChecksTest {
         AmountValidator(),
         AssetValidator(),
         TransactionIdValidator(),
+        MaxAmountValidator(),
     )
 
     private val requestValidator = RequestValidator(validators)
 
-    /** Fails every business check at once; the amount scale check needs a known asset, so it is shown separately. */
+    /** Fails every business check at once; the amount scale check needs a known asset, so the amount checks are shown separately. */
     private val unsupportedEverywhere = validRequest.copy(
         state = "PENDING",
         asset = "BTC",
@@ -61,7 +63,7 @@ class RequestValidatorAllChecksTest {
     }
 
     @Test
-    fun `uses all 9 validators, each with its own order`() {
+    fun `uses all 10 validators, each with its own order`() {
         // given
         val orders = validators.map { it::class.java.getAnnotation(Order::class.java)?.value }
 
@@ -69,7 +71,7 @@ class RequestValidatorAllChecksTest {
         val distinct = orders.filterNotNull().toSet()
 
         // then
-        assertThat(distinct).hasSize(9)
+        assertThat(distinct).hasSize(10)
     }
 
     @ParameterizedTest(name = "{0}")
@@ -100,7 +102,7 @@ class RequestValidatorAllChecksTest {
     }
 
     @Test
-    fun `reports the business problems in the order state, asset, asset type, type, amount scale`() {
+    fun `reports the business problems in the order state, asset, asset type, type, amount scale, max amount`() {
         // given
         val requests = listOf(
             unsupportedEverywhere.copy(amount = BigDecimal("10.001")),
@@ -108,13 +110,14 @@ class RequestValidatorAllChecksTest {
             unsupportedEverywhere.copy(amount = BigDecimal("10.001"), state = "SETTLED - PENDING FEE", asset = "USD"),
             validRequest.copy(amount = BigDecimal("10.001"), type = "Refund"),
             validRequest.copy(amount = BigDecimal("10.001")),
+            validRequest.copy(amount = BigDecimal("3000000000.01")),
         )
 
         // when
         val errors = requests.map { requestValidator.validate(it) }
 
         // then
-        assertThat(errors.map { it?.field }).containsExactly("state", "asset", "asset_type", "type", "amount")
+        assertThat(errors.map { it?.field }).containsExactly("state", "asset", "asset_type", "type", "amount", "amount")
         assertThat(errors.map { it?.kind }).containsOnly(ValidationError.Kind.UNSUPPORTED)
     }
 
@@ -128,6 +131,61 @@ class RequestValidatorAllChecksTest {
 
         // then
         assertThat(error?.message).isEqualTo("Amount 10.001 has 3 decimals. USD allows 2")
+    }
+
+    @Test
+    fun `reports an amount above the maximum with the maximum`() {
+        // given
+        val request = validRequest.copy(amount = BigDecimal("3000000000.01"))
+
+        // when
+        val error = requestValidator.validate(request)
+
+        // then
+        assertThat(error).isEqualTo(
+            ValidationError(
+                "amount",
+                "3000000000.01",
+                "Amount 3000000000.01 is above the maximum. Allowed: up to 3000000000",
+                ValidationError.Kind.UNSUPPORTED,
+            ),
+        )
+    }
+
+    @Test
+    fun `passes an amount of exactly the maximum`() {
+        // given
+        val request = validRequest.copy(amount = BigDecimal("3000000000.00"))
+
+        // when
+        val error = requestValidator.validate(request)
+
+        // then
+        assertThat(error).isNull()
+    }
+
+    @Test
+    fun `reports too many decimals before an amount above the maximum`() {
+        // given
+        val request = validRequest.copy(amount = BigDecimal("3000000000.001"))
+
+        // when
+        val error = requestValidator.validate(request)
+
+        // then
+        assertThat(error?.message).isEqualTo("Amount 3000000000.001 has 3 decimals. USD allows 2")
+    }
+
+    @Test
+    fun `reports an unsupported asset before an amount above the maximum`() {
+        // given
+        val request = validRequest.copy(amount = BigDecimal("1E+999999999"), asset = "BTC")
+
+        // when
+        val error = requestValidator.validate(request)
+
+        // then
+        assertThat(error?.field).isEqualTo("asset")
     }
 
     companion object {

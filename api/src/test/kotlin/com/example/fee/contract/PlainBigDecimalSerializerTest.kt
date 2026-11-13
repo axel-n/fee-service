@@ -21,6 +21,12 @@ class PlainBigDecimalSerializerTest {
         "0.0015, 0.0015",
         "-2.00, -2.00",
         "0, 0",
+        "0E-4, 0.0000",
+        "0E+3, 0",
+        "3000000000, 3000000000",
+        "3E+9, 3000000000",
+        "3000000000.01, 3000000000.01",
+        "-1E+10, -10000000000",
     )
     fun `writes a plain number that keeps its scale`(value: String, expected: String) {
         // given
@@ -33,8 +39,22 @@ class PlainBigDecimalSerializerTest {
         assertThat(json).isEqualTo(expected)
     }
 
+    @ParameterizedTest(name = "{0} is written plain, {1} characters")
+    @CsvSource("1E+9999, 10000", "1E-9999, 10001", "-1E+9999, 10001")
+    fun `writes plain up to the scale bound`(value: String, length: Int) {
+        // given
+        val number = BigDecimal(value)
+
+        // when
+        val json = mapper.writeValueAsString(number)
+
+        // then
+        assertThat(json).hasSize(length).doesNotContain("E")
+        assertThat(BigDecimal(json)).isEqualByComparingTo(number)
+    }
+
     @ParameterizedTest(name = "{0} stays scientific")
-    @CsvSource("1E+999999999", "1E-10000")
+    @CsvSource("1E+999999999", "1E-10000", "1E+10000", "-1E+10000", "1E-999999999", "-1E-999999999")
     fun `keeps scientific notation for an extreme scale instead of building a huge string`(value: String) {
         // given
         val number = BigDecimal(value)

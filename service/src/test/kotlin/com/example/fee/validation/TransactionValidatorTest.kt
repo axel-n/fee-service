@@ -17,6 +17,7 @@ class ValidationOrderTest {
         ValidationOrder.ASSET_TYPE,
         ValidationOrder.TRANSACTION_TYPE,
         ValidationOrder.AMOUNT_SCALE,
+        ValidationOrder.MAX_AMOUNT,
     )
 
     @Test
@@ -54,5 +55,17 @@ class ValidationOrderTest {
 
         // then
         assertThat(amountScale).isGreaterThan(asset)
+    }
+
+    @Test
+    fun `checks the maximum amount after the amount scale`() {
+        // given
+        val amountScale = ValidationOrder.AMOUNT_SCALE
+
+        // when
+        val maxAmount = ValidationOrder.MAX_AMOUNT
+
+        // then
+        assertThat(maxAmount).isGreaterThan(amountScale)
     }
 }
