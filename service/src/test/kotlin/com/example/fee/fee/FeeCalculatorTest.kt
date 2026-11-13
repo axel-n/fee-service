@@ -20,7 +20,6 @@ import org.junit.jupiter.params.provider.EnumSource
 import java.math.BigDecimal
 
 class FeeCalculatorTest {
-
     private val mobileTopUp = MobileTopUpFeeRule(MobileTopUpFeeProperties(BigDecimal("0.0015")))
     private val bankTransfer = BankTransferFeeRule(BankTransferFeeProperties(BigDecimal("0.005"), BigDecimal("1.00")))
     private val merchantPayment =

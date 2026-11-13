@@ -11,13 +11,11 @@ import kotlinx.coroutines.runBlocking
  * Restate stored rather than what the app reports.
  */
 object StoredFeeRecords {
-
     /** The record of `TransactionFeeRecord/{transactionId}`, or `null` if the id was never claimed. */
     fun of(transactionId: String): FeeRecord? = runBlocking { record(transactionId).get() }
 
     /** Calls `claim` on the record of [transactionId] directly, as a workflow at its CLAIM step does. */
     fun claim(transactionId: String): ClaimResult = runBlocking { record(transactionId).claim() }
 
-    private fun record(transactionId: String): TransactionFeeRecord =
-        TestIngress.client.virtualObject<TransactionFeeRecord>(transactionId)
+    private fun record(transactionId: String): TransactionFeeRecord = TestIngress.client.virtualObject<TransactionFeeRecord>(transactionId)
 }

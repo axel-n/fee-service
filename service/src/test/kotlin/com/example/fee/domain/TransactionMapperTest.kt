@@ -10,18 +10,18 @@ import java.math.BigDecimal
 import java.time.LocalDateTime
 
 class TransactionMapperTest {
-
     private val mapper = TransactionMapper()
 
-    private val valid = FeeRequest(
-        transactionId = "txn_001",
-        amount = BigDecimal("1000.50"),
-        asset = "EUR",
-        assetType = "FIAT",
-        type = "Bank Transfer",
-        state = "SETTLED - PENDING FEE",
-        createdAt = "2023-08-30 15:42:17.610059",
-    )
+    private val valid =
+        FeeRequest(
+            transactionId = "txn_001",
+            amount = BigDecimal("1000.50"),
+            asset = "EUR",
+            assetType = "FIAT",
+            type = "Bank Transfer",
+            state = "SETTLED - PENDING FEE",
+            createdAt = "2023-08-30 15:42:17.610059",
+        )
 
     @Test
     fun `maps every field of a valid request`() {
@@ -60,7 +60,10 @@ class TransactionMapperTest {
 
     @ParameterizedTest(name = "{0}")
     @MethodSource("supportedTypes")
-    fun `maps every supported transaction type`(raw: String, expected: TransactionType) {
+    fun `maps every supported transaction type`(
+        raw: String,
+        expected: TransactionType,
+    ) {
         // given
         val request = valid.copy(type = raw)
 
@@ -104,9 +107,10 @@ class TransactionMapperTest {
 
     companion object {
         @JvmStatic
-        fun supportedTypes(): List<Arguments> = TransactionType.entries
-            .filter { it != TransactionType.UNKNOWN }
-            .map { Arguments.of(it.value, it) }
+        fun supportedTypes(): List<Arguments> =
+            TransactionType.entries
+                .filter { it != TransactionType.UNKNOWN }
+                .map { Arguments.of(it.value, it) }
 
         @JvmStatic
         fun unvalidatedRequests(): List<Arguments> {

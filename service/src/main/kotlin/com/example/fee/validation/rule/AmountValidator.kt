@@ -15,7 +15,6 @@ import org.springframework.stereotype.Component
 @Component
 @Order(ValidationOrder.AMOUNT)
 class AmountValidator : TransactionValidator {
-
     override fun validate(request: FeeRequest): ValidationError? {
         val amount = request.amount ?: return null
         if (amount.signum() > 0) return null

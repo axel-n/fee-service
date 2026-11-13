@@ -13,7 +13,6 @@ import org.junit.jupiter.params.provider.ValueSource
 import java.math.BigDecimal
 
 class PercentageFeeTest {
-
     private val rule = PercentageFee(TransactionType.MOBILE_TOP_UP, BigDecimal("0.0015"), describeAsset)
 
     @Test
@@ -39,7 +38,10 @@ class PercentageFeeTest {
         "0, 0.00",
         "1000000.99, 1500.00", // 1500.001485
     )
-    fun `rounds to the asset's decimals`(amount: String, expected: String) {
+    fun `rounds to the asset's decimals`(
+        amount: String,
+        expected: String,
+    ) {
         // given
         val tx = transaction(amount)
 
@@ -58,7 +60,10 @@ class PercentageFeeTest {
         "5, 0.02", // 0.025: half to even (down)
         "7, 0.04", // 0.035: half to even (up)
     )
-    fun `rounds a half to the even neighbour`(amount: String, expected: String) {
+    fun `rounds a half to the even neighbour`(
+        amount: String,
+        expected: String,
+    ) {
         // given
         val halfCent = PercentageFee(TransactionType.MOBILE_TOP_UP, BigDecimal("0.005"), describeAsset)
 

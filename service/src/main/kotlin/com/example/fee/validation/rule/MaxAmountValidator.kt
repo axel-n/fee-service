@@ -19,7 +19,6 @@ import java.math.BigDecimal
 @Component
 @Order(ValidationOrder.MAX_AMOUNT)
 class MaxAmountValidator : TransactionValidator {
-
     override fun validate(request: FeeRequest): ValidationError? {
         val amount = request.amount ?: return null
         if (amount <= MAX_AMOUNT) return null

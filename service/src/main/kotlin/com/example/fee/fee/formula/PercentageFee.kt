@@ -19,7 +19,6 @@ class PercentageFee(
     val rate: BigDecimal,
     private val description: (Asset) -> String,
 ) : FeeRule {
-
     init {
         requireRate(rate)
     }

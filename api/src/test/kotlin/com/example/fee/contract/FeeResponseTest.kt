@@ -7,16 +7,16 @@ import org.junit.jupiter.params.provider.EnumSource
 import java.math.BigDecimal
 
 class FeeResponseTest {
-
-    private val reference = FeeResponse(
-        transactionId = "txn_001",
-        amount = BigDecimal("1000"),
-        asset = "USD",
-        type = "Mobile Top Up",
-        fee = BigDecimal("1.50"),
-        rate = BigDecimal("0.0015"),
-        description = "Standard fee rate of 0.15%",
-    )
+    private val reference =
+        FeeResponse(
+            transactionId = "txn_001",
+            amount = BigDecimal("1000"),
+            asset = "USD",
+            type = "Mobile Top Up",
+            fee = BigDecimal("1.50"),
+            rate = BigDecimal("0.0015"),
+            description = "Standard fee rate of 0.15%",
+        )
 
     @ParameterizedTest
     @EnumSource(ContractMapper::class)
@@ -29,7 +29,13 @@ class FeeResponseTest {
 
         // then
         assertThat(ContractMapper.fieldNames(json)).containsExactlyInAnyOrder(
-            "transaction_id", "amount", "asset", "type", "fee", "rate", "description",
+            "transaction_id",
+            "amount",
+            "asset",
+            "type",
+            "fee",
+            "rate",
+            "description",
         )
         val node = ContractMapper.tree(json)
         assertThat(node["transaction_id"].asText()).isEqualTo("txn_001")
@@ -73,7 +79,8 @@ class FeeResponseTest {
     @EnumSource(ContractMapper::class)
     fun `reads the reference response`(mapper: ContractMapper) {
         // given
-        val json = """
+        val json =
+            """
             {
               "transaction_id": "txn_001",
               "amount": 1000,
@@ -83,7 +90,7 @@ class FeeResponseTest {
               "rate": 0.0015,
               "description": "Standard fee rate of 0.15%"
             }
-        """.trimIndent()
+            """.trimIndent()
 
         // when
         val response = mapper.read(json, FeeResponse::class.java)

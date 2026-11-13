@@ -32,12 +32,14 @@ import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
 import java.net.ConnectException
 
 @WebMvcTest(TransactionFeeController::class)
-class ApiExceptionHandlerTest(@Autowired private val mockMvc: MockMvc) {
-
+class ApiExceptionHandlerTest(
+    @Autowired private val mockMvc: MockMvc,
+) {
     @MockitoBean
     private lateinit var feeService: FeeService
 
-    private val requestJson = """
+    private val requestJson =
+        """
         {
           "transaction_id": "txn_001",
           "amount": 1000,
@@ -47,7 +49,7 @@ class ApiExceptionHandlerTest(@Autowired private val mockMvc: MockMvc) {
           "state": "PENDING",
           "created_at": "2023-08-30 15:42:17.610059"
         }
-    """.trimIndent()
+        """.trimIndent()
 
     private fun postFee(body: String = requestJson): ResultActions =
         mockMvc.performToCompletion(post("/transaction/fee").contentType(MediaType.APPLICATION_JSON).content(body))
@@ -267,21 +269,23 @@ class ApiExceptionHandlerTest(@Autowired private val mockMvc: MockMvc) {
     @Test
     fun `a client reading the body as FeeProblem gets back the exception the service raised`() {
         // given
-        val raised: List<FeeException> = listOf(
-            ValidationException("amount", "-5", "Amount -5 must be greater than 0", ValidationException.Kind.INVALID),
-            ValidationException("asset", null, "Field 'asset' is required", ValidationException.Kind.INVALID),
-            ValidationException("state", "PENDING", "Unsupported state 'PENDING'", ValidationException.Kind.UNSUPPORTED),
-            DuplicateTransactionException("txn_001"),
-            WorkflowUnavailableException(ConnectException("Connection refused")),
-        )
+        val raised: List<FeeException> =
+            listOf(
+                ValidationException("amount", "-5", "Amount -5 must be greater than 0", ValidationException.Kind.INVALID),
+                ValidationException("asset", null, "Field 'asset' is required", ValidationException.Kind.INVALID),
+                ValidationException("state", "PENDING", "Unsupported state 'PENDING'", ValidationException.Kind.UNSUPPORTED),
+                DuplicateTransactionException("txn_001"),
+                WorkflowUnavailableException(ConnectException("Connection refused")),
+            )
         val mapper = jacksonObjectMapper()
 
         // when
-        val received = raised.map { exception ->
-            submitThrows(exception)
-            val body = postFee().andReturn().response.contentAsString
-            mapper.readValue(body, FeeProblem::class.java).toException()
-        }
+        val received =
+            raised.map { exception ->
+                submitThrows(exception)
+                val body = postFee().andReturn().response.contentAsString
+                mapper.readValue(body, FeeProblem::class.java).toException()
+            }
 
         // then
         assertThat(received).hasSameSizeAs(raised)
@@ -293,10 +297,10 @@ class ApiExceptionHandlerTest(@Autowired private val mockMvc: MockMvc) {
         }
     }
 
-    private fun properties(exception: FeeException): List<Any?> = when (exception) {
-        is ValidationException -> listOf(exception.field, exception.value, exception.kind)
-        is DuplicateTransactionException -> listOf(exception.transactionId)
-
-        is WorkflowUnavailableException -> emptyList()
-    }
+    private fun properties(exception: FeeException): List<Any?> =
+        when (exception) {
+            is ValidationException -> listOf(exception.field, exception.value, exception.kind)
+            is DuplicateTransactionException -> listOf(exception.transactionId)
+            is WorkflowUnavailableException -> emptyList()
+        }
 }

@@ -2,8 +2,8 @@ package com.example.fee.restate
 
 import com.example.fee.config.RestateProperties
 import com.example.fee.record.ClaimDecider
-import com.example.fee.record.TransactionFeeRecord
 import com.example.fee.record.RestateFeeRecordState
+import com.example.fee.record.TransactionFeeRecord
 import com.example.fee.workflow.FeeWorkflow
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
@@ -23,7 +23,6 @@ import java.time.Duration
  * invocations through a real Restate are the ITs' (section 7).
  */
 class RestateEndpointLifecycleTest {
-
     private val port = freePort()
     private val lifecycle = lifecycle(port)
 
@@ -177,20 +176,23 @@ class RestateEndpointLifecycleTest {
         assertThat(discover(port).statusCode()).isEqualTo(200)
     }
 
-    private fun lifecycle(endpointPort: Int) = RestateEndpointLifecycle(
-        feeWorkflow = mock(FeeWorkflow::class.java),
-        transactionFeeRecord = TransactionFeeRecord(ClaimDecider(), RestateFeeRecordState()),
-        properties = RestateProperties(
-            ingressUrl = "http://localhost:8080",
-            endpointPort = endpointPort,
-            attachTimeout = Duration.ofSeconds(10),
-        ),
-    )
+    private fun lifecycle(endpointPort: Int) =
+        RestateEndpointLifecycle(
+            feeWorkflow = mock(FeeWorkflow::class.java),
+            transactionFeeRecord = TransactionFeeRecord(ClaimDecider(), RestateFeeRecordState()),
+            properties =
+                RestateProperties(
+                    ingressUrl = "http://localhost:8080",
+                    endpointPort = endpointPort,
+                    attachTimeout = Duration.ofSeconds(10),
+                ),
+        )
 
     private fun discover(port: Int): HttpResponse<String> =
         HttpClient.newBuilder().version(HttpClient.Version.HTTP_1_1).build().use { client ->
             client.send(
-                HttpRequest.newBuilder(URI("http://localhost:$port/discover"))
+                HttpRequest
+                    .newBuilder(URI("http://localhost:$port/discover"))
                     .header("Accept", DISCOVERY_MEDIA_TYPE)
                     .timeout(Duration.ofSeconds(10))
                     .GET()
@@ -205,7 +207,6 @@ class RestateEndpointLifecycleTest {
 
         fun freePort(): Int = ServerSocket(0).use { it.localPort }
 
-        fun canBind(port: Int): Boolean =
-            runCatching { ServerSocket().use { it.bind(InetSocketAddress(port)) } }.isSuccess
+        fun canBind(port: Int): Boolean = runCatching { ServerSocket().use { it.bind(InetSocketAddress(port)) } }.isSuccess
     }
 }

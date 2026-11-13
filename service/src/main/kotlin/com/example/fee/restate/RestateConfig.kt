@@ -17,15 +17,12 @@ import org.springframework.context.annotation.Configuration
  */
 @Configuration(proxyBeanMethods = false)
 class RestateConfig {
-
     // The serde factory the handlers declare, so the ingress and the endpoint read the same JSON.
     @Bean
-    fun restateIngressClient(properties: RestateProperties): Client =
-        Client.connect(properties.ingressUrl, KotlinJacksonSerdeFactory())
+    fun restateIngressClient(properties: RestateProperties): Client = Client.connect(properties.ingressUrl, KotlinJacksonSerdeFactory())
 
     @Bean
-    fun feeWorkflowClients(restateIngressClient: Client): FeeWorkflowClients =
-        IngressFeeWorkflowClients(restateIngressClient)
+    fun feeWorkflowClients(restateIngressClient: Client): FeeWorkflowClients = IngressFeeWorkflowClients(restateIngressClient)
 }
 
 /**
@@ -33,25 +30,30 @@ class RestateConfig {
  * so `FeeService` is tested with fakes.
  */
 interface FeeWorkflowClients {
-
     /**
      * Submits `FeeWorkflow/{transactionId}` with [request] and returns once Restate acknowledged it. If that key was
      * submitted before, Restate answers `PREVIOUSLY_ACCEPTED`, ignores [request], and the returned run is the first one.
      */
-    suspend fun submit(transactionId: String, request: FeeRequest): FeeWorkflowRun
+    suspend fun submit(
+        transactionId: String,
+        request: FeeRequest,
+    ): FeeWorkflowRun
 }
 
 /** A submitted run of `FeeWorkflow`. */
 fun interface FeeWorkflowRun {
-
     /** Waits for the run's outcome. Every caller attached to the same run gets the same outcome. */
     suspend fun attach(): FeeOutcome
 }
 
 /** [FeeWorkflowClients] over the ingress [client], through the Kotlin SDK's typed requests. */
-private class IngressFeeWorkflowClients(private val client: Client) : FeeWorkflowClients {
-
-    override suspend fun submit(transactionId: String, request: FeeRequest): FeeWorkflowRun {
+private class IngressFeeWorkflowClients(
+    private val client: Client,
+) : FeeWorkflowClients {
+    override suspend fun submit(
+        transactionId: String,
+        request: FeeRequest,
+    ): FeeWorkflowRun {
         val sent = client.toWorkflow<FeeWorkflow>(transactionId).request { run(request) }.send()
         return FeeWorkflowRun {
             checkNotNull(sent.attachSuspend().response()) { "Workflow $transactionId returned no outcome" }

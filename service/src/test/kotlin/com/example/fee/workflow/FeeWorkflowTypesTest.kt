@@ -13,7 +13,6 @@ import org.junit.jupiter.params.provider.Arguments
 import org.junit.jupiter.params.provider.MethodSource
 
 class FeeOutcomeTest {
-
     private val serde = JacksonSerdeFactory().create(FeeOutcome::class.java)
 
     @ParameterizedTest
@@ -37,10 +36,11 @@ class FeeOutcomeTest {
     @Test
     fun `reads back a charged outcome stored by an earlier run, keeping the fee's scale`() {
         // given
-        val json = """
+        val json =
+            """
             {"@type":"CHARGED","response":{"transaction_id":"txn_001","amount":1000,"asset":"USD",
             "type":"Mobile Top Up","fee":1.50,"rate":0.0015,"description":"Standard fee rate of 0.15%"}}
-        """.trimIndent()
+            """.trimIndent()
 
         // when
         val restored = serde.deserialize(Slice.wrap(json))
@@ -53,10 +53,11 @@ class FeeOutcomeTest {
     @Test
     fun `reads back a rejection with the kind that decides the status`() {
         // given
-        val json = """
+        val json =
+            """
             {"@type":"REJECTED","error":{"field":"state","value":"PENDING",
             "message":"Unsupported state 'PENDING'. Supported: 'SETTLED - PENDING FEE'","kind":"UNSUPPORTED"}}
-        """.trimIndent()
+            """.trimIndent()
 
         // when
         val restored = serde.deserialize(Slice.wrap(json))
@@ -75,24 +76,25 @@ class FeeOutcomeTest {
     }
 
     companion object {
-        private val unsupportedState = ValidationError(
-            field = "state",
-            value = "PENDING",
-            message = "Unsupported state 'PENDING'. Supported: 'SETTLED - PENDING FEE'",
-            kind = ValidationError.Kind.UNSUPPORTED,
-        )
+        private val unsupportedState =
+            ValidationError(
+                field = "state",
+                value = "PENDING",
+                message = "Unsupported state 'PENDING'. Supported: 'SETTLED - PENDING FEE'",
+                kind = ValidationError.Kind.UNSUPPORTED,
+            )
 
         @JvmStatic
-        fun outcomes() = listOf(
-            Arguments.of(FeeOutcome.Charged(response), "CHARGED", listOf("response")),
-            Arguments.of(FeeOutcome.Rejected(unsupportedState), "REJECTED", listOf("error")),
-            Arguments.of(FeeOutcome.Conflict("txn_001"), "CONFLICT", listOf("transaction_id")),
-        )
+        fun outcomes() =
+            listOf(
+                Arguments.of(FeeOutcome.Charged(response), "CHARGED", listOf("response")),
+                Arguments.of(FeeOutcome.Rejected(unsupportedState), "REJECTED", listOf("error")),
+                Arguments.of(FeeOutcome.Conflict("txn_001"), "CONFLICT", listOf("transaction_id")),
+            )
     }
 }
 
 class WorkflowStepTest {
-
     @Test
     fun `lists the steps in the order the workflow runs them, ending with DONE`() {
         // given

@@ -19,9 +19,9 @@ import java.time.Duration
  * real ones of the machine (the dev container sets `RESTATE_*`) can't change the result.
  */
 class PackagedConfigurationTest {
-
     private fun packagedYaml(): OriginTrackedMapPropertySource =
-        YamlPropertySourceLoader().load("application.yml", ClassPathResource("application.yml"))
+        YamlPropertySourceLoader()
+            .load("application.yml", ClassPathResource("application.yml"))
             .single() as OriginTrackedMapPropertySource
 
     private fun environment(variables: Map<String, Any> = emptyMap()): ConfigurableEnvironment {
@@ -63,7 +63,10 @@ class PackagedConfigurationTest {
         "restate.endpoint-port, 9080",
         "restate.attach-timeout, 10s",
     )
-    fun `restate setting has its packaged default when no variable is set`(key: String, expected: String) {
+    fun `restate setting has its packaged default when no variable is set`(
+        key: String,
+        expected: String,
+    ) {
         // given
         val environment = environment()
 

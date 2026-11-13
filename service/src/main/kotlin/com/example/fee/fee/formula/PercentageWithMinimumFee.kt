@@ -22,7 +22,6 @@ class PercentageWithMinimumFee(
     val min: BigDecimal,
     private val description: (Asset) -> String,
 ) : FeeRule {
-
     init {
         requireRate(rate)
         requireNonNegative("min", min)

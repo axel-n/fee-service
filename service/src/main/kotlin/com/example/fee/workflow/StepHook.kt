@@ -11,19 +11,29 @@ import org.springframework.stereotype.Component
  * simulated. An implementation must not touch anything the workflow decides on.
  */
 interface StepHook {
-
     /** Called before [step] runs in the workflow with [workflowKey] (the `transaction_id`). */
-    fun before(step: WorkflowStep, workflowKey: String)
+    fun before(
+        step: WorkflowStep,
+        workflowKey: String,
+    )
 
     /** Called after [step] completed in the workflow with [workflowKey]. */
-    fun after(step: WorkflowStep, workflowKey: String)
+    fun after(
+        step: WorkflowStep,
+        workflowKey: String,
+    )
 }
 
 /** The production [StepHook]: does nothing. Tests provide their own bean in its place. */
 @Component
 class NoOpStepHook : StepHook {
+    override fun before(
+        step: WorkflowStep,
+        workflowKey: String,
+    ) = Unit
 
-    override fun before(step: WorkflowStep, workflowKey: String) = Unit
-
-    override fun after(step: WorkflowStep, workflowKey: String) = Unit
+    override fun after(
+        step: WorkflowStep,
+        workflowKey: String,
+    ) = Unit
 }

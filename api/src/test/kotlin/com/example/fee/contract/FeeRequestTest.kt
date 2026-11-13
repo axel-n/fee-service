@@ -6,22 +6,23 @@ import org.junit.jupiter.params.provider.EnumSource
 import java.math.BigDecimal
 
 class FeeRequestTest {
-
-    private val full = FeeRequest(
-        transactionId = "txn_001",
-        amount = BigDecimal("1000"),
-        asset = "USD",
-        assetType = "FIAT",
-        type = "Mobile Top Up",
-        state = "SETTLED - PENDING FEE",
-        createdAt = "2023-08-30 15:42:17.610059",
-    )
+    private val full =
+        FeeRequest(
+            transactionId = "txn_001",
+            amount = BigDecimal("1000"),
+            asset = "USD",
+            assetType = "FIAT",
+            type = "Mobile Top Up",
+            state = "SETTLED - PENDING FEE",
+            createdAt = "2023-08-30 15:42:17.610059",
+        )
 
     @ParameterizedTest
     @EnumSource(ContractMapper::class)
     fun `reads the reference request with snake_case field names`(mapper: ContractMapper) {
         // given
-        val json = """
+        val json =
+            """
             {
               "transaction_id": "txn_001",
               "amount": 1000,
@@ -31,7 +32,7 @@ class FeeRequestTest {
               "state": "SETTLED - PENDING FEE",
               "created_at": "2023-08-30 15:42:17.610059"
             }
-        """.trimIndent()
+            """.trimIndent()
 
         // when
         val request = mapper.read(json, FeeRequest::class.java)
@@ -51,7 +52,13 @@ class FeeRequestTest {
 
         // then
         assertThat(ContractMapper.fieldNames(json)).containsExactlyInAnyOrder(
-            "transaction_id", "amount", "asset", "asset_type", "type", "state", "created_at",
+            "transaction_id",
+            "amount",
+            "asset",
+            "asset_type",
+            "type",
+            "state",
+            "created_at",
         )
         val node = ContractMapper.tree(json)
         assertThat(node["transaction_id"].asText()).isEqualTo("txn_001")

@@ -14,14 +14,19 @@ import java.util.concurrent.atomic.AtomicInteger
  * run on every replay, the journaled closures only once. Unarmed, it does nothing, so other ITs are unaffected.
  */
 class FaultInjectingStepHook : StepHook {
-
     /** Which side of a step the crash happens on. */
     enum class Phase { BEFORE, AFTER }
 
-    private data class Boundary(val step: WorkflowStep, val phase: Phase)
+    private data class Boundary(
+        val step: WorkflowStep,
+        val phase: Phase,
+    )
 
     // Compared by identity, so remove(key, value) disarms exactly the arming that was found
-    private class Arming(val boundary: Boundary, val onCrash: () -> Unit)
+    private class Arming(
+        val boundary: Boundary,
+        val onCrash: () -> Unit,
+    )
 
     private val armed = ConcurrentHashMap<String, Arming>()
     private val crashes = ConcurrentHashMap<String, AtomicInteger>()
@@ -31,7 +36,12 @@ class FaultInjectingStepHook : StepHook {
      * Makes the workflows of [transactionId] crash once, at the [phase] side of [step]. [onCrash] runs right before the
      * crash, on the handler's thread, so whatever it changes (the clock, say) is in place before Restate retries.
      */
-    fun crashOnce(transactionId: String, step: WorkflowStep, phase: Phase, onCrash: () -> Unit = {}) {
+    fun crashOnce(
+        transactionId: String,
+        step: WorkflowStep,
+        phase: Phase,
+        onCrash: () -> Unit = {},
+    ) {
         armed[transactionId] = Arming(Boundary(step, phase), onCrash)
     }
 
@@ -39,15 +49,27 @@ class FaultInjectingStepHook : StepHook {
     fun crashCount(transactionId: String): Int = crashes[transactionId]?.get() ?: 0
 
     /** How many times the hook was called at the [phase] side of [step] for [transactionId], replays included. */
-    fun callCount(transactionId: String, step: WorkflowStep, phase: Phase): Int =
-        calls[transactionId to Boundary(step, phase)]?.get() ?: 0
+    fun callCount(
+        transactionId: String,
+        step: WorkflowStep,
+        phase: Phase,
+    ): Int = calls[transactionId to Boundary(step, phase)]?.get() ?: 0
 
-    override fun before(step: WorkflowStep, workflowKey: String) = reach(workflowKey, Boundary(step, Phase.BEFORE))
+    override fun before(
+        step: WorkflowStep,
+        workflowKey: String,
+    ) = reach(workflowKey, Boundary(step, Phase.BEFORE))
 
-    override fun after(step: WorkflowStep, workflowKey: String) = reach(workflowKey, Boundary(step, Phase.AFTER))
+    override fun after(
+        step: WorkflowStep,
+        workflowKey: String,
+    ) = reach(workflowKey, Boundary(step, Phase.AFTER))
 
     // The workflow key is the transaction_id
-    private fun reach(transactionId: String, boundary: Boundary) {
+    private fun reach(
+        transactionId: String,
+        boundary: Boundary,
+    ) {
         calls.computeIfAbsent(transactionId to boundary) { AtomicInteger() }.incrementAndGet()
         // remove(key, value) disarms atomically, so the crash happens exactly once even if two runs reach it together
         val arming = armed[transactionId]?.takeIf { it.boundary == boundary } ?: return
@@ -59,5 +81,7 @@ class FaultInjectingStepHook : StepHook {
     }
 
     /** The injected failure: a plain exception, which Restate retries. */
-    class SimulatedCrash(message: String) : RuntimeException(message)
+    class SimulatedCrash(
+        message: String,
+    ) : RuntimeException(message)
 }

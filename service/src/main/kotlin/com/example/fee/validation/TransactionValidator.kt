@@ -14,7 +14,6 @@ import com.example.fee.contract.FeeRequest
  * Implementations must be pure apart from an injected `Clock`: they run inside a journaled step, so the result is journaled.
  */
 interface TransactionValidator {
-
     /**
      * The problem with [request], or `null` if this check passes. Never throws: a bad value is an error to return.
      * The message must be readable and name the rejected value and, where there are any, the allowed ones.
@@ -28,7 +27,6 @@ interface TransactionValidator {
  * check (422), and a check comes after the ones it relies on.
  */
 object ValidationOrder {
-
     // Structural: the request is malformed (ValidationError.Kind.INVALID, 400).
     const val REQUIRED_FIELDS = 100
     const val TRANSACTION_ID = 200

@@ -28,7 +28,6 @@ data class FeeProblem(
     @JsonProperty("message") val message: String? = null,
     @JsonProperty("transaction_id") val transactionId: String? = null,
 ) {
-
     /** The [FeeErrorCode] named by [code], or `null` when it is missing or unknown to this version of the contract. */
     fun errorCode(): FeeErrorCode? = FeeErrorCode.entries.firstOrNull { it.name == code }
 
@@ -36,14 +35,14 @@ data class FeeProblem(
      * The [FeeException] the service raised, rebuilt from this body so a client can throw or match it; `null` when
      * [code] is missing or unknown, or a property the exception needs is absent.
      */
-    fun toException(): FeeException? = when (errorCode()) {
-        FeeErrorCode.INVALID_REQUEST -> validation(ValidationException.Kind.INVALID)
-        FeeErrorCode.UNSUPPORTED_REQUEST -> validation(ValidationException.Kind.UNSUPPORTED)
-        FeeErrorCode.DUPLICATE_TRANSACTION -> transactionId?.let { DuplicateTransactionException(it) }
-
-        FeeErrorCode.WORKFLOW_UNAVAILABLE -> WorkflowUnavailableException()
-        null -> null
-    }
+    fun toException(): FeeException? =
+        when (errorCode()) {
+            FeeErrorCode.INVALID_REQUEST -> validation(ValidationException.Kind.INVALID)
+            FeeErrorCode.UNSUPPORTED_REQUEST -> validation(ValidationException.Kind.UNSUPPORTED)
+            FeeErrorCode.DUPLICATE_TRANSACTION -> transactionId?.let { DuplicateTransactionException(it) }
+            FeeErrorCode.WORKFLOW_UNAVAILABLE -> WorkflowUnavailableException()
+            null -> null
+        }
 
     private fun validation(kind: ValidationException.Kind): ValidationException? {
         val text = message ?: detail

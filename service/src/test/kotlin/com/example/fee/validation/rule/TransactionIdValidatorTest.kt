@@ -10,7 +10,6 @@ import org.junit.jupiter.params.provider.ValueSource
 import org.springframework.core.annotation.Order
 
 class TransactionIdValidatorTest {
-
     private val validator = TransactionIdValidator()
 
     @ParameterizedTest(name = "''{0}''")

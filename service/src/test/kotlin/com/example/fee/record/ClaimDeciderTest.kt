@@ -10,7 +10,6 @@ import org.junit.jupiter.params.provider.Arguments
 import org.junit.jupiter.params.provider.MethodSource
 
 class ClaimDeciderTest {
-
     private val decider = ClaimDecider()
 
     @Test
@@ -51,12 +50,14 @@ class ClaimDeciderTest {
 }
 
 class ClaimResultTest {
-
     private val serde = JacksonSerdeFactory().create(ClaimResult::class.java)
 
     @ParameterizedTest
     @MethodSource("results")
-    fun `is journaled under its explicit type name and read back equal`(result: ClaimResult, typeName: String) {
+    fun `is journaled under its explicit type name and read back equal`(
+        result: ClaimResult,
+        typeName: String,
+    ) {
         // given
         val claim = result
 
@@ -83,10 +84,11 @@ class ClaimResultTest {
 
     companion object {
         @JvmStatic
-        fun results() = listOf(
-            Arguments.of(ClaimResult.New, "NEW"),
-            Arguments.of(ClaimResult.AlreadyCompleted(response), "ALREADY_COMPLETED"),
-            Arguments.of(ClaimResult.InProgress, "IN_PROGRESS"),
-        )
+        fun results() =
+            listOf(
+                Arguments.of(ClaimResult.New, "NEW"),
+                Arguments.of(ClaimResult.AlreadyCompleted(response), "ALREADY_COMPLETED"),
+                Arguments.of(ClaimResult.InProgress, "IN_PROGRESS"),
+            )
     }
 }

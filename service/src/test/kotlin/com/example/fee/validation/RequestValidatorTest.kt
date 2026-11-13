@@ -6,19 +6,19 @@ import org.junit.jupiter.api.Test
 import org.springframework.core.annotation.Order
 
 class RequestValidatorTest {
-
     private val request = FeeRequest(transactionId = "txn_001")
 
     private val calls = mutableListOf<String>()
 
     private val requiredFieldsError =
         ValidationError("amount", null, "Field 'amount' is required", ValidationError.Kind.INVALID)
-    private val stateError = ValidationError(
-        "state",
-        "PENDING",
-        "Unsupported state 'PENDING'. Supported: 'SETTLED - PENDING FEE'",
-        ValidationError.Kind.UNSUPPORTED,
-    )
+    private val stateError =
+        ValidationError(
+            "state",
+            "PENDING",
+            "Unsupported state 'PENDING'. Supported: 'SETTLED - PENDING FEE'",
+            ValidationError.Kind.UNSUPPORTED,
+        )
 
     @Test
     fun `returns null when every validator passes`() {
@@ -73,9 +73,10 @@ class RequestValidatorTest {
     @Test
     fun `reports the error of the lowest Order when several validators fail`() {
         // given
-        val validator = RequestValidator(
-            listOf(Third(calls, stateError), Second(calls, stateError), First(calls, requiredFieldsError)),
-        )
+        val validator =
+            RequestValidator(
+                listOf(Third(calls, stateError), Second(calls, stateError), First(calls, requiredFieldsError)),
+            )
 
         // when
         val error = validator.validate(request)
@@ -101,12 +102,13 @@ class RequestValidatorTest {
     fun `passes the request to every validator`() {
         // given
         val seen = mutableListOf<FeeRequest>()
-        val validator = RequestValidator(
-            listOf(
-                Second(calls) { seen += it },
-                First(calls) { seen += it },
-            ),
-        )
+        val validator =
+            RequestValidator(
+                listOf(
+                    Second(calls) { seen += it },
+                    First(calls) { seen += it },
+                ),
+            )
 
         // when
         validator.validate(request)
@@ -130,16 +132,27 @@ class RequestValidatorTest {
     }
 
     @Order(ValidationOrder.REQUIRED_FIELDS)
-    class First(calls: MutableList<String>, result: ValidationError? = null, onValidate: (FeeRequest) -> Unit = {}) :
-        RecordingValidator("first", calls, result, onValidate)
+    class First(
+        calls: MutableList<String>,
+        result: ValidationError? = null,
+        onValidate: (FeeRequest) -> Unit = {},
+    ) : RecordingValidator("first", calls, result, onValidate)
 
     @Order(ValidationOrder.STATE)
-    class Second(calls: MutableList<String>, result: ValidationError? = null, onValidate: (FeeRequest) -> Unit = {}) :
-        RecordingValidator("second", calls, result, onValidate)
+    class Second(
+        calls: MutableList<String>,
+        result: ValidationError? = null,
+        onValidate: (FeeRequest) -> Unit = {},
+    ) : RecordingValidator("second", calls, result, onValidate)
 
     @Order(ValidationOrder.AMOUNT_SCALE)
-    class Third(calls: MutableList<String>, result: ValidationError? = null, onValidate: (FeeRequest) -> Unit = {}) :
-        RecordingValidator("third", calls, result, onValidate)
+    class Third(
+        calls: MutableList<String>,
+        result: ValidationError? = null,
+        onValidate: (FeeRequest) -> Unit = {},
+    ) : RecordingValidator("third", calls, result, onValidate)
 
-    class Unordered(calls: MutableList<String>) : RecordingValidator("unordered", calls, null, {})
+    class Unordered(
+        calls: MutableList<String>,
+    ) : RecordingValidator("unordered", calls, null, {})
 }

@@ -24,7 +24,9 @@ data class Transaction(
  *
  * [value] is the exact string of the request's `type` field.
  */
-enum class TransactionType(val value: String) {
+enum class TransactionType(
+    val value: String,
+) {
     MOBILE_TOP_UP("Mobile Top Up"),
     BANK_TRANSFER("Bank Transfer"),
     MERCHANT_PAYMENT("Merchant Payment"),
@@ -48,7 +50,9 @@ enum class TransactionType(val value: String) {
  *
  * [value] is the exact string of the request's `state` field.
  */
-enum class TransactionState(val value: String) {
+enum class TransactionState(
+    val value: String,
+) {
     SETTLED_PENDING_FEE("SETTLED - PENDING FEE"),
 
     /** Anything that matches no other value. */
@@ -69,7 +73,11 @@ enum class TransactionState(val value: String) {
  * [value] is the exact string of the request's `asset` field. [decimals] is the scale amounts and fees are allowed
  * to have and are rounded to (`HALF_EVEN`).
  */
-enum class Asset(val value: String, val decimals: Int, val assetType: AssetType) {
+enum class Asset(
+    val value: String,
+    val decimals: Int,
+    val assetType: AssetType,
+) {
     USD("USD", 2, AssetType.FIAT),
     EUR("EUR", 2, AssetType.FIAT),
 
@@ -93,7 +101,9 @@ enum class Asset(val value: String, val decimals: Int, val assetType: AssetType)
  *
  * [value] is the exact string of the request's `asset_type` field.
  */
-enum class AssetType(val value: String) {
+enum class AssetType(
+    val value: String,
+) {
     FIAT("FIAT"),
 
     /** Anything that matches no other value. */

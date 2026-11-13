@@ -12,7 +12,6 @@ import org.springframework.core.annotation.Order
 import java.math.BigDecimal
 
 class AmountValidatorTest {
-
     private val validator = AmountValidator()
 
     @ParameterizedTest(name = "{0}")
@@ -30,7 +29,10 @@ class AmountValidatorTest {
 
     @ParameterizedTest(name = "{0} is shown as {1}")
     @CsvSource("0, 0", "0.00, 0.00", "-5, -5", "-1.50, -1.50", "-1E+3, -1000")
-    fun `rejects zero and negative amounts with a message naming the value`(amount: String, shown: String) {
+    fun `rejects zero and negative amounts with a message naming the value`(
+        amount: String,
+        shown: String,
+    ) {
         // given
         val request = validRequest.copy(amount = BigDecimal(amount))
 

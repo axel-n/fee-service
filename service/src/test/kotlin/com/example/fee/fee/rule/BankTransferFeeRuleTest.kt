@@ -11,7 +11,6 @@ import org.junit.jupiter.params.provider.CsvSource
 import java.math.BigDecimal
 
 class BankTransferFeeRuleTest {
-
     private val rule = BankTransferFeeRule(BankTransferFeeProperties(BigDecimal("0.005"), BigDecimal("1.00")))
 
     @Test
@@ -29,7 +28,10 @@ class BankTransferFeeRuleTest {
         "100, 1.0", // the minimum
         "10000, 50.0",
     )
-    fun `charges the fee table's numbers`(amount: String, expected: String) {
+    fun `charges the fee table's numbers`(
+        amount: String,
+        expected: String,
+    ) {
         // given
         val tx = transaction(amount, Asset.USD, TransactionType.BANK_TRANSFER)
 
@@ -46,7 +48,10 @@ class BankTransferFeeRuleTest {
         "USD, Fee rate of 0.5% (min 1.00 USD)",
         "EUR, Fee rate of 0.5% (min 1.00 EUR)",
     )
-    fun `describes rate and minimum in the transaction's asset`(asset: Asset, expected: String) {
+    fun `describes rate and minimum in the transaction's asset`(
+        asset: Asset,
+        expected: String,
+    ) {
         // given
         val tx = transaction("1000", asset, TransactionType.BANK_TRANSFER)
 

@@ -42,6 +42,8 @@
         <opentelemetry.version>1.58.0</opentelemetry.version>
         <!-- Cucumber 7.34 is built against JUnit 5.14 (Cucumber 8 needs JUnit 6 and Spring 7) -->
         <junit-jupiter.version>5.14.4</junit-jupiter.version>
+        <!-- Bundles ktlint 1.8.0 -->
+        <ktlint-maven-plugin.version>3.7.1</ktlint-maven-plugin.version>
         <!-- mvn spring-boot:run from the root runs only the app: service sets it back to false -->
         <spring-boot.run.skip>true</spring-boot.run.skip>
     </properties>
@@ -95,6 +97,22 @@
                         <execution>
                             <goals>
                                 <goal>properties</goal>
+                            </goals>
+                        </execution>
+                    </executions>
+                </plugin>
+                <!-- ktlint (ktlint_official style, main and test sources): a format problem fails every build,
+                     mvn test included. mvn ktlint:format fixes what it can -->
+                <plugin>
+                    <groupId>com.github.gantsign.maven</groupId>
+                    <artifactId>ktlint-maven-plugin</artifactId>
+                    <version>${ktlint-maven-plugin.version}</version>
+                    <executions>
+                        <execution>
+                            <id>ktlint-check</id>
+                            <phase>validate</phase>
+                            <goals>
+                                <goal>check</goal>
                             </goals>
                         </execution>
                     </executions>

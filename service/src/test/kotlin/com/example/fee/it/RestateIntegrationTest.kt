@@ -23,7 +23,6 @@ import org.springframework.test.context.DynamicPropertySource
     properties = ["spring.config.location=classpath:/"],
 )
 abstract class RestateIntegrationTest {
-
     companion object {
         @JvmStatic
         @DynamicPropertySource

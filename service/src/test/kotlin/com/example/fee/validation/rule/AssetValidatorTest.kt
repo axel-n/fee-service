@@ -10,7 +10,6 @@ import org.junit.jupiter.params.provider.ValueSource
 import org.springframework.core.annotation.Order
 
 class AssetValidatorTest {
-
     private val validator = AssetValidator()
 
     @ParameterizedTest(name = "{0}")

@@ -16,9 +16,10 @@ import org.springframework.stereotype.Component
  * The permanent fee record of one `transaction_id` (the object key): one [FeeRecord] in Restate state. Restate runs the
  * exclusive handlers of one key one at a time, so two workflows claiming the same id can't both get [ClaimResult.New].
  * The claim rules live in [ClaimDecider]; this class only reads and writes the state, through [FeeRecordState].
+ *
+ * Breaking changes for stored records and in-flight workflows: the class and handler names and signatures, and the
+ * state key name.
  */
-// Breaking changes for stored records and in-flight workflows: the class and handler names and signatures, and the
-// state key name.
 @Component
 @VirtualObject
 @CustomSerdeFactory(KotlinJacksonSerdeFactory::class)
@@ -26,7 +27,6 @@ class TransactionFeeRecord(
     private val claimDecider: ClaimDecider,
     private val state: FeeRecordState,
 ) {
-
     /** Claims the id for the calling run; on [ClaimResult.New] the record becomes `IN_PROGRESS`. */
     @Handler
     suspend fun claim(): ClaimResult {
@@ -62,7 +62,6 @@ class TransactionFeeRecord(
  * this, so tests replace it with an in-memory fake.
  */
 interface FeeRecordState {
-
     /** The object key: the `transaction_id`. */
     suspend fun key(): String
 
@@ -79,7 +78,6 @@ interface FeeRecordState {
  */
 @Component
 class RestateFeeRecordState : FeeRecordState {
-
     override suspend fun key(): String = objectKey()
 
     override suspend fun get(): FeeRecord? = state().get(RECORD)

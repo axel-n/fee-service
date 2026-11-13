@@ -279,6 +279,7 @@ when (val failure = problem.toException()) {
 ## Tests
 
 ```bash
+mvn ktlint:format     # formats the Kotlin sources: every build runs the ktlint check first and fails on a problem
 mvn test              # unit tests: no Docker, no Spring context except @WebMvcTest slices
 mvn verify            # + integration tests (Testcontainers Restate 1.8.1) and Cucumber features; needs a container engine
 scripts/check.sh      # the project's gate: rule checks + mvn clean verify, and every test must actually run

@@ -24,7 +24,6 @@ import java.time.Duration
  * `RESTATE_*`) can't change the result.
  */
 class RestatePropertiesBindingTest {
-
     private fun environment(
         variables: Map<String, Any> = emptyMap(),
         resource: Resource = ClassPathResource("application.yml"),
@@ -38,15 +37,20 @@ class RestatePropertiesBindingTest {
     }
 
     companion object {
-        private fun override(variable: String, value: String, setting: (RestateProperties) -> Any, expected: Any) =
-            Arguments.of(variable, value, setting, expected)
+        private fun override(
+            variable: String,
+            value: String,
+            setting: (RestateProperties) -> Any,
+            expected: Any,
+        ) = Arguments.of(variable, value, setting, expected)
 
         @JvmStatic
-        fun overrides(): List<Arguments> = listOf(
-            override("RESTATE_INGRESS_URL", "http://restate:8080", { it.ingressUrl }, "http://restate:8080"),
-            override("RESTATE_ENDPOINT_PORT", "19080", { it.endpointPort }, 19080),
-            override("RESTATE_ATTACH_TIMEOUT", "30s", { it.attachTimeout }, Duration.ofSeconds(30)),
-        )
+        fun overrides(): List<Arguments> =
+            listOf(
+                override("RESTATE_INGRESS_URL", "http://restate:8080", { it.ingressUrl }, "http://restate:8080"),
+                override("RESTATE_ENDPOINT_PORT", "19080", { it.endpointPort }, 19080),
+                override("RESTATE_ATTACH_TIMEOUT", "30s", { it.attachTimeout }, Duration.ofSeconds(30)),
+            )
     }
 
     private fun bind(environment: ConfigurableEnvironment): RestateProperties =
@@ -114,11 +118,12 @@ class RestatePropertiesBindingTest {
     @Test
     fun `a missing restate setting fails binding with a message naming the key`() {
         // given
-        val yaml = """
+        val yaml =
+            """
             restate:
               ingress-url: http://localhost:8080
               endpoint-port: 9080
-        """.trimIndent()
+            """.trimIndent()
         val environment = environment(resource = ByteArrayResource(yaml.toByteArray()))
 
         // when / then

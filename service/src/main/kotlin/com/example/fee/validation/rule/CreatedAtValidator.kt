@@ -20,16 +20,18 @@ import java.time.format.DateTimeFormatter
  */
 @Component
 @Order(ValidationOrder.CREATED_AT)
-class CreatedAtValidator(private val clock: Clock) : TransactionValidator {
-
+class CreatedAtValidator(
+    private val clock: Clock,
+) : TransactionValidator {
     override fun validate(request: FeeRequest): ValidationError? {
         val raw = request.createdAt ?: return null
-        val createdAt = CreatedAtFormat.parseOrNull(raw)
-            ?: return error(
-                raw,
-                "Invalid $FIELD ${ValueDisplay.quoted(raw)}. Allowed: 'yyyy-MM-dd HH:mm:ss' with 0 to 9 fraction " +
-                    "digits, e.g. '$EXAMPLE'",
-            )
+        val createdAt =
+            CreatedAtFormat.parseOrNull(raw)
+                ?: return error(
+                    raw,
+                    "Invalid $FIELD ${ValueDisplay.quoted(raw)}. Allowed: 'yyyy-MM-dd HH:mm:ss' with 0 to 9 fraction " +
+                        "digits, e.g. '$EXAMPLE'",
+                )
         // UTC explicitly, so a Clock in another zone (a test, a misconfigured bean) can't shift the check.
         val now = LocalDateTime.ofInstant(clock.instant(), ZoneOffset.UTC)
         if (!createdAt.isAfter(now)) return null
@@ -40,8 +42,10 @@ class CreatedAtValidator(private val clock: Clock) : TransactionValidator {
         )
     }
 
-    private fun error(raw: String, message: String) =
-        ValidationError(FIELD, raw, message, ValidationError.Kind.INVALID)
+    private fun error(
+        raw: String,
+        message: String,
+    ) = ValidationError(FIELD, raw, message, ValidationError.Kind.INVALID)
 
     private companion object {
         const val FIELD = "created_at"

@@ -13,7 +13,6 @@ data class FeeRecord(
     @JsonProperty("status") val status: FeeRecordStatus,
     @JsonProperty("response") val response: FeeResponse? = null,
 ) {
-
     init {
         require((status == FeeRecordStatus.COMPLETED) == (response != null)) {
             "A fee record has a response exactly when it is COMPLETED, but status is $status and response is $response"

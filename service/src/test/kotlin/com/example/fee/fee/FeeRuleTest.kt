@@ -5,8 +5,7 @@ import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import java.math.BigDecimal
 
-class FeeQuoteTest {
-
+class FeeRuleTest {
     @Test
     fun `survives Restate's serde with its scale, as CALCULATE journals it`() {
         // given

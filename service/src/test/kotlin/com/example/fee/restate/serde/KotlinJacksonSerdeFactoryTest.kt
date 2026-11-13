@@ -12,7 +12,6 @@ import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 
 class KotlinJacksonSerdeFactoryTest {
-
     private val factory = KotlinJacksonSerdeFactory()
 
     private fun json(slice: Slice): String = String(slice.toByteArray())

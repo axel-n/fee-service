@@ -33,7 +33,6 @@ class FeeService(
     private val feeWorkflowClients: FeeWorkflowClients,
     private val restateProperties: RestateProperties,
 ) {
-
     suspend fun submit(request: FeeRequest): FeeStatusResponse {
         transactionIdValidator.validate(request)?.let { throw rejected(it) }
         val transactionId = checkNotNull(request.transactionId) { "transaction_id passed the pre-check but is null" }
@@ -50,7 +49,10 @@ class FeeService(
 
     // A failed Restate call means Restate is unavailable. A cancellation isn't a failure: the caller went away, so it
     // passes through untouched, as coroutines require.
-    private suspend fun <T> restateCall(transactionId: String, call: suspend () -> T): T =
+    private suspend fun <T> restateCall(
+        transactionId: String,
+        call: suspend () -> T,
+    ): T =
         try {
             call()
         } catch (e: CancellationException) {
@@ -59,22 +61,27 @@ class FeeService(
             throw unavailable(transactionId, e)
         }
 
-    private fun toResponse(outcome: FeeOutcome): FeeStatusResponse = when (outcome) {
-        is FeeOutcome.Charged -> FeeStatusResponse.completed(outcome.response)
-        is FeeOutcome.Rejected -> throw rejected(outcome.error)
-        is FeeOutcome.Conflict -> throw DuplicateTransactionException(outcome.transactionId)
-    }
+    private fun toResponse(outcome: FeeOutcome): FeeStatusResponse =
+        when (outcome) {
+            is FeeOutcome.Charged -> FeeStatusResponse.completed(outcome.response)
+            is FeeOutcome.Rejected -> throw rejected(outcome.error)
+            is FeeOutcome.Conflict -> throw DuplicateTransactionException(outcome.transactionId)
+        }
 
     // ValidationError is the workflow's durable type, ValidationException the published contract: same fields.
     private fun rejected(error: ValidationError): ValidationException {
-        val kind = when (error.kind) {
-            ValidationError.Kind.INVALID -> ValidationException.Kind.INVALID
-            ValidationError.Kind.UNSUPPORTED -> ValidationException.Kind.UNSUPPORTED
-        }
+        val kind =
+            when (error.kind) {
+                ValidationError.Kind.INVALID -> ValidationException.Kind.INVALID
+                ValidationError.Kind.UNSUPPORTED -> ValidationException.Kind.UNSUPPORTED
+            }
         return ValidationException(error.field, error.value, error.message, kind)
     }
 
-    private fun unavailable(transactionId: String, cause: Throwable): WorkflowUnavailableException {
+    private fun unavailable(
+        transactionId: String,
+        cause: Throwable,
+    ): WorkflowUnavailableException {
         log.warn("Restate call for workflow {} failed: {}", transactionId, cause.toString())
         return WorkflowUnavailableException(cause)
     }
@@ -89,6 +96,8 @@ class FeeService(
  * it isn't a [FeeException]: `ApiExceptionHandler` answers 202 with the `IN_PROGRESS` status as body. Resubmitting the
  * transaction attaches to the same run, so it charges once. HTTP only, never stored.
  */
-class FeeInProgressException(val transactionId: String) :
+class FeeInProgressException(
+    val transactionId: String,
+) :
     // No stack trace: an expected outcome of every slow run, not a bug to locate.
     RuntimeException("The fee for transaction '$transactionId' is still being processed", null, false, false)

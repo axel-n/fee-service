@@ -22,7 +22,6 @@ class PercentagePlusFixedFee(
     val fixed: BigDecimal,
     private val description: (Asset) -> String,
 ) : FeeRule {
-
     init {
         requireRate(rate)
         requireNonNegative("fixed", fixed)

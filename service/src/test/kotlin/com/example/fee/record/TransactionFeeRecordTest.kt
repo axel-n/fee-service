@@ -14,60 +14,63 @@ import org.junit.jupiter.api.Test
  * against a real Restate are covered by the ITs.
  */
 class TransactionFeeRecordTest {
+    @Test
+    fun `a first claim is new and stores an in-progress record`() =
+        runBlocking<Unit> {
+            // given
+            val state = InMemoryState(record = null)
+
+            // when
+            val result = handlers(state).claim()
+
+            // then
+            assertThat(result).isEqualTo(ClaimResult.New)
+            assertThat(state.record).isEqualTo(FeeRecord.inProgress())
+        }
 
     @Test
-    fun `a first claim is new and stores an in-progress record`() = runBlocking<Unit> {
-        // given
-        val state = InMemoryState(record = null)
+    fun `a claim while an earlier run holds the id is in progress and leaves the record unchanged`() =
+        runBlocking<Unit> {
+            // given
+            val state = InMemoryState(record = FeeRecord.inProgress())
 
-        // when
-        val result = handlers(state).claim()
+            // when
+            val result = handlers(state).claim()
 
-        // then
-        assertThat(result).isEqualTo(ClaimResult.New)
-        assertThat(state.record).isEqualTo(FeeRecord.inProgress())
-    }
-
-    @Test
-    fun `a claim while an earlier run holds the id is in progress and leaves the record unchanged`() = runBlocking<Unit> {
-        // given
-        val state = InMemoryState(record = FeeRecord.inProgress())
-
-        // when
-        val result = handlers(state).claim()
-
-        // then
-        assertThat(result).isEqualTo(ClaimResult.InProgress)
-        assertThat(state.record).isEqualTo(FeeRecord.inProgress())
-        assertThat(state.writes).isZero()
-    }
+            // then
+            assertThat(result).isEqualTo(ClaimResult.InProgress)
+            assertThat(state.record).isEqualTo(FeeRecord.inProgress())
+            assertThat(state.writes).isZero()
+        }
 
     @Test
-    fun `a claim on a charged id returns the stored response and leaves the record unchanged`() = runBlocking<Unit> {
-        // given
-        val completed = FeeRecord.inProgress().complete(response)
-        val state = InMemoryState(record = completed)
+    fun `a claim on a charged id returns the stored response and leaves the record unchanged`() =
+        runBlocking<Unit> {
+            // given
+            val completed = FeeRecord.inProgress().complete(response)
+            val state = InMemoryState(record = completed)
 
-        // when
-        val result = handlers(state).claim()
+            // when
+            val result = handlers(state).claim()
 
-        // then
-        assertThat(result).isEqualTo(ClaimResult.AlreadyCompleted(response))
-        assertThat(state.record).isEqualTo(completed)
-        assertThat(state.writes).isZero()
-    }
+            // then
+            assertThat(result).isEqualTo(ClaimResult.AlreadyCompleted(response))
+            assertThat(state.record).isEqualTo(completed)
+            assertThat(state.writes).isZero()
+        }
 
     @Test
-    fun `complete stores the response as a completed record`() = runBlocking<Unit> {
-        // given
-        val state = InMemoryState(record = FeeRecord.inProgress())
+    fun `complete stores the response as a completed record`() =
+        runBlocking<Unit> {
+            // given
+            val state = InMemoryState(record = FeeRecord.inProgress())
 
-        // when
-        handlers(state).complete(response)
+            // when
+            handlers(state).complete(response)
 
-        // then
-        assertThat(state.record).isEqualTo(FeeRecord(FeeRecordStatus.COMPLETED, response = response))
-    }
+            // then
+            assertThat(state.record).isEqualTo(FeeRecord(FeeRecordStatus.COMPLETED, response = response))
+        }
 
     @Test
     fun `complete without a claim is a bug that names the transaction and stores nothing`() {
@@ -95,29 +98,31 @@ class TransactionFeeRecordTest {
     }
 
     @Test
-    fun `get returns the stored record`() = runBlocking<Unit> {
-        // given
-        val completed = FeeRecord.inProgress().complete(response)
-        val state = InMemoryState(record = completed)
+    fun `get returns the stored record`() =
+        runBlocking<Unit> {
+            // given
+            val completed = FeeRecord.inProgress().complete(response)
+            val state = InMemoryState(record = completed)
 
-        // when
-        val record = handlers(state).get()
+            // when
+            val record = handlers(state).get()
 
-        // then
-        assertThat(record).isEqualTo(completed)
-    }
+            // then
+            assertThat(record).isEqualTo(completed)
+        }
 
     @Test
-    fun `get returns null for an id that was never claimed`() = runBlocking<Unit> {
-        // given
-        val state = InMemoryState(record = null)
+    fun `get returns null for an id that was never claimed`() =
+        runBlocking<Unit> {
+            // given
+            val state = InMemoryState(record = null)
 
-        // when
-        val record = handlers(state).get()
+            // when
+            val record = handlers(state).get()
 
-        // then
-        assertThat(record).isNull()
-    }
+            // then
+            assertThat(record).isNull()
+        }
 
     @Test
     fun `is bound as a virtual object with exclusive writes and a shared get`() {
@@ -154,7 +159,9 @@ class TransactionFeeRecordTest {
     private fun handlers(state: FeeRecordState) = TransactionFeeRecord(ClaimDecider(), state)
 
     /** The state of transaction `txn_001` in memory. */
-    private class InMemoryState(var record: FeeRecord?) : FeeRecordState {
+    private class InMemoryState(
+        var record: FeeRecord?,
+    ) : FeeRecordState {
         var writes = 0
             private set
 

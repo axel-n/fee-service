@@ -29,28 +29,32 @@ import java.time.Duration
 import kotlin.coroutines.cancellation.CancellationException
 
 class FeeServiceTest {
+    private val request =
+        FeeRequest(
+            transactionId = "txn_001",
+            amount = BigDecimal("1000"),
+            asset = "USD",
+            assetType = "FIAT",
+            type = "Mobile Top Up",
+            state = "SETTLED - PENDING FEE",
+            createdAt = "2023-08-30 15:42:17.610059",
+        )
 
-    private val request = FeeRequest(
-        transactionId = "txn_001",
-        amount = BigDecimal("1000"),
-        asset = "USD",
-        assetType = "FIAT",
-        type = "Mobile Top Up",
-        state = "SETTLED - PENDING FEE",
-        createdAt = "2023-08-30 15:42:17.610059",
-    )
+    private val response =
+        FeeResponse(
+            transactionId = "txn_001",
+            amount = BigDecimal("1000"),
+            asset = "USD",
+            type = "Mobile Top Up",
+            fee = BigDecimal("1.50"),
+            rate = BigDecimal("0.0015"),
+            description = "Standard fee rate of 0.15%",
+        )
 
-    private val response = FeeResponse(
-        transactionId = "txn_001",
-        amount = BigDecimal("1000"),
-        asset = "USD",
-        type = "Mobile Top Up",
-        fee = BigDecimal("1.50"),
-        rate = BigDecimal("0.0015"),
-        description = "Standard fee rate of 0.15%",
-    )
-
-    private fun service(clients: FeeWorkflowClients, attachTimeout: Duration = Duration.ofSeconds(5)) = FeeService(
+    private fun service(
+        clients: FeeWorkflowClients,
+        attachTimeout: Duration = Duration.ofSeconds(5),
+    ) = FeeService(
         TransactionIdValidator(),
         clients,
         RestateProperties(
@@ -64,46 +68,51 @@ class FeeServiceTest {
         IngressException("Error when executing the request", "POST", "http://localhost:8080", -1, null, ConnectException())
 
     // Runs submit in a coroutine; a failure comes back as the exception, so assertThatThrownBy can inspect it
-    private fun submitting(service: FeeService, request: FeeRequest) =
-        ThrowingCallable { runBlocking { service.submit(request) } }
+    private fun submitting(
+        service: FeeService,
+        request: FeeRequest,
+    ) = ThrowingCallable { runBlocking { service.submit(request) } }
 
     @Test
-    fun `a charged outcome completes with the workflow's response`() = runBlocking<Unit> {
-        // given
-        val clients = FakeClients(attach = { FeeOutcome.Charged(response) })
+    fun `a charged outcome completes with the workflow's response`() =
+        runBlocking<Unit> {
+            // given
+            val clients = FakeClients(attach = { FeeOutcome.Charged(response) })
 
-        // when
-        val submission = service(clients).submit(request)
+            // when
+            val submission = service(clients).submit(request)
 
-        // then
-        assertThat(submission).isEqualTo(FeeStatusResponse.completed(response))
-    }
-
-    @Test
-    fun `submits the request as sent to the workflow keyed by its transaction id`() = runBlocking<Unit> {
-        // given
-        val clients = FakeClients(attach = { FeeOutcome.Charged(response) })
-
-        // when
-        service(clients).submit(request)
-
-        // then
-        assertThat(clients.submitted).containsExactly("txn_001" to request)
-    }
+            // then
+            assertThat(submission).isEqualTo(FeeStatusResponse.completed(response))
+        }
 
     @Test
-    fun `a changed payload with the same transaction id goes to the same workflow`() = runBlocking<Unit> {
-        // given
-        val clients = FakeClients(attach = { FeeOutcome.Charged(response) })
-        val service = service(clients)
+    fun `submits the request as sent to the workflow keyed by its transaction id`() =
+        runBlocking<Unit> {
+            // given
+            val clients = FakeClients(attach = { FeeOutcome.Charged(response) })
 
-        // when
-        service.submit(request)
-        service.submit(request.copy(amount = BigDecimal("2000")))
+            // when
+            service(clients).submit(request)
 
-        // then
-        assertThat(clients.submitted.map { it.first }).containsExactly("txn_001", "txn_001")
-    }
+            // then
+            assertThat(clients.submitted).containsExactly("txn_001" to request)
+        }
+
+    @Test
+    fun `a changed payload with the same transaction id goes to the same workflow`() =
+        runBlocking<Unit> {
+            // given
+            val clients = FakeClients(attach = { FeeOutcome.Charged(response) })
+            val service = service(clients)
+
+            // when
+            service.submit(request)
+            service.submit(request.copy(amount = BigDecimal("2000")))
+
+            // then
+            assertThat(clients.submitted.map { it.first }).containsExactly("txn_001", "txn_001")
+        }
 
     @Test
     fun `attaches to the run Restate returns, so a transaction id sent again gets the first run's result`() =
@@ -137,12 +146,13 @@ class FeeServiceTest {
     @Test
     fun `an unsupported request rejected by the workflow is a 422 validation exception`() {
         // given
-        val error = ValidationError(
-            "state",
-            "PENDING",
-            "Unsupported state 'PENDING'. Supported: 'SETTLED - PENDING FEE'",
-            ValidationError.Kind.UNSUPPORTED,
-        )
+        val error =
+            ValidationError(
+                "state",
+                "PENDING",
+                "Unsupported state 'PENDING'. Supported: 'SETTLED - PENDING FEE'",
+                ValidationError.Kind.UNSUPPORTED,
+            )
         val clients = FakeClients(attach = { FeeOutcome.Rejected(error) })
 
         // when / then
@@ -237,19 +247,20 @@ class FeeServiceTest {
     }
 
     @Test
-    fun `a request cancelled while it waits stays a cancellation and is not reported as a 503`() = runBlocking<Unit> {
-        // given: the workflow was accepted but never finishes, and the caller is waiting for it
-        val clients = FakeClients(attach = { awaitCancellation() })
-        val submission = async { service(clients).submit(request) }
-        clients.attaching.await()
+    fun `a request cancelled while it waits stays a cancellation and is not reported as a 503`() =
+        runBlocking<Unit> {
+            // given: the workflow was accepted but never finishes, and the caller is waiting for it
+            val clients = FakeClients(attach = { awaitCancellation() })
+            val submission = async { service(clients).submit(request) }
+            clients.attaching.await()
 
-        // when
-        submission.cancel()
-        val failure = runCatching { submission.await() }.exceptionOrNull()
+            // when
+            submission.cancel()
+            val failure = runCatching { submission.await() }.exceptionOrNull()
 
-        // then
-        assertThat(failure).isInstanceOf(CancellationException::class.java)
-    }
+            // then
+            assertThat(failure).isInstanceOf(CancellationException::class.java)
+        }
 
     /**
      * The ingress in memory: [submit] runs on every submission, which the fake records, and [attach] answers the run's
@@ -266,7 +277,10 @@ class FeeServiceTest {
         /** Completed once an attach started waiting. */
         val attaching = CompletableDeferred<Unit>()
 
-        override suspend fun submit(transactionId: String, request: FeeRequest): FeeWorkflowRun {
+        override suspend fun submit(
+            transactionId: String,
+            request: FeeRequest,
+        ): FeeWorkflowRun {
             submitted += transactionId to request
             submit()
             return FeeWorkflowRun {
@@ -279,7 +293,6 @@ class FeeServiceTest {
 }
 
 class FeeInProgressExceptionTest {
-
     @Test
     fun `carries the transaction id of the run still in progress`() {
         // given

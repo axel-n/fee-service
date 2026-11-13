@@ -17,7 +17,6 @@ import java.math.BigDecimal
  * `BigDecimal`, rounded `HALF_EVEN` to the transaction asset's decimals.
  */
 interface FeeRule {
-
     /** The transaction type this rule prices. */
     val type: TransactionType
 

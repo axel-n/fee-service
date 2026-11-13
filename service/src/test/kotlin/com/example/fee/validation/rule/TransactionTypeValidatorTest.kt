@@ -10,12 +10,11 @@ import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.Mockito.`when`
 import org.mockito.Mockito.mock
+import org.mockito.Mockito.`when`
 import org.springframework.core.annotation.Order
 
 class TransactionTypeValidatorTest {
-
     private val validator = TransactionTypeValidator(allRulesCalculator())
 
     @ParameterizedTest(name = "{0}")

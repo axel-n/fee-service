@@ -15,8 +15,11 @@ import java.math.BigDecimal
  * as the same value.
  */
 class PlainBigDecimalSerializer : StdSerializer<BigDecimal>(BigDecimal::class.java) {
-
-    override fun serialize(value: BigDecimal, gen: JsonGenerator, provider: SerializerProvider) {
+    override fun serialize(
+        value: BigDecimal,
+        gen: JsonGenerator,
+        provider: SerializerProvider,
+    ) {
         if (value.scale() in -MAX_PLAIN_SCALE..MAX_PLAIN_SCALE) {
             gen.writeNumber(value.toPlainString())
         } else {

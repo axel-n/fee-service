@@ -24,31 +24,32 @@ import java.time.ZoneOffset
 
 /** [RequestValidator] with the 10 production validators, built as Spring builds them but in shuffled order. */
 class RequestValidatorAllChecksTest {
-
     private val clock = Clock.fixed(Instant.parse("2023-08-30T16:00:00Z"), ZoneOffset.UTC)
 
-    private val validators: List<TransactionValidator> = listOf(
-        AmountScaleValidator(),
-        StateValidator(),
-        CreatedAtValidator(clock),
-        TransactionTypeValidator(allRulesCalculator()),
-        RequiredFieldsValidator(),
-        AssetTypeValidator(),
-        AmountValidator(),
-        AssetValidator(),
-        TransactionIdValidator(),
-        MaxAmountValidator(),
-    )
+    private val validators: List<TransactionValidator> =
+        listOf(
+            AmountScaleValidator(),
+            StateValidator(),
+            CreatedAtValidator(clock),
+            TransactionTypeValidator(allRulesCalculator()),
+            RequiredFieldsValidator(),
+            AssetTypeValidator(),
+            AmountValidator(),
+            AssetValidator(),
+            TransactionIdValidator(),
+            MaxAmountValidator(),
+        )
 
     private val requestValidator = RequestValidator(validators)
 
     /** Fails every business check at once; the amount scale check needs a known asset, so the amount checks are shown separately. */
-    private val unsupportedEverywhere = validRequest.copy(
-        state = "PENDING",
-        asset = "BTC",
-        assetType = "CRYPTO",
-        type = "Refund",
-    )
+    private val unsupportedEverywhere =
+        validRequest.copy(
+            state = "PENDING",
+            asset = "BTC",
+            assetType = "CRYPTO",
+            type = "Refund",
+        )
 
     @Test
     fun `passes the reference request`() {
@@ -76,7 +77,10 @@ class RequestValidatorAllChecksTest {
 
     @ParameterizedTest(name = "{0}")
     @MethodSource("structuralProblems")
-    fun `reports a 400 problem before every 422 problem`(field: String, broken: (FeeRequest) -> FeeRequest) {
+    fun `reports a 400 problem before every 422 problem`(
+        field: String,
+        broken: (FeeRequest) -> FeeRequest,
+    ) {
         // given
         val request = broken(unsupportedEverywhere)
 
@@ -104,14 +108,15 @@ class RequestValidatorAllChecksTest {
     @Test
     fun `reports the business problems in the order state, asset, asset type, type, amount scale, max amount`() {
         // given
-        val requests = listOf(
-            unsupportedEverywhere.copy(amount = BigDecimal("10.001")),
-            unsupportedEverywhere.copy(amount = BigDecimal("10.001"), state = "SETTLED - PENDING FEE"),
-            unsupportedEverywhere.copy(amount = BigDecimal("10.001"), state = "SETTLED - PENDING FEE", asset = "USD"),
-            validRequest.copy(amount = BigDecimal("10.001"), type = "Refund"),
-            validRequest.copy(amount = BigDecimal("10.001")),
-            validRequest.copy(amount = BigDecimal("3000000000.01")),
-        )
+        val requests =
+            listOf(
+                unsupportedEverywhere.copy(amount = BigDecimal("10.001")),
+                unsupportedEverywhere.copy(amount = BigDecimal("10.001"), state = "SETTLED - PENDING FEE"),
+                unsupportedEverywhere.copy(amount = BigDecimal("10.001"), state = "SETTLED - PENDING FEE", asset = "USD"),
+                validRequest.copy(amount = BigDecimal("10.001"), type = "Refund"),
+                validRequest.copy(amount = BigDecimal("10.001")),
+                validRequest.copy(amount = BigDecimal("3000000000.01")),
+            )
 
         // when
         val errors = requests.map { requestValidator.validate(it) }
@@ -189,19 +194,21 @@ class RequestValidatorAllChecksTest {
     }
 
     companion object {
-
         @JvmStatic
-        fun structuralProblems(): List<Arguments> = listOf(
-            problem("transaction_id") { it.copy(transactionId = null) },
-            problem("amount") { it.copy(amount = null) },
-            problem("created_at") { it.copy(createdAt = " ") },
-            problem("transaction_id") { it.copy(transactionId = "txn:001") },
-            problem("amount") { it.copy(amount = BigDecimal("-10.001")) },
-            problem("created_at") { it.copy(createdAt = "2023-08-30T15:42:17") },
-            problem("created_at") { it.copy(createdAt = "2099-01-01 00:00:00") },
-        )
+        fun structuralProblems(): List<Arguments> =
+            listOf(
+                problem("transaction_id") { it.copy(transactionId = null) },
+                problem("amount") { it.copy(amount = null) },
+                problem("created_at") { it.copy(createdAt = " ") },
+                problem("transaction_id") { it.copy(transactionId = "txn:001") },
+                problem("amount") { it.copy(amount = BigDecimal("-10.001")) },
+                problem("created_at") { it.copy(createdAt = "2023-08-30T15:42:17") },
+                problem("created_at") { it.copy(createdAt = "2099-01-01 00:00:00") },
+            )
 
-        private fun problem(field: String, broken: (FeeRequest) -> FeeRequest): Arguments =
-            Arguments.of(field, broken)
+        private fun problem(
+            field: String,
+            broken: (FeeRequest) -> FeeRequest,
+        ): Arguments = Arguments.of(field, broken)
     }
 }

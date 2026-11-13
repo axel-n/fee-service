@@ -18,10 +18,10 @@ import org.springframework.stereotype.Component
 @Component
 @Order(ValidationOrder.TRANSACTION_ID)
 class TransactionIdValidator : TransactionValidator {
-
     override fun validate(request: FeeRequest): ValidationError? {
-        val raw = request.transactionId
-            ?: return ValidationError(FIELD, null, "Field '$FIELD' is required", ValidationError.Kind.INVALID)
+        val raw =
+            request.transactionId
+                ?: return ValidationError(FIELD, null, "Field '$FIELD' is required", ValidationError.Kind.INVALID)
         if (PATTERN.matches(raw)) return null
         return ValidationError(
             FIELD,

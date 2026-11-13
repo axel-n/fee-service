@@ -14,7 +14,6 @@ import java.time.ZoneId
 import java.time.ZoneOffset
 
 class CreatedAtValidatorTest {
-
     private val now = Instant.parse("2023-08-30T16:00:00Z")
     private val validator = CreatedAtValidator(Clock.fixed(now, ZoneOffset.UTC))
 

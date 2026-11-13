@@ -16,7 +16,6 @@ import org.springframework.stereotype.Component
 @Component
 @Order(ValidationOrder.ASSET)
 class AssetValidator : TransactionValidator {
-
     override fun validate(request: FeeRequest): ValidationError? {
         val raw = request.asset ?: return null
         if (Asset.fromValue(raw) != Asset.UNKNOWN) return null

@@ -51,7 +51,9 @@ class CountingValidator : TransactionValidator {
  * A test can hold the calculations of one `transaction_id` on a latch ([block] / [release]), to keep a workflow inside
  * its CALCULATE closure, which Restate hasn't journaled yet. Tests use their own transaction ids, so no reset is needed.
  */
-class CountingFeeCalculator(rules: List<FeeRule>) : FeeCalculator(rules) {
+class CountingFeeCalculator(
+    rules: List<FeeRule>,
+) : FeeCalculator(rules) {
     private val counter = CallCounter()
     private val finished = CallCounter()
     private val gates = ConcurrentHashMap<String, CountDownLatch>()
@@ -84,7 +86,10 @@ class CountingFeeCalculator(rules: List<FeeRule>) : FeeCalculator(rules) {
 
     // Bounded, so a test that never releases can't leave a thread waiting for the rest of the run. The plain exception
     // makes Restate retry the closure.
-    private fun awaitRelease(transactionId: String, gate: CountDownLatch) {
+    private fun awaitRelease(
+        transactionId: String,
+        gate: CountDownLatch,
+    ) {
         check(gate.await(MAX_BLOCK.toMillis(), TimeUnit.MILLISECONDS)) {
             "calculation for $transactionId was not released within $MAX_BLOCK"
         }

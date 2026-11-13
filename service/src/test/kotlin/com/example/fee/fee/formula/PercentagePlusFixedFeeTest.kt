@@ -12,13 +12,13 @@ import org.junit.jupiter.params.provider.CsvSource
 import java.math.BigDecimal
 
 class PercentagePlusFixedFeeTest {
-
-    private val rule = PercentagePlusFixedFee(
-        TransactionType.MERCHANT_PAYMENT,
-        rate = BigDecimal("0.01"),
-        fixed = BigDecimal("0.30"),
-        description = describeAsset,
-    )
+    private val rule =
+        PercentagePlusFixedFee(
+            TransactionType.MERCHANT_PAYMENT,
+            rate = BigDecimal("0.01"),
+            fixed = BigDecimal("0.30"),
+            description = describeAsset,
+        )
 
     @ParameterizedTest(name = "{0} → {1}")
     @CsvSource(
@@ -28,7 +28,10 @@ class PercentagePlusFixedFeeTest {
         "0.5, 0.30", // 0.305: half to even (down), the sum is rounded once
         "1.5, 0.32", // 0.315: half to even (up)
     )
-    fun `charges the rate plus the fixed amount, rounded once`(amount: String, expected: String) {
+    fun `charges the rate plus the fixed amount, rounded once`(
+        amount: String,
+        expected: String,
+    ) {
         // given
         val tx = transaction(amount, type = TransactionType.MERCHANT_PAYMENT)
 

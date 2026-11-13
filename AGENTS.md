@@ -28,6 +28,9 @@ setup step outside the app.
   runs **externally** in Docker. The root `pom.xml` aligns Kotlin, coroutines, kotlinx-serialization and Byte Buddy with the
   versions the SDK is built against; bump them together with `restate.version`
 - Tests: JUnit 5, Mockito, Testcontainers, Cucumber
+- Formatting: ktlint through `ktlint-maven-plugin` (root `pom.xml`), with its default `ktlint_official` style and no
+  `.editorconfig`. It checks main and test sources of both modules in the `validate` phase, so a format problem fails every
+  build, `mvn test` included
 
 ## Hard rules
 
@@ -97,6 +100,8 @@ Follow the call graph in `docs/design.md`:
 
 ## Code style
 
+- Code is ktlint-clean. Run `mvn ktlint:format`, then fix by hand what it can't, e.g. a file must be named after its
+  single class (a test class takes its file's name, `FeeRuleTest`), and a KDoc can't be followed by a `//` comment.
 - Idiomatic Kotlin: `val` over `var`, data classes for values, sealed types for closed hierarchies, no `!!`, no `lateinit`
   in production code.
 - Number literals of 1000 or more are grouped by thousands with underscores, in main and test code: `1_000`, `65_535`,
@@ -145,6 +150,7 @@ Follow the call graph in `docs/design.md`:
 ### Commands
 
 ```bash
+mvn ktlint:format    # reformats main and test sources; every build fails while ktlint reports a problem
 mvn test             # unit tests only (fast, no Docker)
 mvn verify           # + Testcontainers and Cucumber (needs Docker)
 mvn spring-boot:run      # from the root: starts the app (service module) and its endpoint; register it once (README, "Run")

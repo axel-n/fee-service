@@ -10,7 +10,6 @@ import org.junit.jupiter.params.provider.ValueSource
 import org.springframework.core.annotation.Order
 
 class AssetTypeValidatorTest {
-
     private val validator = AssetTypeValidator()
 
     @Test

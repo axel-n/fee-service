@@ -4,8 +4,7 @@ import org.assertj.core.api.Assertions.assertThatCode
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.EnumSource
 
-class NoOpStepHookTest {
-
+class StepHookTest {
     private val hook: StepHook = NoOpStepHook()
 
     @ParameterizedTest

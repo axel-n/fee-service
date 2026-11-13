@@ -12,8 +12,10 @@ package com.example.fee.contract.error
  * Not durable (they never cross Restate's serde), but published: other services compile against them, so renaming a
  * class or a [FeeErrorCode] breaks those clients.
  */
-sealed class FeeException(message: String, cause: Throwable? = null) : RuntimeException(message, cause) {
-
+sealed class FeeException(
+    message: String,
+    cause: Throwable? = null,
+) : RuntimeException(message, cause) {
     /** What went wrong, machine-readable: the `code` of the problem body. */
     abstract val code: FeeErrorCode
 
@@ -22,7 +24,9 @@ sealed class FeeException(message: String, cause: Throwable? = null) : RuntimeEx
 }
 
 /** The `code` of every problem the service raises itself, with the HTTP [status] it answers with. */
-enum class FeeErrorCode(val status: Int) {
+enum class FeeErrorCode(
+    val status: Int,
+) {
     /** A malformed request: a missing field or a value of the wrong form ([ValidationException]). */
     INVALID_REQUEST(400),
 
@@ -47,19 +51,22 @@ class ValidationException(
     message: String,
     val kind: Kind,
 ) : FeeException(message) {
-
     override val code: FeeErrorCode get() = kind.code
 
-    enum class Kind(val code: FeeErrorCode) {
+    enum class Kind(
+        val code: FeeErrorCode,
+    ) {
         INVALID(FeeErrorCode.INVALID_REQUEST),
         UNSUPPORTED(FeeErrorCode.UNSUPPORTED_REQUEST),
     }
 }
 
 /** [transactionId] is claimed by an earlier run that never finished (one an operator killed, say): 409. */
-class DuplicateTransactionException(val transactionId: String) : FeeException(
-    "Transaction '$transactionId' is claimed by an earlier run that has not finished",
-) {
+class DuplicateTransactionException(
+    val transactionId: String,
+) : FeeException(
+        "Transaction '$transactionId' is claimed by an earlier run that has not finished",
+    ) {
     override val code: FeeErrorCode get() = FeeErrorCode.DUPLICATE_TRANSACTION
 }
 
@@ -67,9 +74,11 @@ class DuplicateTransactionException(val transactionId: String) : FeeException(
  * Restate couldn't be reached or failed to accept the request, so nothing is known to be processed: 503. The [cause]
  * stays in the service's log; the response never shows it.
  */
-class WorkflowUnavailableException(cause: Throwable? = null) : FeeException(
-    "Fee processing is temporarily unavailable. Retry the same request later",
-    cause,
-) {
+class WorkflowUnavailableException(
+    cause: Throwable? = null,
+) : FeeException(
+        "Fee processing is temporarily unavailable. Retry the same request later",
+        cause,
+    ) {
     override val code: FeeErrorCode get() = FeeErrorCode.WORKFLOW_UNAVAILABLE
 }

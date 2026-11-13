@@ -21,7 +21,6 @@ import java.time.Duration
  *   again (`RestateEndpointLifecycle`) is reached at the URL Restate already knows. Only one app can listen on it at a time.
  */
 object RestateTestEnvironment {
-
     private const val IMAGE = "docker.io/restatedev/restate:1.8.1"
     private const val INGRESS_PORT = 8080
     private const val ADMIN_PORT = 9070
@@ -29,19 +28,19 @@ object RestateTestEnvironment {
     /** The host port the app's Restate endpoint listens on, the same for the whole run. */
     val endpointPort: Int = ServerSocket(0).use { it.localPort }
 
-    private val container: GenericContainer<*> = GenericContainer(DockerImageName.parse(IMAGE))
-        .withExposedPorts(INGRESS_PORT, ADMIN_PORT)
-        .waitingFor(
-            WaitAllStrategy()
-                .withStrategy(Wait.forHttp("/health").forPort(ADMIN_PORT).forStatusCode(200))
-                .withStrategy(Wait.forHttp("/restate/health").forPort(INGRESS_PORT).forStatusCode(200))
-                .withStartupTimeout(Duration.ofMinutes(2)),
-        )
-        .also {
-            // before the start, so the container gets the host.testcontainers.internal entry
-            Testcontainers.exposeHostPorts(endpointPort)
-            it.start()
-        }
+    private val container: GenericContainer<*> =
+        GenericContainer(DockerImageName.parse(IMAGE))
+            .withExposedPorts(INGRESS_PORT, ADMIN_PORT)
+            .waitingFor(
+                WaitAllStrategy()
+                    .withStrategy(Wait.forHttp("/health").forPort(ADMIN_PORT).forStatusCode(200))
+                    .withStrategy(Wait.forHttp("/restate/health").forPort(INGRESS_PORT).forStatusCode(200))
+                    .withStartupTimeout(Duration.ofMinutes(2)),
+            ).also {
+                // before the start, so the container gets the host.testcontainers.internal entry
+                Testcontainers.exposeHostPorts(endpointPort)
+                it.start()
+            }
 
     val ingressUrl: String = "http://${container.host}:${container.getMappedPort(INGRESS_PORT)}"
 
@@ -67,11 +66,12 @@ object RestateTestEnvironment {
      * variables (`RESTATE_INGRESS_URL`, …) and config files, so a developer's local settings can't point the tests at
      * another Restate.
      */
-    fun restateProperties(): Map<String, String> = mapOf(
-        "restate.ingress-url" to ingressUrl,
-        "restate.endpoint-port" to endpointPort.toString(),
-        "restate.attach-timeout" to "30s",
-    )
+    fun restateProperties(): Map<String, String> =
+        mapOf(
+            "restate.ingress-url" to ingressUrl,
+            "restate.endpoint-port" to endpointPort.toString(),
+            "restate.attach-timeout" to "30s",
+        )
 
     fun registerProperties(registry: DynamicPropertyRegistry) {
         restateProperties().forEach { (key, value) -> registry.add(key) { value } }
@@ -86,6 +86,11 @@ object RestateTestEnvironment {
     fun thaw() = signal("SIGCONT")
 
     private fun signal(signal: String) {
-        DockerClientFactory.instance().client().killContainerCmd(container.containerId).withSignal(signal).exec()
+        DockerClientFactory
+            .instance()
+            .client()
+            .killContainerCmd(container.containerId)
+            .withSignal(signal)
+            .exec()
     }
 }

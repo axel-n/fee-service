@@ -21,21 +21,26 @@ import com.fasterxml.jackson.annotation.JsonTypeInfo
     JsonSubTypes.Type(value = FeeOutcome.Conflict::class, name = "CONFLICT"),
 )
 sealed interface FeeOutcome {
-
     /** The fee was charged (recorded), now or by an earlier run of the same `transaction_id`. */
-    data class Charged(@JsonProperty("response") val response: FeeResponse) : FeeOutcome
+    data class Charged(
+        @JsonProperty("response") val response: FeeResponse,
+    ) : FeeOutcome
 
     /**
      * Validation rejected the request; the [error]'s kind decides 400 or 422. Nothing is recorded, but this is the
      * answer for the `transaction_id` until Restate drops the finished run.
      */
-    data class Rejected(@JsonProperty("error") val error: ValidationError) : FeeOutcome
+    data class Rejected(
+        @JsonProperty("error") val error: ValidationError,
+    ) : FeeOutcome
 
     /**
      * The id's fee record is claimed by an earlier run that never finished (one an operator killed, say), so this run
      * can't charge it.
      */
-    data class Conflict(@JsonProperty("transaction_id") val transactionId: String) : FeeOutcome
+    data class Conflict(
+        @JsonProperty("transaction_id") val transactionId: String,
+    ) : FeeOutcome
 }
 
 /**

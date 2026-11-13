@@ -16,7 +16,6 @@ import org.springframework.stereotype.Component
 @Component
 @Order(ValidationOrder.STATE)
 class StateValidator : TransactionValidator {
-
     override fun validate(request: FeeRequest): ValidationError? {
         val raw = request.state ?: return null
         if (TransactionState.fromValue(raw) != TransactionState.UNKNOWN) return null

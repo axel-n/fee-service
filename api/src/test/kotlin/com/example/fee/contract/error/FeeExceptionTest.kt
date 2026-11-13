@@ -6,7 +6,6 @@ import org.junit.jupiter.api.Test
 import java.net.ConnectException
 
 class FeeExceptionTest {
-
     @Test
     fun `a malformed request is a 400 carrying the field, the value and the readable message`() {
         // given
@@ -83,12 +82,13 @@ class FeeExceptionTest {
     @Test
     fun `every kind of fee failure is a fee exception with its own code`() {
         // given
-        val exceptions: List<FeeException> = listOf(
-            ValidationException("amount", "-5", "Amount -5 must be greater than 0", ValidationException.Kind.INVALID),
-            ValidationException("state", "PENDING", "Unsupported state 'PENDING'", ValidationException.Kind.UNSUPPORTED),
-            DuplicateTransactionException("txn_001"),
-            WorkflowUnavailableException(),
-        )
+        val exceptions: List<FeeException> =
+            listOf(
+                ValidationException("amount", "-5", "Amount -5 must be greater than 0", ValidationException.Kind.INVALID),
+                ValidationException("state", "PENDING", "Unsupported state 'PENDING'", ValidationException.Kind.UNSUPPORTED),
+                DuplicateTransactionException("txn_001"),
+                WorkflowUnavailableException(),
+            )
 
         // when
         val codes = exceptions.map { it.code }

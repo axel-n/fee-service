@@ -16,8 +16,9 @@ import org.springframework.stereotype.Component
  */
 @Component
 @Order(ValidationOrder.TRANSACTION_TYPE)
-class TransactionTypeValidator(private val feeCalculator: FeeCalculator) : TransactionValidator {
-
+class TransactionTypeValidator(
+    private val feeCalculator: FeeCalculator,
+) : TransactionValidator {
     private val supported: List<String> = TransactionType.entries.filter(feeCalculator::supports).map { it.value }
 
     override fun validate(request: FeeRequest): ValidationError? {

@@ -12,8 +12,9 @@ import org.springframework.stereotype.Component
  * Pure: the workflow calls [calculate] inside CALCULATE's journaled step, so the quote is journaled.
  */
 @Component
-class FeeCalculator(rules: List<FeeRule>) {
-
+class FeeCalculator(
+    rules: List<FeeRule>,
+) {
     private val rulesByType: Map<TransactionType, FeeRule> = index(rules)
 
     /** Whether a rule prices [type]; `TransactionTypeValidator` rejects every type this returns `false` for. */
@@ -24,14 +25,14 @@ class FeeCalculator(rules: List<FeeRule>) {
      * first, so it throws [IllegalArgumentException] instead of returning a business result.
      */
     fun calculate(transaction: Transaction): FeeQuote {
-        val rule = requireNotNull(rulesByType[transaction.type]) {
-            "No fee rule for transaction type ${transaction.type}; validation should have rejected it"
-        }
+        val rule =
+            requireNotNull(rulesByType[transaction.type]) {
+                "No fee rule for transaction type ${transaction.type}; validation should have rejected it"
+            }
         return rule.calculate(transaction)
     }
 
     private companion object {
-
         fun index(rules: List<FeeRule>): Map<TransactionType, FeeRule> {
             val byType = rules.groupBy { it.type }
 

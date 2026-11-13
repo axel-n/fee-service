@@ -8,10 +8,10 @@ import org.junit.jupiter.params.provider.CsvSource
 import java.math.BigDecimal
 
 class PlainBigDecimalSerializerTest {
-
-    private val mapper = ObjectMapper().registerModule(
-        SimpleModule().addSerializer(BigDecimal::class.java, PlainBigDecimalSerializer()),
-    )
+    private val mapper =
+        ObjectMapper().registerModule(
+            SimpleModule().addSerializer(BigDecimal::class.java, PlainBigDecimalSerializer()),
+        )
 
     @ParameterizedTest(name = "{0} is written as {1}")
     @CsvSource(
@@ -28,7 +28,10 @@ class PlainBigDecimalSerializerTest {
         "3000000000.01, 3000000000.01",
         "-1E+10, -10000000000",
     )
-    fun `writes a plain number that keeps its scale`(value: String, expected: String) {
+    fun `writes a plain number that keeps its scale`(
+        value: String,
+        expected: String,
+    ) {
         // given
         val number = BigDecimal(value)
 
@@ -41,7 +44,10 @@ class PlainBigDecimalSerializerTest {
 
     @ParameterizedTest(name = "{0} is written plain, {1} characters")
     @CsvSource("1E+9999, 10000", "1E-9999, 10001", "-1E+9999, 10001")
-    fun `writes plain up to the scale bound`(value: String, length: Int) {
+    fun `writes plain up to the scale bound`(
+        value: String,
+        length: Int,
+    ) {
         // given
         val number = BigDecimal(value)
 

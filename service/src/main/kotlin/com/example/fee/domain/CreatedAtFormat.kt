@@ -12,13 +12,14 @@ import java.time.temporal.ChronoField
  * fraction digits, no zone (read as UTC). One place, so validation and mapping can't disagree on it.
  */
 object CreatedAtFormat {
-    private val formatter: DateTimeFormatter = DateTimeFormatterBuilder()
-        .appendPattern("uuuu-MM-dd HH:mm:ss")
-        .optionalStart()
-        .appendFraction(ChronoField.NANO_OF_SECOND, 1, 9, true)
-        .optionalEnd()
-        .toFormatter()
-        .withResolverStyle(ResolverStyle.STRICT)
+    private val formatter: DateTimeFormatter =
+        DateTimeFormatterBuilder()
+            .appendPattern("uuuu-MM-dd HH:mm:ss")
+            .optionalStart()
+            .appendFraction(ChronoField.NANO_OF_SECOND, 1, 9, true)
+            .optionalEnd()
+            .toFormatter()
+            .withResolverStyle(ResolverStyle.STRICT)
 
     /** The parsed value, or `null` for null or anything not in the format (including impossible dates). Never throws. */
     fun parseOrNull(raw: String?): LocalDateTime? =

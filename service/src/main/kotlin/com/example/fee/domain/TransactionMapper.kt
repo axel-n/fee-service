@@ -12,7 +12,6 @@ import org.springframework.stereotype.Component
  */
 @Component
 class TransactionMapper {
-
     fun toTransaction(request: FeeRequest): Transaction? {
         val transactionId = request.transactionId ?: return null
         val amount = request.amount ?: return null

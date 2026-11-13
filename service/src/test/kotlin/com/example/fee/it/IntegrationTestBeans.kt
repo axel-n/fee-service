@@ -13,7 +13,6 @@ import org.springframework.context.event.EventListener
  * up and the app stays the plain app everywhere else.
  */
 class IntegrationTestBeans {
-
     // Registers the shared app's endpoint once it listens, as the README asks of whoever starts the app
     @Bean
     fun endpointRegistration(): EndpointRegistration = EndpointRegistration()
@@ -43,7 +42,6 @@ class IntegrationTestBeans {
  * listens, so Restate can discover the services.
  */
 class EndpointRegistration {
-
     @EventListener(ApplicationReadyEvent::class)
     fun register() {
         RestateTestEnvironment.registerEndpoint()

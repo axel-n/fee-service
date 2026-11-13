@@ -4,7 +4,6 @@ import com.example.fee.application.FeeInProgressException
 import com.example.fee.contract.FeeStatusResponse
 import com.example.fee.contract.error.DuplicateTransactionException
 import com.example.fee.contract.error.FeeException
-
 import com.example.fee.contract.error.ValidationException
 import com.example.fee.validation.ValueDisplay
 import com.fasterxml.jackson.core.JsonProcessingException
@@ -32,7 +31,6 @@ import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExcep
  */
 @RestControllerAdvice
 class ApiExceptionHandler : ResponseEntityExceptionHandler() {
-
     /** A run still going after `restate.attach-timeout`: 202 and the `IN_PROGRESS` status. */
     @ExceptionHandler(FeeInProgressException::class)
     fun handleInProgress(exception: FeeInProgressException): ResponseEntity<FeeStatusResponse> =
@@ -73,30 +71,37 @@ class ApiExceptionHandler : ResponseEntityExceptionHandler() {
             setProperty(CODE, exception.code.name)
         }
 
-    private fun unreadableBodyProblem(status: HttpStatusCode, cause: Throwable?): ProblemDetail {
-        val field = (cause as? JsonMappingException)?.path?.takeIf { it.isNotEmpty() }?.joinToString(".") {
-            it.fieldName ?: "[${it.index}]"
-        }
-        if (field == null) {
-            val message = if (cause is JsonProcessingException) {
-                "The request body is not valid JSON"
-            } else {
-                "The request body is missing or can't be read"
+    private fun unreadableBodyProblem(
+        status: HttpStatusCode,
+        cause: Throwable?,
+    ): ProblemDetail {
+        val field =
+            (cause as? JsonMappingException)?.path?.takeIf { it.isNotEmpty() }?.joinToString(".") {
+                it.fieldName ?: "[${it.index}]"
             }
+        if (field == null) {
+            val message =
+                if (cause is JsonProcessingException) {
+                    "The request body is not valid JSON"
+                } else {
+                    "The request body is missing or can't be read"
+                }
             return ProblemDetail.forStatusAndDetail(status, message).apply { setProperty(MESSAGE, message) }
         }
         val invalid = cause as? InvalidFormatException
         val value = invalid?.value?.toString()
-        val expected = if (invalid != null && Number::class.java.isAssignableFrom(invalid.targetType)) {
-            ". Expected a number"
-        } else {
-            ""
-        }
-        val message = if (value == null) {
-            "Field '$field' has a value of the wrong JSON type"
-        } else {
-            "Field '$field' has an invalid value ${ValueDisplay.quoted(value)}$expected"
-        }
+        val expected =
+            if (invalid != null && Number::class.java.isAssignableFrom(invalid.targetType)) {
+                ". Expected a number"
+            } else {
+                ""
+            }
+        val message =
+            if (value == null) {
+                "Field '$field' has a value of the wrong JSON type"
+            } else {
+                "Field '$field' has an invalid value ${ValueDisplay.quoted(value)}$expected"
+            }
         return ProblemDetail.forStatusAndDetail(status, message).apply {
             setProperty(FIELD, field)
             setProperty(VALUE, value)

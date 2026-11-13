@@ -6,19 +6,19 @@ import org.junit.jupiter.api.Test
 import java.math.BigDecimal
 
 class FeeStatusResponseTest {
-
     // HTTP only, so Spring's mapper is the one that matters
     private val mapper = ContractMapper.SPRING
 
-    private val response = FeeResponse(
-        transactionId = "txn_001",
-        amount = BigDecimal("1000"),
-        asset = "USD",
-        type = "Mobile Top Up",
-        fee = BigDecimal("1.50"),
-        rate = BigDecimal("0.0015"),
-        description = "Standard fee rate of 0.15%",
-    )
+    private val response =
+        FeeResponse(
+            transactionId = "txn_001",
+            amount = BigDecimal("1000"),
+            asset = "USD",
+            type = "Mobile Top Up",
+            fee = BigDecimal("1.50"),
+            rate = BigDecimal("0.0015"),
+            description = "Standard fee rate of 0.15%",
+        )
 
     @Test
     fun `completed status carries every fee response field`() {
@@ -30,7 +30,14 @@ class FeeStatusResponseTest {
 
         // then
         assertThat(ContractMapper.fieldNames(json)).containsExactlyInAnyOrder(
-            "transaction_id", "status", "amount", "asset", "type", "fee", "rate", "description",
+            "transaction_id",
+            "status",
+            "amount",
+            "asset",
+            "type",
+            "fee",
+            "rate",
+            "description",
         )
         val node = ContractMapper.tree(json)
         assertThat(node["status"].asText()).isEqualTo("COMPLETED")

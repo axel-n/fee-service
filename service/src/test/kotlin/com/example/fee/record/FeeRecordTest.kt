@@ -8,7 +8,6 @@ import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 
 class FeeRecordTest {
-
     private val serde = JacksonSerdeFactory().create(FeeRecord::class.java)
 
     @Test
@@ -32,7 +31,6 @@ class FeeRecordTest {
         assertThat(completed).isEqualTo(FeeRecord(FeeRecordStatus.COMPLETED, response = response))
     }
 
-
     @Test
     fun `rejects a completed record without a response`() {
         // when / then
@@ -48,7 +46,6 @@ class FeeRecordTest {
             .isInstanceOf(IllegalArgumentException::class.java)
             .hasMessageContaining("IN_PROGRESS")
     }
-
 
     @Test
     fun `is stored by Restate's serde with snake_case names and read back unchanged`() {
@@ -78,7 +75,6 @@ class FeeRecordTest {
 }
 
 class FeeRecordStatusTest {
-
     @Test
     fun `lists exactly the two stored statuses by name`() {
         // given

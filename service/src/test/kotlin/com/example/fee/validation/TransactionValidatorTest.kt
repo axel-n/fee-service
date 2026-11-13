@@ -3,22 +3,23 @@ package com.example.fee.validation
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 
-class ValidationOrderTest {
-
-    private val structural = listOf(
-        ValidationOrder.REQUIRED_FIELDS,
-        ValidationOrder.TRANSACTION_ID,
-        ValidationOrder.AMOUNT,
-        ValidationOrder.CREATED_AT,
-    )
-    private val business = listOf(
-        ValidationOrder.STATE,
-        ValidationOrder.ASSET,
-        ValidationOrder.ASSET_TYPE,
-        ValidationOrder.TRANSACTION_TYPE,
-        ValidationOrder.AMOUNT_SCALE,
-        ValidationOrder.MAX_AMOUNT,
-    )
+class TransactionValidatorTest {
+    private val structural =
+        listOf(
+            ValidationOrder.REQUIRED_FIELDS,
+            ValidationOrder.TRANSACTION_ID,
+            ValidationOrder.AMOUNT,
+            ValidationOrder.CREATED_AT,
+        )
+    private val business =
+        listOf(
+            ValidationOrder.STATE,
+            ValidationOrder.ASSET,
+            ValidationOrder.ASSET_TYPE,
+            ValidationOrder.TRANSACTION_TYPE,
+            ValidationOrder.AMOUNT_SCALE,
+            ValidationOrder.MAX_AMOUNT,
+        )
 
     @Test
     fun `orders the checks as the design lists them, spaced by 100`() {

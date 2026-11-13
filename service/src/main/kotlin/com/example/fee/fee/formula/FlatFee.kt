@@ -20,7 +20,6 @@ class FlatFee(
     val fixed: BigDecimal,
     private val description: (Asset) -> String,
 ) : FeeRule {
-
     init {
         requireNonNegative("fixed", fixed)
     }

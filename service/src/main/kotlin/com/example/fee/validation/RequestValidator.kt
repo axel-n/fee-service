@@ -11,8 +11,9 @@ import org.springframework.stereotype.Component
  * future caller) runs in the same order. Called inside the workflow's VALIDATE journaled step.
  */
 @Component
-class RequestValidator(validators: List<TransactionValidator>) {
-
+class RequestValidator(
+    validators: List<TransactionValidator>,
+) {
     private val ordered: List<TransactionValidator> = validators.sortedWith(AnnotationAwareOrderComparator.INSTANCE)
 
     /** The first error in `@Order` order, or `null` if the request passes every check. */

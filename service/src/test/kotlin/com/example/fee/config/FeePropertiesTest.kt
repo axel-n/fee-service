@@ -8,7 +8,6 @@ import org.junit.jupiter.params.provider.ValueSource
 import java.math.BigDecimal
 
 class MobileTopUpFeePropertiesTest {
-
     @Test
     fun `keeps a valid rate`() {
         // given
@@ -56,7 +55,6 @@ class MobileTopUpFeePropertiesTest {
 }
 
 class BankTransferFeePropertiesTest {
-
     @Test
     fun `keeps a valid rate and minimum`() {
         // given
@@ -129,7 +127,6 @@ class BankTransferFeePropertiesTest {
 }
 
 class MerchantPaymentFeePropertiesTest {
-
     @Test
     fun `keeps a valid rate and fixed amount`() {
         // given
@@ -190,7 +187,6 @@ class MerchantPaymentFeePropertiesTest {
 }
 
 class CashWithdrawalFeePropertiesTest {
-
     @Test
     fun `keeps a valid fixed amount`() {
         // given
@@ -227,7 +223,6 @@ class CashWithdrawalFeePropertiesTest {
 }
 
 class FeePropertyChecksTest {
-
     @ParameterizedTest(name = "{0}")
     @ValueSource(strings = ["0", "0.0015", "0.999999"])
     fun `accepts a rate in 0 to 1 exclusive`(rate: String) {

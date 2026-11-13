@@ -11,7 +11,6 @@ import org.junit.jupiter.params.provider.CsvSource
 import java.math.BigDecimal
 
 class MerchantPaymentFeeRuleTest {
-
     private val rule = MerchantPaymentFeeRule(MerchantPaymentFeeProperties(BigDecimal("0.01"), BigDecimal("0.30")))
 
     @Test
@@ -41,7 +40,10 @@ class MerchantPaymentFeeRuleTest {
         "USD, Fee rate of 1% plus 0.30 USD fixed",
         "EUR, Fee rate of 1% plus 0.30 EUR fixed",
     )
-    fun `describes rate and fixed amount in the transaction's asset`(asset: Asset, expected: String) {
+    fun `describes rate and fixed amount in the transaction's asset`(
+        asset: Asset,
+        expected: String,
+    ) {
         // given
         val tx = transaction("1000", asset, TransactionType.MERCHANT_PAYMENT)
 

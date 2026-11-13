@@ -9,7 +9,6 @@ import org.junit.jupiter.params.provider.NullAndEmptySource
 import org.junit.jupiter.params.provider.ValueSource
 
 class TransactionTypeTest {
-
     @ParameterizedTest(name = "''{0}'' is {1}")
     @CsvSource(
         "Mobile Top Up, MOBILE_TOP_UP",
@@ -17,7 +16,10 @@ class TransactionTypeTest {
         "Merchant Payment, MERCHANT_PAYMENT",
         "Cash Withdrawal, CASH_WITHDRAWAL",
     )
-    fun `parses the request value of every type`(raw: String, expected: TransactionType) {
+    fun `parses the request value of every type`(
+        raw: String,
+        expected: TransactionType,
+    ) {
         // given
         val input = raw
 
@@ -57,7 +59,6 @@ class TransactionTypeTest {
 }
 
 class TransactionStateTest {
-
     @Test
     fun `parses SETTLED - PENDING FEE`() {
         // given
@@ -99,7 +100,6 @@ class TransactionStateTest {
 }
 
 class AssetTest {
-
     @ParameterizedTest(name = "''{0}'' is {1} with {2} decimals, {3}")
     @CsvSource(
         "USD, USD, 2, FIAT",
@@ -153,7 +153,6 @@ class AssetTest {
 }
 
 class AssetTypeTest {
-
     @Test
     fun `parses FIAT`() {
         // given

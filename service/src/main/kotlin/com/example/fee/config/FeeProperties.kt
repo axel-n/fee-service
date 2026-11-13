@@ -8,8 +8,9 @@ import java.math.BigDecimal
 
 /** The numbers of `MobileTopUpFeeRule`, from `fee.mobile-top-up`. A missing or invalid value fails startup. */
 @ConfigurationProperties(MobileTopUpFeeProperties.PREFIX)
-class MobileTopUpFeeProperties(rate: BigDecimal?) {
-
+class MobileTopUpFeeProperties(
+    rate: BigDecimal?,
+) {
     val rate: BigDecimal = requiredRate("$PREFIX.rate", rate)
 
     companion object {
@@ -19,8 +20,10 @@ class MobileTopUpFeeProperties(rate: BigDecimal?) {
 
 /** The numbers of `BankTransferFeeRule`, from `fee.bank-transfer`. A missing or invalid value fails startup. */
 @ConfigurationProperties(BankTransferFeeProperties.PREFIX)
-class BankTransferFeeProperties(rate: BigDecimal?, min: BigDecimal?) {
-
+class BankTransferFeeProperties(
+    rate: BigDecimal?,
+    min: BigDecimal?,
+) {
     val rate: BigDecimal = requiredRate("$PREFIX.rate", rate)
 
     /** The minimum fee, in the transaction's asset. */
@@ -33,8 +36,10 @@ class BankTransferFeeProperties(rate: BigDecimal?, min: BigDecimal?) {
 
 /** The numbers of `MerchantPaymentFeeRule`, from `fee.merchant-payment`. A missing or invalid value fails startup. */
 @ConfigurationProperties(MerchantPaymentFeeProperties.PREFIX)
-class MerchantPaymentFeeProperties(rate: BigDecimal?, fixed: BigDecimal?) {
-
+class MerchantPaymentFeeProperties(
+    rate: BigDecimal?,
+    fixed: BigDecimal?,
+) {
     val rate: BigDecimal = requiredRate("$PREFIX.rate", rate)
 
     /** The fixed part added to the percentage, in the transaction's asset. */
@@ -47,8 +52,9 @@ class MerchantPaymentFeeProperties(rate: BigDecimal?, fixed: BigDecimal?) {
 
 /** The numbers of `CashWithdrawalFeeRule`, from `fee.cash-withdrawal`. A missing or invalid value fails startup. */
 @ConfigurationProperties(CashWithdrawalFeeProperties.PREFIX)
-class CashWithdrawalFeeProperties(fixed: BigDecimal?) {
-
+class CashWithdrawalFeeProperties(
+    fixed: BigDecimal?,
+) {
     /** The flat fee, in the transaction's asset. */
     val fixed: BigDecimal = requiredAmount("$PREFIX.fixed", fixed)
 
@@ -61,14 +67,20 @@ class CashWithdrawalFeeProperties(fixed: BigDecimal?) {
 // message that names the configuration key, without the Bean Validation starter.
 
 /** [value] of the configuration key [key] as a rate: present and in [0, 1). */
-internal fun requiredRate(key: String, value: BigDecimal?): BigDecimal {
+internal fun requiredRate(
+    key: String,
+    value: BigDecimal?,
+): BigDecimal {
     requireNotNull(value) { "$key is missing: set it to a rate in [0, 1), e.g. \"0.005\"" }
     require(value.signum() >= 0 && value < BigDecimal.ONE) { "$key must be in [0, 1), was ${value.toPlainString()}" }
     return value
 }
 
 /** [value] of the configuration key [key] as an amount in the transaction's asset: present and not negative. */
-internal fun requiredAmount(key: String, value: BigDecimal?): BigDecimal {
+internal fun requiredAmount(
+    key: String,
+    value: BigDecimal?,
+): BigDecimal {
     requireNotNull(value) { "$key is missing: set it to an amount of 0 or more, e.g. \"1.00\"" }
     require(value.signum() >= 0) { "$key must not be negative, was ${value.toPlainString()}" }
     return value

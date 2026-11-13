@@ -17,7 +17,6 @@ data class ValidationError(
     @JsonProperty("message") val message: String,
     @JsonProperty("kind") val kind: Kind,
 ) {
-
     enum class Kind {
         /** The request is malformed: a missing field or a value of the wrong form → 400. */
         INVALID,
@@ -32,14 +31,18 @@ data class ValidationError(
  * `Unsupported asset 'BTC'. Supported: 'USD', 'EUR'`.
  */
 object UnsupportedValue {
-
     /** [raw] of [field] is not one of [supported]; the message names both, in the order given. */
-    fun error(field: String, raw: String, supported: List<String>): ValidationError = ValidationError(
-        field,
-        raw,
-        "Unsupported $field ${ValueDisplay.quoted(raw)}. Supported: ${supported.joinToString(", ") { "'$it'" }}",
-        ValidationError.Kind.UNSUPPORTED,
-    )
+    fun error(
+        field: String,
+        raw: String,
+        supported: List<String>,
+    ): ValidationError =
+        ValidationError(
+            field,
+            raw,
+            "Unsupported $field ${ValueDisplay.quoted(raw)}. Supported: ${supported.joinToString(", ") { "'$it'" }}",
+            ValidationError.Kind.UNSUPPORTED,
+        )
 }
 
 /**
@@ -47,7 +50,6 @@ object UnsupportedValue {
  * Messages echo what the client sent, so an absurdly long value is shortened there and can't bloat the response.
  */
 object ValueDisplay {
-
     /** Longer values are cut to this many characters in messages, followed by `…`. */
     const val MAX_MESSAGE_LENGTH = 64
 
@@ -60,8 +62,7 @@ object ValueDisplay {
         }
 
     /** [raw] shortened to [MAX_MESSAGE_LENGTH] characters, for a message that shows it without quotes. */
-    fun shortened(raw: String): String =
-        if (raw.length <= MAX_MESSAGE_LENGTH) raw else "${raw.take(MAX_MESSAGE_LENGTH)}…"
+    fun shortened(raw: String): String = if (raw.length <= MAX_MESSAGE_LENGTH) raw else "${raw.take(MAX_MESSAGE_LENGTH)}…"
 
     /** [raw] in single quotes, shortened to [MAX_MESSAGE_LENGTH] characters. */
     fun quoted(raw: String): String = "'${shortened(raw)}'"

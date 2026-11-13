@@ -8,7 +8,6 @@ import dev.restate.client.Client
  * handlers declare, as the app's ingress client does.
  */
 object TestIngress {
-
     // Connecting opens no connection yet
     val client: Client by lazy { Client.connect(RestateTestEnvironment.ingressUrl, KotlinJacksonSerdeFactory()) }
 }

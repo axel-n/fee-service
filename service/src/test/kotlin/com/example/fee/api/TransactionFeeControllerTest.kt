@@ -23,12 +23,14 @@ import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
 import java.math.BigDecimal
 
 @WebMvcTest(TransactionFeeController::class)
-class TransactionFeeControllerTest(@Autowired private val mockMvc: MockMvc) {
-
+class TransactionFeeControllerTest(
+    @Autowired private val mockMvc: MockMvc,
+) {
     @MockitoBean
     private lateinit var feeService: FeeService
 
-    private val requestJson = """
+    private val requestJson =
+        """
         {
           "transaction_id": "txn_001",
           "amount": 1000,
@@ -38,27 +40,29 @@ class TransactionFeeControllerTest(@Autowired private val mockMvc: MockMvc) {
           "state": "SETTLED - PENDING FEE",
           "created_at": "2023-08-30 15:42:17.610059"
         }
-    """.trimIndent()
+        """.trimIndent()
 
-    private val request = FeeRequest(
-        transactionId = "txn_001",
-        amount = BigDecimal("1000"),
-        asset = "USD",
-        assetType = "FIAT",
-        type = "Mobile Top Up",
-        state = "SETTLED - PENDING FEE",
-        createdAt = "2023-08-30 15:42:17.610059",
-    )
+    private val request =
+        FeeRequest(
+            transactionId = "txn_001",
+            amount = BigDecimal("1000"),
+            asset = "USD",
+            assetType = "FIAT",
+            type = "Mobile Top Up",
+            state = "SETTLED - PENDING FEE",
+            createdAt = "2023-08-30 15:42:17.610059",
+        )
 
-    private val response = FeeResponse(
-        transactionId = "txn_001",
-        amount = BigDecimal("1000"),
-        asset = "USD",
-        type = "Mobile Top Up",
-        fee = BigDecimal("1.50"),
-        rate = BigDecimal("0.0015"),
-        description = "Standard fee rate of 0.15%",
-    )
+    private val response =
+        FeeResponse(
+            transactionId = "txn_001",
+            amount = BigDecimal("1000"),
+            asset = "USD",
+            type = "Mobile Top Up",
+            fee = BigDecimal("1.50"),
+            rate = BigDecimal("0.0015"),
+            description = "Standard fee rate of 0.15%",
+        )
 
     @Test
     fun `a charged fee is 200 with the completed status and the fee in snake case`() {
@@ -66,9 +70,10 @@ class TransactionFeeControllerTest(@Autowired private val mockMvc: MockMvc) {
         runBlocking { `when`(feeService.submit(request)).thenReturn(FeeStatusResponse.completed(response)) }
 
         // when
-        val result = mockMvc.performToCompletion(
-            post("/transaction/fee").contentType(MediaType.APPLICATION_JSON).content(requestJson),
-        )
+        val result =
+            mockMvc.performToCompletion(
+                post("/transaction/fee").contentType(MediaType.APPLICATION_JSON).content(requestJson),
+            )
 
         // then
         result

@@ -11,7 +11,6 @@ import org.junit.jupiter.params.provider.EnumSource
 import java.math.BigDecimal
 
 class MobileTopUpFeeRuleTest {
-
     private val rule = MobileTopUpFeeRule(MobileTopUpFeeProperties(BigDecimal("0.0015")))
 
     @Test

@@ -10,13 +10,13 @@ import org.junit.jupiter.params.provider.EnumSource
 import java.math.BigDecimal
 
 class ValidationErrorTest {
-
-    private val error = ValidationError(
-        field = "asset",
-        value = "BTC",
-        message = "Unsupported asset 'BTC'. Supported: 'USD', 'EUR'",
-        kind = ValidationError.Kind.UNSUPPORTED,
-    )
+    private val error =
+        ValidationError(
+            field = "asset",
+            value = "BTC",
+            message = "Unsupported asset 'BTC'. Supported: 'USD', 'EUR'",
+            kind = ValidationError.Kind.UNSUPPORTED,
+        )
 
     @ParameterizedTest
     @EnumSource(ContractMapper::class)
@@ -71,7 +71,6 @@ class ValidationErrorTest {
 }
 
 class UnsupportedValueTest {
-
     @Test
     fun `names the field, the rejected value and the supported values in order`() {
         // given
@@ -102,10 +101,12 @@ class UnsupportedValueTest {
 }
 
 class ValueDisplayTest {
-
     @ParameterizedTest(name = "{0} is shown as {1}")
     @CsvSource("1E+3, 1000", "-1.50, -1.50", "0E-4, 0.0000", "-5, -5")
-    fun `shows an amount as a plain number keeping its scale`(raw: String, expected: String) {
+    fun `shows an amount as a plain number keeping its scale`(
+        raw: String,
+        expected: String,
+    ) {
         // given
         val amount = BigDecimal(raw)
 

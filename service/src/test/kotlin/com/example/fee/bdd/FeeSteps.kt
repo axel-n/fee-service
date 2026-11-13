@@ -38,7 +38,6 @@ class FeeSteps(
     private val clock: TestClock,
     @LocalServerPort apiPort: Int,
 ) {
-
     private val api = FeeApi(apiPort)
     private val scenarioSuffix = UUID.randomUUID().toString().take(8)
 
@@ -60,22 +59,33 @@ class FeeSteps(
     }
 
     @Given("a {string} transaction {string} of {bigdecimal} {string} {string} in state {string}")
-    fun aTransaction(type: String, featureId: String, amount: BigDecimal, asset: String, assetType: String, state: String) {
-        request = mapOf(
-            "transaction_id" to transactionId(featureId),
-            "amount" to amount,
-            "asset" to asset,
-            "asset_type" to assetType,
-            "type" to type,
-            "state" to state,
-            "created_at" to SAMPLE_CREATED_AT,
-        )
+    fun aTransaction(
+        type: String,
+        featureId: String,
+        amount: BigDecimal,
+        asset: String,
+        assetType: String,
+        state: String,
+    ) {
+        request =
+            mapOf(
+                "transaction_id" to transactionId(featureId),
+                "amount" to amount,
+                "asset" to asset,
+                "asset_type" to assetType,
+                "type" to type,
+                "state" to state,
+                "created_at" to SAMPLE_CREATED_AT,
+            )
         givenTransactionId = transactionId(featureId)
     }
 
     /** Changes one field of the scenario's request, e.g. to send the transaction again in a corrected state. */
     @When("the transaction's {string} is changed to {string}")
-    fun theTransactionFieldIsChangedTo(field: String, value: String) {
+    fun theTransactionFieldIsChangedTo(
+        field: String,
+        value: String,
+    ) {
         val current = checkNotNull(request) { "No transaction was given before it was changed" }
         request = current + (field to requestValue(field, value))
     }
@@ -93,7 +103,10 @@ class FeeSteps(
      * into a number like an amount. For values that only make sense verbatim, such as a malformed transaction id.
      */
     @When("the transaction's {string} is sent exactly as {string}")
-    fun theTransactionFieldIsSentExactlyAs(field: String, value: String) {
+    fun theTransactionFieldIsSentExactlyAs(
+        field: String,
+        value: String,
+    ) {
         val current = checkNotNull(request) { "No transaction was given before it was changed" }
         request = current + (field to value)
     }
@@ -138,7 +151,11 @@ class FeeSteps(
      * exactly, also as the problem's `detail`.
      */
     @Then("the request is rejected on field {string} with value {string} and message {string}")
-    fun theRequestIsRejectedOn(field: String, value: String, message: String) {
+    fun theRequestIsRejectedOn(
+        field: String,
+        value: String,
+        message: String,
+    ) {
         val problem = response().body
         assertThat(problem["field"]?.asText()).describedAs("field of %s", problem).isEqualTo(field)
         assertThat(problem["value"]?.asText()).describedAs("value of %s", problem).isEqualTo(value)
@@ -148,7 +165,10 @@ class FeeSteps(
 
     /** The response is the problem of a missing [field]: its `value` is `null`, and the [message] is exact. */
     @Then("the request is rejected on missing field {string} with message {string}")
-    fun theRequestIsRejectedOnMissingField(field: String, message: String) {
+    fun theRequestIsRejectedOnMissingField(
+        field: String,
+        message: String,
+    ) {
         val problem = response().body
         assertThat(problem["field"]?.asText()).describedAs("field of %s", problem).isEqualTo(field)
         assertThat(problem.has("value")).describedAs("value present in %s", problem).isTrue()
@@ -177,7 +197,11 @@ class FeeSteps(
     }
 
     @Then("the fee is {bigdecimal} with rate {bigdecimal} and description {string}")
-    fun theFeeIs(fee: BigDecimal, rate: BigDecimal, description: String) {
+    fun theFeeIs(
+        fee: BigDecimal,
+        rate: BigDecimal,
+        description: String,
+    ) {
         theFeeIs(fee)
         val body = response().body
         assertThat(body["rate"].decimalValue()).isEqualByComparingTo(rate)
@@ -253,11 +277,15 @@ class FeeSteps(
         submission.get(RESPONSE_TIMEOUT_SECONDS, TimeUnit.SECONDS)
 
     // A feature's value as the request carries it: the id scoped to the scenario, the amount as a number
-    private fun requestValue(field: String, value: String?): Any? = when (field) {
-        "transaction_id" -> value?.let(::transactionId)
-        "amount" -> value?.let(::BigDecimal)
-        else -> value
-    }
+    private fun requestValue(
+        field: String,
+        value: String?,
+    ): Any? =
+        when (field) {
+            "transaction_id" -> value?.let(::transactionId)
+            "amount" -> value?.let(::BigDecimal)
+            else -> value
+        }
 
     private companion object {
         // the created_at of the sample in requirements.md

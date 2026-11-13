@@ -7,7 +7,6 @@ import java.nio.file.Path
  * `basedir`, also an IDE's default); the api module sits in the root above it.
  */
 object ProjectLayout {
-
     /** The service module: `service/`. */
     val serviceDir: Path = Path.of(System.getProperty("basedir") ?: ".").toAbsolutePath().normalize()
 

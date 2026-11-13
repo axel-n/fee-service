@@ -19,7 +19,6 @@ import java.math.BigDecimal
 @Component
 @Order(ValidationOrder.AMOUNT_SCALE)
 class AmountScaleValidator : TransactionValidator {
-
     override fun validate(request: FeeRequest): ValidationError? {
         val amount = request.amount ?: return null
         val asset = Asset.fromValue(request.asset)
@@ -36,5 +35,4 @@ class AmountScaleValidator : TransactionValidator {
     }
 
     private fun decimalsOf(amount: BigDecimal): Int = amount.stripTrailingZeros().scale().coerceAtLeast(0)
-
 }

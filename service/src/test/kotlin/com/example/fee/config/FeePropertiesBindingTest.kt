@@ -17,7 +17,6 @@ import org.springframework.core.io.Resource
  * binding), without a Spring context.
  */
 class FeePropertiesBindingTest {
-
     private fun binderFor(resource: Resource): Binder {
         val sources = YamlPropertySourceLoader().load("application.yml", resource)
         return Binder(ConfigurationPropertySources.from(sources))
@@ -79,14 +78,15 @@ class FeePropertiesBindingTest {
     @Test
     fun `an override file changes only the keys it sets`() {
         // given
-        val binder = binderFor(
-            """
+        val binder =
+            binderFor(
+                """
             fee:
               bank-transfer:
                 rate: "0.006"
                 min: "1.50"
             """,
-        )
+            )
 
         // when
         val properties = binder.bindOrCreate(BankTransferFeeProperties.PREFIX, BankTransferFeeProperties::class.java)
@@ -99,14 +99,15 @@ class FeePropertiesBindingTest {
     @Test
     fun `a missing fee section fails binding with a message naming the key`() {
         // given
-        val binder = binderFor(
-            """
+        val binder =
+            binderFor(
+                """
             fee:
               bank-transfer:
                 rate: "0.005"
                 min: "1.00"
             """,
-        )
+            )
 
         // when / then
         assertThatThrownBy { binder.bindOrCreate(MobileTopUpFeeProperties.PREFIX, MobileTopUpFeeProperties::class.java) }
@@ -119,13 +120,14 @@ class FeePropertiesBindingTest {
     @Test
     fun `a missing fee value fails binding with a message naming the key`() {
         // given
-        val binder = binderFor(
-            """
+        val binder =
+            binderFor(
+                """
             fee:
               bank-transfer:
                 rate: "0.005"
             """,
-        )
+            )
 
         // when / then
         assertThatThrownBy { binder.bindOrCreate(BankTransferFeeProperties.PREFIX, BankTransferFeeProperties::class.java) }
@@ -137,14 +139,15 @@ class FeePropertiesBindingTest {
     @Test
     fun `an out of range fee value fails binding with a message naming the key and the value`() {
         // given
-        val binder = binderFor(
-            """
+        val binder =
+            binderFor(
+                """
             fee:
               merchant-payment:
                 rate: "1.5"
                 fixed: "0.30"
             """,
-        )
+            )
 
         // when / then
         assertThatThrownBy { binder.bindOrCreate(MerchantPaymentFeeProperties.PREFIX, MerchantPaymentFeeProperties::class.java) }
@@ -156,13 +159,14 @@ class FeePropertiesBindingTest {
     @Test
     fun `a negative fee amount fails binding with a message naming the key and the value`() {
         // given
-        val binder = binderFor(
-            """
+        val binder =
+            binderFor(
+                """
             fee:
               cash-withdrawal:
                 fixed: "-2.00"
             """,
-        )
+            )
 
         // when / then
         assertThatThrownBy { binder.bindOrCreate(CashWithdrawalFeeProperties.PREFIX, CashWithdrawalFeeProperties::class.java) }
@@ -174,18 +178,20 @@ class FeePropertiesBindingTest {
     @Test
     fun `a fee value that is not a number fails binding with a message naming the key and the value`() {
         // given
-        val binder = binderFor(
-            """
+        val binder =
+            binderFor(
+                """
             fee:
               cash-withdrawal:
                 fixed: "two euros"
             """,
-        )
+            )
 
         // when
-        val failure = catchThrowable {
-            binder.bindOrCreate(CashWithdrawalFeeProperties.PREFIX, CashWithdrawalFeeProperties::class.java)
-        }
+        val failure =
+            catchThrowable {
+                binder.bindOrCreate(CashWithdrawalFeeProperties.PREFIX, CashWithdrawalFeeProperties::class.java)
+            }
 
         // then
         assertThat(failure).isInstanceOf(BindException::class.java)

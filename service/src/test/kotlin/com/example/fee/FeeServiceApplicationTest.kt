@@ -6,7 +6,6 @@ import java.time.Instant
 import java.time.ZoneOffset
 
 class FeeServiceApplicationTest {
-
     @Test
     fun `clock bean uses UTC whatever the host zone is`() {
         // given

@@ -27,7 +27,6 @@ class RestateEndpointLifecycle(
     private val transactionFeeRecord: TransactionFeeRecord,
     private val properties: RestateProperties,
 ) : SmartLifecycle {
-
     private val lock = Any()
 
     // null while stopped; replaced on every start, because a closed Vert.x instance can't be reused.
@@ -37,12 +36,16 @@ class RestateEndpointLifecycle(
     override fun start() {
         synchronized(lock) {
             if (server != null) return
-            val endpoint = Endpoint.builder()
-                .bind(feeWorkflow)
-                .bind(transactionFeeRecord)
-                .build()
-            server = RunningServer.listen(endpoint, properties.endpointPort)
-                .also { log.info("Restate endpoint listening on port {}", it.port) }
+            val endpoint =
+                Endpoint
+                    .builder()
+                    .bind(feeWorkflow)
+                    .bind(transactionFeeRecord)
+                    .build()
+            server =
+                RunningServer
+                    .listen(endpoint, properties.endpointPort)
+                    .also { log.info("Restate endpoint listening on port {}", it.port) }
         }
     }
 
@@ -50,7 +53,8 @@ class RestateEndpointLifecycle(
         synchronized(lock) {
             val running = server ?: return
             server = null
-            running.close()
+            running
+                .close()
                 .onSuccess { log.info("Restate endpoint on port {} stopped", running.port) }
                 .onFailure { log.warn("Restate endpoint on port {} did not stop cleanly", running.port, it) }
         }
@@ -65,8 +69,11 @@ class RestateEndpointLifecycle(
      * A listening server and its own Vert.x instance. `io.vertx:vertx-core` is only a runtime dependency of the SDK, so
      * Vert.x is reached by reflection rather than declared as a compile dependency.
      */
-    private class RunningServer(private val vertx: Any, private val httpServer: Any, val port: Int) {
-
+    private class RunningServer(
+        private val vertx: Any,
+        private val httpServer: Any,
+        val port: Int,
+    ) {
         /** Closes the server, then its Vert.x instance (also when the server failed to close); never throws. */
         fun close(): Result<Unit> {
             val closedServer = runCatching { await(invoke(httpServer, HTTP_SERVER, "close")) }
@@ -80,16 +87,20 @@ class RestateEndpointLifecycle(
             private val FUTURE: Class<*> = Class.forName("io.vertx.core.Future")
 
             /** Listens on [port] (0: the OS picks one); fails naming the port, leaving no Vert.x instance behind. */
-            fun listen(endpoint: Endpoint, port: Int): RunningServer {
+            fun listen(
+                endpoint: Endpoint,
+                port: Int,
+            ): RunningServer {
                 val vertx = checkNotNull(invoke(null, VERTX, "vertx")) { "Vertx.vertx() returned null" }
                 try {
-                    val httpServer = checkNotNull(
-                        unwrapping {
-                            RestateHttpServer::class.java
-                                .getMethod("fromEndpoint", VERTX, Endpoint::class.java)
-                                .invoke(null, vertx, endpoint)
-                        },
-                    ) { "RestateHttpServer.fromEndpoint returned null" }
+                    val httpServer =
+                        checkNotNull(
+                            unwrapping {
+                                RestateHttpServer::class.java
+                                    .getMethod("fromEndpoint", VERTX, Endpoint::class.java)
+                                    .invoke(null, vertx, endpoint)
+                            },
+                        ) { "RestateHttpServer.fromEndpoint returned null" }
                     await(unwrapping { HTTP_SERVER.getMethod("listen", Int::class.javaPrimitiveType).invoke(httpServer, port) })
                     val actualPort = invoke(httpServer, HTTP_SERVER, "actualPort") as Int
                     return RunningServer(vertx, httpServer, actualPort)
@@ -102,8 +113,11 @@ class RestateEndpointLifecycle(
                 }
             }
 
-            private fun invoke(target: Any?, type: Class<*>, method: String): Any? =
-                unwrapping { type.getMethod(method).invoke(target) }
+            private fun invoke(
+                target: Any?,
+                type: Class<*>,
+                method: String,
+            ): Any? = unwrapping { type.getMethod(method).invoke(target) }
 
             // Vert.x completes a bind or a close (successfully or not) by itself, so the wait needs no timeout of its own.
             private fun await(future: Any?) {

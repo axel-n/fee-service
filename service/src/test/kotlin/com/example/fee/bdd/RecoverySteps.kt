@@ -26,16 +26,20 @@ class RecoverySteps(
     private val hook: FaultInjectingStepHook,
     private val endpoint: RestateEndpointLifecycle,
 ) {
-
     private val blockedIds = mutableListOf<String>()
 
     /** Arms one crash, a plain exception Restate retries, at the [moment] (`before` / `after`) side of [step]. */
     @Given("the service will crash {word} the {string} step")
-    fun theServiceWillCrash(moment: String, step: String) {
-        val phase = FaultInjectingStepHook.Phase.entries.singleOrNull { it.name.equals(moment, ignoreCase = true) }
-            ?: error("Unknown moment '$moment', expected one of ${FaultInjectingStepHook.Phase.entries.map { it.name.lowercase() }}")
-        val workflowStep = WorkflowStep.entries.singleOrNull { it.name == step && it != WorkflowStep.DONE }
-            ?: error("Unknown step '$step', expected one of ${WorkflowStep.entries.filter { it != WorkflowStep.DONE }}")
+    fun theServiceWillCrash(
+        moment: String,
+        step: String,
+    ) {
+        val phase =
+            FaultInjectingStepHook.Phase.entries.singleOrNull { it.name.equals(moment, ignoreCase = true) }
+                ?: error("Unknown moment '$moment', expected one of ${FaultInjectingStepHook.Phase.entries.map { it.name.lowercase() }}")
+        val workflowStep =
+            WorkflowStep.entries.singleOrNull { it.name == step && it != WorkflowStep.DONE }
+                ?: error("Unknown step '$step', expected one of ${WorkflowStep.entries.filter { it != WorkflowStep.DONE }}")
         hook.crashOnce(fee.submittedTransactionId(), workflowStep, phase)
     }
 

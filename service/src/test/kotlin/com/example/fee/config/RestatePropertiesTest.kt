@@ -8,7 +8,6 @@ import org.junit.jupiter.params.provider.ValueSource
 import java.time.Duration
 
 class RestatePropertiesTest {
-
     private fun properties(
         ingressUrl: String? = "http://localhost:8080",
         endpointPort: Int? = 9080,

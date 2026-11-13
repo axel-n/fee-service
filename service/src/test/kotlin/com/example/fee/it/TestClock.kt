@@ -12,7 +12,6 @@ import java.util.concurrent.atomic.AtomicReference
  * runs, and must [reset] it afterwards.
  */
 class TestClock : Clock() {
-
     private val pinned = AtomicReference<Instant?>(null)
 
     /** From now on the clock reads [instant]. */

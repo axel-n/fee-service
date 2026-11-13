@@ -13,13 +13,19 @@ import java.time.Duration
  * The ITs' calls to Restate's admin API (1.8.1): registering the endpoint, the way the README tells an operator to,
  * and reading or purging what the app did. The app itself never calls the admin API.
  */
-class RestateAdminApi(private val adminUrl: String, private val timeout: Duration = Duration.ofSeconds(10)) {
-
+class RestateAdminApi(
+    private val adminUrl: String,
+    private val timeout: Duration = Duration.ofSeconds(10),
+) {
     private val http = HttpClient.newBuilder().connectTimeout(timeout).build()
     private val mapper = ObjectMapper()
 
     /** A deployment as `GET /deployments` lists it. */
-    data class Deployment(val id: String, val uri: String?, val services: Map<String, Int>)
+    data class Deployment(
+        val id: String,
+        val uri: String?,
+        val services: Map<String, Int>,
+    )
 
     /**
      * `POST /deployments` with `force`: Restate discovers the services at [uri] and registers them, or updates a known
@@ -28,7 +34,8 @@ class RestateAdminApi(private val adminUrl: String, private val timeout: Duratio
     fun register(uri: String) {
         val body = mapper.writeValueAsString(mapOf("uri" to uri, "force" to true))
         send(
-            HttpRequest.newBuilder(URI("$adminUrl/deployments"))
+            HttpRequest
+                .newBuilder(URI("$adminUrl/deployments"))
                 .header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(body)),
         )
@@ -55,10 +62,12 @@ class RestateAdminApi(private val adminUrl: String, private val timeout: Duratio
     /** Rows of a query on Restate's SQL introspection (`POST /query`), e.g. `sys_invocation` or `sys_journal`. */
     fun query(sql: String): List<JsonNode> {
         val body = mapper.writeValueAsString(mapOf("query" to sql))
-        val request = HttpRequest.newBuilder(URI("$adminUrl/query"))
-            .header("Content-Type", "application/json")
-            .header("Accept", "application/json")
-            .POST(HttpRequest.BodyPublishers.ofString(body))
+        val request =
+            HttpRequest
+                .newBuilder(URI("$adminUrl/query"))
+                .header("Content-Type", "application/json")
+                .header("Accept", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(body))
         return mapper.readTree(send(request))["rows"].toList()
     }
 

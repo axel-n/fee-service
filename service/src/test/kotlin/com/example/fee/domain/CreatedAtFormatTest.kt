@@ -8,7 +8,6 @@ import org.junit.jupiter.params.provider.ValueSource
 import java.time.LocalDateTime
 
 class CreatedAtFormatTest {
-
     @ParameterizedTest(name = "''{0}'' is {1}")
     @CsvSource(
         "2023-08-30 15:42:17.610059, 2023-08-30T15:42:17.610059",
@@ -16,7 +15,10 @@ class CreatedAtFormatTest {
         "2023-08-30 15:42:17.6, 2023-08-30T15:42:17.600",
         "2024-02-29 00:00:00.123456789, 2024-02-29T00:00:00.123456789",
     )
-    fun `parses the request format with 0 to 9 fraction digits`(raw: String, expected: LocalDateTime) {
+    fun `parses the request format with 0 to 9 fraction digits`(
+        raw: String,
+        expected: LocalDateTime,
+    ) {
         // given
         val input = raw
 

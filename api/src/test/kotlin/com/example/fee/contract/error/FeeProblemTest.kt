@@ -5,13 +5,13 @@ import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 
 class FeeProblemTest {
-
     private fun read(json: String): FeeProblem = ContractMapper.SPRING.read(json, FeeProblem::class.java)
 
     @Test
     fun `reads a validation problem with snake_case names and a null value`() {
         // given
-        val json = """
+        val json =
+            """
             {
               "type": "about:blank",
               "title": "Bad Request",
@@ -23,7 +23,7 @@ class FeeProblemTest {
               "value": null,
               "message": "Field 'amount' is required"
             }
-        """.trimIndent()
+            """.trimIndent()
 
         // when
         val problem = read(json)
@@ -60,14 +60,15 @@ class FeeProblemTest {
     @Test
     fun `rebuilds a rejected request as a validation exception of the same kind`() {
         // given
-        val problem = FeeProblem(
-            status = 422,
-            detail = "Unsupported state 'PENDING'. Supported: 'SETTLED - PENDING FEE'",
-            code = "UNSUPPORTED_REQUEST",
-            field = "state",
-            value = "PENDING",
-            message = "Unsupported state 'PENDING'. Supported: 'SETTLED - PENDING FEE'",
-        )
+        val problem =
+            FeeProblem(
+                status = 422,
+                detail = "Unsupported state 'PENDING'. Supported: 'SETTLED - PENDING FEE'",
+                code = "UNSUPPORTED_REQUEST",
+                field = "state",
+                value = "PENDING",
+                message = "Unsupported state 'PENDING'. Supported: 'SETTLED - PENDING FEE'",
+            )
 
         // when
         val exception = problem.toException()
@@ -85,13 +86,14 @@ class FeeProblemTest {
     @Test
     fun `rebuilds a malformed request with a missing field as a 400 with a null value`() {
         // given
-        val problem = FeeProblem(
-            status = 400,
-            detail = "Field 'amount' is required",
-            code = "INVALID_REQUEST",
-            field = "amount",
-            message = "Field 'amount' is required",
-        )
+        val problem =
+            FeeProblem(
+                status = 400,
+                detail = "Field 'amount' is required",
+                code = "INVALID_REQUEST",
+                field = "amount",
+                message = "Field 'amount' is required",
+            )
 
         // when
         val exception = problem.toException()
@@ -106,14 +108,16 @@ class FeeProblemTest {
     @Test
     fun `rebuilds every failure about one transaction with the same message the service sent`() {
         // given
-        val originals = listOf(
-            DuplicateTransactionException("txn_001"),
-            WorkflowUnavailableException(),
-        )
-        val problems = listOf(
-            FeeProblem(status = 409, code = "DUPLICATE_TRANSACTION", transactionId = "txn_001"),
-            FeeProblem(status = 503, code = "WORKFLOW_UNAVAILABLE"),
-        )
+        val originals =
+            listOf(
+                DuplicateTransactionException("txn_001"),
+                WorkflowUnavailableException(),
+            )
+        val problems =
+            listOf(
+                FeeProblem(status = 409, code = "DUPLICATE_TRANSACTION", transactionId = "txn_001"),
+                FeeProblem(status = 503, code = "WORKFLOW_UNAVAILABLE"),
+            )
 
         // when
         val rebuilt = problems.map { it.toException() }

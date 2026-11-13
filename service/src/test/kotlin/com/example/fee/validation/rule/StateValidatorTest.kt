@@ -10,7 +10,6 @@ import org.junit.jupiter.params.provider.ValueSource
 import org.springframework.core.annotation.Order
 
 class StateValidatorTest {
-
     private val validator = StateValidator()
 
     @Test

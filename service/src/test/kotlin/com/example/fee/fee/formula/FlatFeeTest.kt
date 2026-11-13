@@ -12,7 +12,6 @@ import org.junit.jupiter.params.provider.ValueSource
 import java.math.BigDecimal
 
 class FlatFeeTest {
-
     private val rule = FlatFee(TransactionType.CASH_WITHDRAWAL, BigDecimal("2.00"), describeAsset)
 
     @ParameterizedTest(name = "{0} → 2.00")

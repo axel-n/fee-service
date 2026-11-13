@@ -20,16 +20,18 @@ import kotlin.reflect.jvm.javaType
  * `@CustomSerdeFactory` creates it by reflection, so it needs a public no-arg constructor.
  */
 class KotlinJacksonSerdeFactory : JacksonSerdeFactory() {
-
     @Suppress("UNCHECKED_CAST")
-    override fun <T : Any?> create(typeTag: TypeTag<T>): Serde<T> = when {
-        typeTag !is KtTypeTag<*> -> super.create(typeTag)
-        typeTag.type == Unit::class -> KotlinSerializationSerdeFactory.UNIT as Serde<T>
-        else -> create(JavaTypeRef<T>(typeTag.kotlinType?.javaType ?: typeTag.type.java))
-    }
+    override fun <T : Any?> create(typeTag: TypeTag<T>): Serde<T> =
+        when {
+            typeTag !is KtTypeTag<*> -> super.create(typeTag)
+            typeTag.type == Unit::class -> KotlinSerializationSerdeFactory.UNIT as Serde<T>
+            else -> create(JavaTypeRef<T>(typeTag.kotlinType?.javaType ?: typeTag.type.java))
+        }
 
     // TypeRef reads its type from a subclass's generic signature; this one takes it from Kotlin reflection instead.
-    private class JavaTypeRef<T>(private val javaType: Type) : TypeRef<T>() {
+    private class JavaTypeRef<T>(
+        private val javaType: Type,
+    ) : TypeRef<T>() {
         override fun getType(): Type = javaType
     }
 }

@@ -14,7 +14,10 @@ internal fun requireRate(rate: BigDecimal) {
     require(rate.signum() >= 0 && rate < BigDecimal.ONE) { "Fee rate must be in [0, 1), was ${rate.toPlainString()}" }
 }
 
-internal fun requireNonNegative(name: String, amount: BigDecimal) {
+internal fun requireNonNegative(
+    name: String,
+    amount: BigDecimal,
+) {
     require(amount.signum() >= 0) { "Fee $name must not be negative, was ${amount.toPlainString()}" }
 }
 
@@ -24,4 +27,7 @@ internal fun requireNonNegative(name: String, amount: BigDecimal) {
 internal fun percent(rate: BigDecimal): String = "${rate.movePointRight(2).stripTrailingZeros().toPlainString()}%"
 
 /** An amount at the asset's decimals, with the asset: `1` → `1.00 EUR`. */
-internal fun money(amount: BigDecimal, asset: Asset): String = "${amount.roundedFor(asset).toPlainString()} ${asset.value}"
+internal fun money(
+    amount: BigDecimal,
+    asset: Asset,
+): String = "${amount.roundedFor(asset).toPlainString()} ${asset.value}"

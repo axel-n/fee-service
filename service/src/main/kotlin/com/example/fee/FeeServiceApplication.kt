@@ -9,7 +9,6 @@ import java.time.Clock
 @SpringBootApplication
 @ConfigurationPropertiesScan
 class FeeServiceApplication {
-
     /**
      * The only source of "now". UTC rather than the host's zone, so a `created_at` without a zone is judged
      * the same way on every machine.
