@@ -29,7 +29,9 @@ class RestateConfigTest {
     private fun properties(ingressUrl: String) =
         RestateProperties(
             ingressUrl = ingressUrl,
+            adminUrl = "http://localhost:9070",
             endpointPort = 9080,
+            advertisedHost = "localhost",
             attachTimeout = Duration.ofSeconds(10),
         )
 

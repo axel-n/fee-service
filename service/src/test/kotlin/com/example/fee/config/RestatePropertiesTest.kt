@@ -10,19 +10,72 @@ import java.time.Duration
 class RestatePropertiesTest {
     private fun properties(
         ingressUrl: String? = "http://localhost:8080",
+        adminUrl: String? = "http://localhost:9070",
         endpointPort: Int? = 9080,
+        advertisedHost: String? = "localhost",
         attachTimeout: Duration? = Duration.ofSeconds(10),
-    ) = RestateProperties(ingressUrl, endpointPort, attachTimeout)
+    ) = RestateProperties(ingressUrl, adminUrl, endpointPort, advertisedHost, attachTimeout)
 
     @Test
     fun `keeps valid settings`() {
         // given / when
-        val properties = properties(ingressUrl = "https://restate.example:8080")
+        val properties =
+            properties(
+                ingressUrl = "https://restate.example:8080",
+                adminUrl = "https://restate.example:9070",
+                advertisedHost = "host.docker.internal",
+            )
 
         // then
         assertThat(properties.ingressUrl).isEqualTo("https://restate.example:8080")
+        assertThat(properties.adminUrl).isEqualTo("https://restate.example:9070")
         assertThat(properties.endpointPort).isEqualTo(9080)
+        assertThat(properties.advertisedHost).isEqualTo("host.docker.internal")
         assertThat(properties.attachTimeout).isEqualTo(Duration.ofSeconds(10))
+    }
+
+    @Test
+    fun `rejects a missing admin url with a readable message`() {
+        // given / when / then
+        assertThatThrownBy { properties(adminUrl = null) }
+            .isInstanceOf(IllegalArgumentException::class.java)
+            .hasMessage("restate.admin-url is missing; set it in application.yml")
+    }
+
+    @ParameterizedTest(name = "rejects ''{0}''")
+    @ValueSource(strings = ["restate:9070", "ftp://restate:9070", "not a url", ""])
+    fun `rejects an admin url that is not an absolute http url with a readable message`(url: String) {
+        // given / when / then
+        assertThatThrownBy { properties(adminUrl = url) }
+            .isInstanceOf(IllegalArgumentException::class.java)
+            .hasMessage("restate.admin-url must be an absolute http or https URL, was '$url'")
+    }
+
+    @ParameterizedTest(name = "accepts ''{0}''")
+    @ValueSource(strings = ["localhost", "dev", "host.docker.internal", "10.89.0.4", "[::1]"])
+    fun `accepts an advertised host that is a host name or an IP address`(host: String) {
+        // given / when
+        val properties = properties(advertisedHost = host)
+
+        // then
+        assertThat(properties.advertisedHost).isEqualTo(host)
+    }
+
+    @Test
+    fun `rejects a missing advertised host with a readable message`() {
+        // given / when / then
+        assertThatThrownBy { properties(advertisedHost = null) }
+            .isInstanceOf(IllegalArgumentException::class.java)
+            .hasMessage("restate.advertised-host is missing; set it in application.yml")
+    }
+
+    @ParameterizedTest(name = "rejects ''{0}''")
+    @ValueSource(strings = ["", "http://dev", "dev:9080", "dev/path", "not a host"])
+    fun `rejects an advertised host that is not a host name or an IP address with a readable message`(host: String) {
+        // given / when / then
+        assertThatThrownBy { properties(advertisedHost = host) }
+            .isInstanceOf(IllegalArgumentException::class.java)
+            .hasMessage("restate.advertised-host must be a host name or an IP address, was '$host'")
     }
 
     @Test

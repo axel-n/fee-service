@@ -18,12 +18,16 @@ import java.time.Duration
  * - the container's ingress and admin ports are mapped by Testcontainers to free host ports;
  * - the endpoint port is a free host port picked once per run, before the container starts, and exposed to the container
  *   as `host.testcontainers.internal:<port>`. It stays the same for the whole run, so an endpoint stopped and started
- *   again (`RestateEndpointLifecycle`) is reached at the URL Restate already knows. Only one app can listen on it at a time.
+ *   again (`RestateEndpointLifecycle`) registers itself at the URL Restate already knows. Only one app can listen on it
+ *   at a time.
  */
 object RestateTestEnvironment {
     private const val IMAGE = "docker.io/restatedev/restate:1.8.1"
     private const val INGRESS_PORT = 8080
     private const val ADMIN_PORT = 9070
+
+    // How the container reaches the machine the tests run on, and so the app's endpoint (exposeHostPorts below)
+    private const val ADVERTISED_HOST = "host.testcontainers.internal"
 
     /** The host port the app's Restate endpoint listens on, the same for the whole run. */
     val endpointPort: Int = ServerSocket(0).use { it.localPort }
@@ -46,20 +50,11 @@ object RestateTestEnvironment {
 
     val adminUrl: String = "http://${container.host}:${container.getMappedPort(ADMIN_PORT)}"
 
-    /** The endpoint's URL as Restate reaches it, the one [registerEndpoint] registers. */
-    val advertisedUrl: String = "http://host.testcontainers.internal:$endpointPort"
+    /** The URL the app registers its endpoint at, as Restate reaches it. */
+    val advertisedUrl: String = "http://$ADVERTISED_HOST:$endpointPort"
 
-    /** The admin API, which the app itself never calls: registration, introspection, purging. */
+    /** The tests' view of what the app did in Restate: deployments, introspection, purging. */
     val admin: RestateAdminApi = RestateAdminApi(adminUrl)
-
-    /**
-     * Registers the run's endpoint with Restate, the setup step the README asks of whoever runs the app. Restate
-     * discovers the services by calling the endpoint, so it must be listening. It keeps the registration for the whole
-     * run, also across endpoint restarts, because the URL stays the same.
-     */
-    fun registerEndpoint() {
-        admin.register(advertisedUrl)
-    }
 
     /**
      * Every `restate.*` setting of an app under test. Set through `@DynamicPropertySource`, which wins over environment
@@ -69,7 +64,9 @@ object RestateTestEnvironment {
     fun restateProperties(): Map<String, String> =
         mapOf(
             "restate.ingress-url" to ingressUrl,
+            "restate.admin-url" to adminUrl,
             "restate.endpoint-port" to endpointPort.toString(),
+            "restate.advertised-host" to ADVERTISED_HOST,
             "restate.attach-timeout" to "30s",
         )
 

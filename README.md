@@ -77,10 +77,11 @@ new instance) receives the journal. VALIDATE, CLAIM and CALCULATE are **replayed
 again**. RECORD then runs once, and the waiting caller gets the result. If the app dies *while* CALCULATE is running,
 that step was not journaled yet, so it runs again; only its journaled result is recorded.
 
-**Startup.** The app starts its Restate endpoint on port 9080 and needs nothing else from Restate to start. It calls
-Restate only through the ingress (`restate.ingress-url`). Restate calls the workflow through the endpoint, once the
-endpoint is registered with it: a one-time setup step (see [Run](#run)), not something the app does. Until then, or while
-Restate is down, requests get 503.
+**Startup and shutdown.** The app starts its Restate endpoint on port 9080 and registers it with Restate's admin API
+(`restate.admin-url`) as `http://<restate.advertised-host>:<port>`, so it works at whatever host and port it runs on. If
+Restate can't register it, the app doesn't start and says which URL and settings to fix. At shutdown it removes its
+registration again, unless invocations that haven't finished still need it: those resume once the app is back at the same
+URL. Work is sent through the ingress (`restate.ingress-url`); while Restate is down, requests get 503.
 
 ## Architecture
 
@@ -100,7 +101,8 @@ api/               TransactionFeeController, ApiExceptionHandler            HTTP
 application/       FeeService                                               thin gateway: transaction_id → submit/attach → HTTP result
 workflow/          FeeWorkflow, its durable types, StepHook                 the Restate workflow: every business step
 record/            TransactionFeeRecord, FeeRecord, ClaimDecider            the Restate virtual object: one fee per transaction_id
-restate/           RestateEndpointLifecycle, RestateConfig                  Restate plumbing: the endpoint, the ingress client
+restate/           RestateEndpointLifecycle, RestateDeployments,            Restate plumbing: the endpoint and its registration,
+                   RestateConfig                                            the ingress client
 validation/        TransactionValidator, RequestValidator, ValidationError  run inside the workflow (VALIDATE)
 validation/rule/   one TransactionValidator bean per check, by @Order
 fee/               FeeRule, FeeCalculator                                   run inside the workflow (CALCULATE)
@@ -137,34 +139,21 @@ The full class design, the wiring, the call graph and the idempotency and recove
 
    The `--add-host` lets Restate reach the app on the host as `host.docker.internal`, on Linux too.
 
-2. Start the app:
+2. Start the app with the `local` profile (the app on this machine, Restate in a container):
 
    ```bash
-   mvn spring-boot:run
+   mvn spring-boot:run -Dspring-boot.run.profiles=local
    ```
 
-   The API listens on port **8081**, the Restate endpoint on **9080** (`Restate endpoint listening on port 9080` in the log).
+   The API listens on port **8081**, the Restate endpoint on **9080**. The app registers the endpoint with Restate as
+   `http://host.docker.internal:9080` (`Restate endpoint registered as …` in the log); there is nothing to register by
+   hand. Another API or endpoint port works the same way: `SERVER_PORT`, `RESTATE_ENDPOINT_PORT`.
 
-3. Register the endpoint with Restate (once), under the URL Restate reaches the app at. Restate calls that URL to
-   discover the workflow and the virtual object:
+Inside the dev container the environment sets `RESTATE_INGRESS_URL=http://restate:8080`, `RESTATE_ADMIN_URL=http://restate:9070`
+and `RESTATE_ADVERTISED_HOST=dev`, so plain `mvn spring-boot:run` registers the app as `http://dev:9080`.
 
-   ```bash
-   curl -X POST http://localhost:9070/deployments -H 'content-type: application/json' \
-     -d '{"uri": "http://host.docker.internal:9080", "force": true}'
-   ```
-
-   (or `restate deployments register http://host.docker.internal:9080` with the Restate CLI). Restate keeps the
-   registration across app restarts. Run it again only when the endpoint's URL changes or after a change to a handler's
-   signature: `force` makes Restate pick up the changed services.
-
-Inside the dev container the ingress URL comes from an environment variable (`RESTATE_INGRESS_URL=http://restate:8080`),
-so `mvn spring-boot:run` works unchanged. Restate reaches the app there as `http://dev:9080`, so register that URL with
-`http://restate:9070` (the container also sets `RESTATE_ADMIN_URL` and `RESTATE_ADVERTISED_URL` to these two):
-
-```bash
-curl -X POST "$RESTATE_ADMIN_URL/deployments" -H 'content-type: application/json' \
-  -d "{\"uri\": \"$RESTATE_ADVERTISED_URL\", \"force\": true}"
-```
+Whichever app started last gets the new work, so switching between the dev container and the local profile needs only
+a restart of the app you switch to.
 
 ## Configuration
 
@@ -177,7 +166,9 @@ app starts from (or `--spring.config.additional-location=file:/etc/fee-service/`
 |-----|----------------------|---------|------------|
 | `server.port` | `SERVER_PORT` | `8081` | HTTP API port |
 | `restate.ingress-url` | `RESTATE_INGRESS_URL` | `http://localhost:8080` | Restate ingress, used by `FeeService` |
+| `restate.admin-url` | `RESTATE_ADMIN_URL` | `http://localhost:9070` | Restate's admin API, where the app registers its endpoint |
 | `restate.endpoint-port` | `RESTATE_ENDPOINT_PORT` | `9080` | port the Restate endpoint listens on, where Restate calls the workflow |
+| `restate.advertised-host` | `RESTATE_ADVERTISED_HOST` | `localhost` | host Restate reaches the endpoint at (`host.docker.internal` in the `local` profile) |
 | `restate.attach-timeout` | `RESTATE_ATTACH_TIMEOUT` | `10s` | how long `POST` waits for the result before answering 202 |
 | `fee.<type>.rate`, `.min`, `.fixed` | (use a file) | see [Fee table](#fee-table) | fee numbers per transaction type |
 
@@ -200,8 +191,8 @@ never go stale.
 | Change | Effect |
 |--------|--------|
 | Fee numbers | Safe. A workflow that already passed CALCULATE keeps its journaled fee; everything else uses the new numbers. Completed records are never recalculated: resending a charged transaction returns the original response |
-| `restate.ingress-url`, `attach-timeout`, `server.port` | Safe |
-| `restate.endpoint-port` (or the app's host) | Register the new URL with Restate; it becomes a new deployment. Invocations in flight stay on the old URL and keep retrying it, so let them finish first |
+| `restate.ingress-url`, `admin-url`, `attach-timeout`, `server.port` | Safe |
+| `restate.endpoint-port` or `advertised-host` | The app registers the new URL at startup, and it gets all new work. Invocations in flight stay on the old URL and keep retrying it, so let them finish first |
 
 Renaming a key or a variable breaks existing override files and environments.
 
@@ -300,7 +291,8 @@ What the recovery tests prove (each counts the **CALCULATE executions**, not jus
 | Test | Proves |
 |------|--------|
 | `CrashRecoveryIT`, `workflow_recovery.feature` | A crash before or after any step boundary is retried by Restate, and the journaled steps are replayed, not run again (validation and calculation closures each run once): one fee, record `COMPLETED` |
-| `EndpointRestartIT`, `workflow_recovery.feature` | Stopping and restarting the endpoint in the middle of CALCULATE completes the workflow with one fee record |
+| `EndpointRestartIT`, `workflow_recovery.feature` | Stopping and restarting the endpoint in the middle of CALCULATE keeps its deployment and completes the workflow with one fee record |
+| `EndpointRegistrationIT` | The app registers itself at its advertised URL at startup, and a stop with nothing unfinished removes the registration |
 | `RestateOutageIT` | A workflow frozen mid-CALCULATE completes with one fee record once Restate thaws |
 | `InFlightStatusIT` | A run that outlasts the attach timeout answers 202 `IN_PROGRESS`; the same payload sent again gets the fee |
 | `DeterminismIT` | A validation result is journaled: moving the clock between a crash and the retry doesn't change it |
@@ -352,8 +344,10 @@ order or the JSON of `FeeRequest`/`FeeResponse` is a breaking change for in-flig
 
 ## Future work
 
-- **Kubernetes:** register the endpoint as a deploy step (a Job, or the Restate operator) and add **readiness** and
-  **liveness** probes. Actuator is not added yet; it needs approval as a dependency.
+- **Kubernetes:** add **readiness** and **liveness** probes. Actuator is not added yet; it needs approval as a dependency.
+- **Several instances behind one URL:** they share one deployment, and the first to stop with nothing unfinished removes
+  it for all of them until one restarts. With more than one instance, register as a deploy step (or with the Restate
+  operator) instead of at startup.
 - **Graceful shutdown of the endpoint:** stopping it today closes open connections, and Restate retries the interrupted
   invocations (safe, but noisy). Stop accepting new invocations and drain the running ones first.
 - **Deployments per version:** register each release under its own URL and let the old one drain instead of re-registering

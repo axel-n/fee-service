@@ -14,56 +14,107 @@ import java.util.concurrent.ExecutionException
 
 /**
  * Serves the Spring-built [FeeWorkflow] and [TransactionFeeRecord] beans as a Restate endpoint on
- * `restate.endpoint-port`. It is the only place that starts or stops the endpoint, so tests stop and start it
- * to simulate a crash or a restart.
+ * `restate.endpoint-port`, and keeps it registered with Restate while it runs. It is the only place that starts or stops
+ * the endpoint, so tests stop and start it to simulate a crash or a restart.
+ *
+ * Start listens, then registers the endpoint as `http://<restate.advertised-host>:<port>`. Registering the same URL again
+ * after a restart keeps its deployment, so invocations pinned to it resume. A failed registration fails the start: an app
+ * Restate can't reach would only ever answer 202.
+ *
+ * Stop closes the endpoint, then removes its deployment from Restate unless invocations that haven't finished still need
+ * it. Removing it would strand them: Restate never resumes an invocation whose deployment is gone, not even at the same
+ * URL. Kept, they resume once the endpoint is back at that URL. Stop logs a failure instead of throwing, so the shutdown
+ * carries on. Open connections drop on stop, and Restate retries them.
  *
  * Each start gets its own Vert.x instance. Stop closes the server and then that instance, which frees the port and
- * leaves no Vert.x threads behind. Spring stops it before it destroys the context's beans. Stop logs a failure
- * instead of throwing, so the shutdown carries on. Open connections drop on stop, and Restate retries them.
+ * leaves no Vert.x threads behind. Spring stops it before it destroys the context's beans.
  */
 @Component
 class RestateEndpointLifecycle(
     private val feeWorkflow: FeeWorkflow,
     private val transactionFeeRecord: TransactionFeeRecord,
+    private val deployments: RestateDeployments,
     private val properties: RestateProperties,
 ) : SmartLifecycle {
     private val lock = Any()
 
     // null while stopped; replaced on every start, because a closed Vert.x instance can't be reused.
     @Volatile
-    private var server: RunningServer? = null
+    private var started: Started? = null
 
     override fun start() {
         synchronized(lock) {
-            if (server != null) return
+            if (started != null) return
             val endpoint =
                 Endpoint
                     .builder()
                     .bind(feeWorkflow)
                     .bind(transactionFeeRecord)
                     .build()
-            server =
-                RunningServer
-                    .listen(endpoint, properties.endpointPort)
-                    .also { log.info("Restate endpoint listening on port {}", it.port) }
+            val server = RunningServer.listen(endpoint, properties.endpointPort)
+            log.info("Restate endpoint listening on port {}", server.port)
+            started = Started(server, register(server))
         }
     }
 
     override fun stop() {
         synchronized(lock) {
-            val running = server ?: return
-            server = null
-            running
+            val running = started ?: return
+            started = null
+            running.server
                 .close()
-                .onSuccess { log.info("Restate endpoint on port {} stopped", running.port) }
-                .onFailure { log.warn("Restate endpoint on port {} did not stop cleanly", running.port, it) }
+                .onSuccess { log.info("Restate endpoint on port {} stopped", running.server.port) }
+                .onFailure { log.warn("Restate endpoint on port {} did not stop cleanly", running.server.port, it) }
+            removeUnlessNeeded(running.deployment)
         }
     }
 
-    override fun isRunning(): Boolean = server != null
+    override fun isRunning(): Boolean = started != null
 
     /** The port the endpoint listens on while it runs (the OS's pick when `endpoint-port` is 0), else `null`. */
-    fun port(): Int? = server?.port
+    fun port(): Int? = started?.server?.port
+
+    // Restate discovers the services by calling the endpoint, so it registers only once the endpoint listens.
+    private fun register(server: RunningServer): Deployment {
+        val uri = "http://${properties.advertisedHost}:${server.port}"
+        return try {
+            deployments
+                .register(uri)
+                .also { log.info("Restate endpoint registered as {} (deployment {})", uri, it.id) }
+        } catch (e: Exception) {
+            server.close()
+            throw IllegalStateException(
+                "Could not register the Restate endpoint $uri with Restate's admin API at ${properties.adminUrl} " +
+                    "(${RestateProperties.PREFIX}.advertised-host, ${RestateProperties.PREFIX}.admin-url): ${e.message}",
+                e,
+            )
+        }
+    }
+
+    // On a failure the deployment stays: a stale entry is harmless, a removed one can strand invocations.
+    private fun removeUnlessNeeded(deployment: Deployment) {
+        try {
+            val unfinished = deployments.unfinishedInvocations(deployment)
+            if (unfinished == 0L) {
+                deployments.remove(deployment)
+                log.info("Restate deployment {} removed", deployment.id)
+            } else {
+                log.info(
+                    "Restate deployment {} kept: {} unfinished invocation(s) resume once the endpoint is back at its URL",
+                    deployment.id,
+                    unfinished,
+                )
+            }
+        } catch (e: Exception) {
+            log.warn("Restate deployment {} kept: it could not be checked or removed: {}", deployment.id, e.toString())
+        }
+    }
+
+    /** A running endpoint: its server and the deployment Restate registered it as. */
+    private class Started(
+        val server: RunningServer,
+        val deployment: Deployment,
+    )
 
     /**
      * A listening server and its own Vert.x instance. `io.vertx:vertx-core` is only a runtime dependency of the SDK, so

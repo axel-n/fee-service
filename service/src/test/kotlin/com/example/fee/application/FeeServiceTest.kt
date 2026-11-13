@@ -59,7 +59,9 @@ class FeeServiceTest {
         clients,
         RestateProperties(
             ingressUrl = "http://localhost:8080",
+            adminUrl = "http://localhost:9070",
             endpointPort = 9080,
+            advertisedHost = "localhost",
             attachTimeout = attachTimeout,
         ),
     )

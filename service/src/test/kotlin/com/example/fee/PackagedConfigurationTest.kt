@@ -60,7 +60,9 @@ class PackagedConfigurationTest {
     @ParameterizedTest(name = "{0} defaults to {1}")
     @CsvSource(
         "restate.ingress-url, http://localhost:8080",
+        "restate.admin-url, http://localhost:9070",
         "restate.endpoint-port, 9080",
+        "restate.advertised-host, localhost",
         "restate.attach-timeout, 10s",
     )
     fun `restate setting has its packaged default when no variable is set`(
@@ -80,7 +82,9 @@ class PackagedConfigurationTest {
     @ParameterizedTest(name = "{1} overrides {0}")
     @CsvSource(
         "restate.ingress-url, RESTATE_INGRESS_URL, http://restate:8080",
+        "restate.admin-url, RESTATE_ADMIN_URL, http://restate:9070",
         "restate.endpoint-port, RESTATE_ENDPOINT_PORT, 19080",
+        "restate.advertised-host, RESTATE_ADVERTISED_HOST, dev",
         "restate.attach-timeout, RESTATE_ATTACH_TIMEOUT, 30s",
     )
     fun `restate setting is overridden by its readable environment variable`(
@@ -140,15 +144,21 @@ class PackagedConfigurationTest {
     }
 
     @Test
-    fun `the app needs only the ingress url, the endpoint port and the attach timeout to work with Restate`() {
+    fun `the app needs only the ingress, the admin api, its endpoint and the attach timeout to work with Restate`() {
         // given
         val yaml = packagedYaml()
 
         // when
         val restateKeys = yaml.propertyNames.filter { it.startsWith("restate.") }
 
-        // then: registration is a setup step outside the app, so no admin API settings
-        assertThat(restateKeys).containsExactlyInAnyOrder("restate.ingress-url", "restate.endpoint-port", "restate.attach-timeout")
+        // then
+        assertThat(restateKeys).containsExactlyInAnyOrder(
+            "restate.ingress-url",
+            "restate.admin-url",
+            "restate.endpoint-port",
+            "restate.advertised-host",
+            "restate.attach-timeout",
+        )
         assertThat(yaml.propertyNames.filter { it.startsWith("spring.http.client.") }).isEmpty()
     }
 }

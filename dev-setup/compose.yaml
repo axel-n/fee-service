@@ -46,11 +46,11 @@ services:
     working_dir: /workspace/project
     environment:
       HOME: /home/${USER}
-      # The dev Restate above. Restate calls the app's endpoint at dev:9080 over this network, so 9080 isn't published.
-      # Tests ignore these and start their own Restate.
+      # The dev Restate above. The app registers its endpoint there as dev:9080, reached over this network, so 9080 isn't
+      # published. Tests ignore these and start their own Restate.
       RESTATE_INGRESS_URL: http://restate:8080
       RESTATE_ADMIN_URL: http://restate:9070
-      RESTATE_ADVERTISED_URL: http://dev:9080
+      RESTATE_ADVERTISED_HOST: dev
     # The host's podman socket is deliberately not mounted: holding it means controlling the host's podman.
     volumes:
       - ../:/workspace/project:rw,Z

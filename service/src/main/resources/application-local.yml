@@ -1,9 +1,11 @@
 # The local profile: the app runs on this machine (IDE or mvn spring-boot:run), only Restate runs in Docker or Podman,
-# started and registered as in the README ("Run"). Activate it with the profile "local" in the IDE, or
+# started as in the README ("Run"). Activate it with the profile "local" in the IDE, or
 # mvn spring-boot:run -Dspring-boot.run.profiles=local. Everything not set here keeps its packaged default.
 
 restate:
-  # Restate's ingress, published on this machine by the README's docker/podman run (-p 8080:8080)
+  # Restate's ingress and admin API, published on this machine by the README's docker/podman run (-p 8080:8080 -p 9070:9070)
   ingress-url: http://localhost:8080
-  # Restate calls the endpoint here, at the URL registered in the README: http://host.docker.internal:9080
+  admin-url: http://localhost:9070
   endpoint-port: 9080
+  # Restate's container reaches this machine as host.docker.internal; the app registers itself there at startup
+  advertised-host: host.docker.internal

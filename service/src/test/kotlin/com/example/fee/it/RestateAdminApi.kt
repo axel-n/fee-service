@@ -10,8 +10,8 @@ import java.net.http.HttpResponse
 import java.time.Duration
 
 /**
- * The ITs' calls to Restate's admin API (1.8.1): registering the endpoint, the way the README tells an operator to,
- * and reading or purging what the app did. The app itself never calls the admin API.
+ * The ITs' calls to Restate's admin API (1.8.1): reading or purging what the app did, including the deployment the app
+ * registered itself as.
  */
 class RestateAdminApi(
     private val adminUrl: String,
@@ -26,20 +26,6 @@ class RestateAdminApi(
         val uri: String?,
         val services: Map<String, Int>,
     )
-
-    /**
-     * `POST /deployments` with `force`: Restate discovers the services at [uri] and registers them, or updates a known
-     * deployment in place when they changed. The endpoint must be listening.
-     */
-    fun register(uri: String) {
-        val body = mapper.writeValueAsString(mapOf("uri" to uri, "force" to true))
-        send(
-            HttpRequest
-                .newBuilder(URI("$adminUrl/deployments"))
-                .header("Content-Type", "application/json")
-                .POST(HttpRequest.BodyPublishers.ofString(body)),
-        )
-    }
 
     fun deployments(): List<Deployment> =
         get("/deployments")["deployments"].map { deployment ->

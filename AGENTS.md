@@ -7,8 +7,8 @@ Instructions for AI coding agents (and humans) working on **fee-service**.
 A Kotlin + Spring Boot service for a backend technology challenge (requirements: `requirements.md`).
 `POST /transaction/fee` hands the request to a Restate workflow. The workflow validates, calculates, charges and records
 the fee as journaled steps, so processing survives crashes and restarts without charging twice. The result is persisted
-in Restate state. The app calls Restate only through the ingress; registering its endpoint with Restate is a one-time
-setup step outside the app.
+in Restate state. The app sends work through Restate's ingress, and registers its own endpoint with Restate's admin API at
+startup, at whatever host and port it runs on.
 
 - **The design is the source of truth:** `docs/design.md` (goal, fee table, how Restate is used, class design, wiring,
   call graph, extension points, recovery guarantees). Read it before starting any work.
@@ -33,7 +33,7 @@ Approach:
   `docs/design.md` (the README summarises and links to it).
 - **SOLID:** one responsibility per class; extension by adding a class, not by editing a central `when`; building blocks
   interchangeable behind their interface (`FeeRule`, `TransactionValidator`); small interfaces at the Restate boundary
-  (`FeeWorkflowClients`, `FeeWorkflowContext`, `FeeRecordState`), injected through the constructor.
+  (`FeeWorkflowClients`, `FeeWorkflowContext`, `FeeRecordState`, `RestateDeployments`), injected through the constructor.
 
 ## Stack (fixed: don't change without asking)
 
@@ -82,10 +82,13 @@ Follow the call graph in `docs/design.md`:
   no Restate, and nothing of the service. Nothing outside `api` imports `api` (the service's HTTP package).
 - Restate is reached only through the Kotlin SDK's typed clients, each behind an interface the tests fake: `FeeWorkflowClients`
   (the ingress, for `FeeService`), `FeeWorkflowContext` (inside `FeeWorkflow`) and `FeeRecordState` (inside
-  `TransactionFeeRecord`). Only their `Restate*`/`Ingress*` implementations call the SDK. The app never
-  calls Restate's admin API: registration is done outside the app (README), so `restate.*` holds only the ingress URL,
-  the endpoint port and the attach timeout. Don't add Restate settings or admin calls without asking.
-- The endpoint is started and stopped only by `RestateEndpointLifecycle`. Don't add Actuator until that's approved.
+  `TransactionFeeRecord`). Only their `Restate*`/`Ingress*` implementations call the SDK. Restate's admin API is called
+  only to register and remove the endpoint, through `RestateDeployments` (its `AdminApiRestateDeployments`), so `restate.*`
+  holds only the ingress URL, the admin URL, the endpoint port, the advertised host and the attach timeout. Don't add
+  Restate settings or admin calls without asking.
+- The endpoint is started and stopped only by `RestateEndpointLifecycle`, which registers it at start and, at stop, removes
+  its deployment only when no unfinished invocation needs it: a removed deployment strands its invocations for good. Never
+  remove it unconditionally. Don't add Actuator until that's approved.
 - Nothing calls upward, and no layer is skipped.
 
 ### Restate workflow code
@@ -165,8 +168,8 @@ Follow the call graph in `docs/design.md`:
 - Assert idempotency by the number of CALCULATE executions (`CountingFeeCalculator.count(id)`), not just by the response.
 - **Workflow and recovery tests are first-class.** Every workflow change must keep these passing: crash at each step boundary
   (`FaultInjectingStepHook`), endpoint restart (`RestateEndpointLifecycle.stop/start`), Restate outage (container frozen with
-  SIGSTOP). All of them run in `RestateTestEnvironment` (one shared Testcontainers Restate, which registers
-  the shared app's endpoint once it is ready).
+  SIGSTOP). All of them run in `RestateTestEnvironment` (one shared Testcontainers Restate, where the shared app registers
+  its endpoint itself at startup).
 - **Tests never use fixed ports.** Restate container ports come from `getMappedPort`, the API runs on `RANDOM_PORT`, and the endpoint
   port is a free port picked per run. Every `restate.*` setting is set by `@DynamicPropertySource`. A Restate or app already running
   on the machine must not affect the tests.
@@ -178,7 +181,7 @@ Follow the call graph in `docs/design.md`:
 mvn ktlint:format    # reformats main and test sources; every build fails while ktlint reports a problem
 mvn test             # unit tests only (fast, no Docker)
 mvn verify           # + Testcontainers and Cucumber (needs Docker)
-mvn spring-boot:run      # from the root: starts the app (service module) and its endpoint; register it once (README, "Run")
+mvn spring-boot:run      # from the root: starts the app (service module); it registers its endpoint with Restate (README, "Run")
 mvn -pl api -am install  # puts fee-service-api (and the parent pom it needs) in the local repository for other services
 scripts/check.sh     # the gate: rules + mvn clean verify, every test must actually run (--fast, --unit: see --help)
 ```

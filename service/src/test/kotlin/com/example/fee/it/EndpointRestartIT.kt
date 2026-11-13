@@ -16,7 +16,8 @@ import java.util.concurrent.CompletableFuture
 import java.util.concurrent.TimeUnit
 
 /**
- * The endpoint stops while a workflow is inside its CALCULATE journaled step and starts again on the same port. The
+ * The endpoint stops while a workflow is inside its CALCULATE journaled step and starts again on the same port. Its
+ * deployment stays registered throughout, because the workflow is pinned to it. The
  * step was not journaled, so Restate retries the invocation on the restarted endpoint and the closure runs again, while
  * the call from before the stop is still waiting. Once released, both calls finish, only the restarted run's result is
  * journaled, and the workflow completes with one fee record.
@@ -51,10 +52,19 @@ class EndpointRestartIT
             assertThat(StoredFeeRecords.of(transactionId)?.status).isEqualTo(FeeRecordStatus.IN_PROGRESS)
 
             // when: the endpoint restarts while CALCULATE is blocked
+            val deploymentBefore = registeredDeploymentId()
             endpoint.stop()
             assertThat(endpoint.isRunning).isFalse()
+
+            // then: the deployment stays, because the workflow in flight is pinned to it
+            assertThat(registeredDeploymentId()).describedAs("deployment after the stop").isEqualTo(deploymentBefore)
+
+            // when
             endpoint.start()
             assertThat(endpoint.isRunning).isTrue()
+
+            // then: registering the same URL again kept the deployment the workflow is pinned to
+            assertThat(registeredDeploymentId()).describedAs("deployment after the start").isEqualTo(deploymentBefore)
 
             // then: Restate retried the invocation on the restarted endpoint, and CALCULATE (not journaled) runs again
             awaitUntil("Restate runs CALCULATE again on the restarted endpoint") { calculator.count(transactionId) >= 2 }
@@ -94,6 +104,12 @@ class EndpointRestartIT
                 .describedAs("CALCULATE executions after the resubmission")
                 .isEqualTo(calculations)
         }
+
+        private fun registeredDeploymentId(): String? =
+            RestateTestEnvironment.admin
+                .deployments()
+                .singleOrNull { it.uri?.removeSuffix("/") == RestateTestEnvironment.advertisedUrl }
+                ?.id
 
         private fun bodyOf(request: FeeRequest): Map<String, Any?> =
             mapOf(
