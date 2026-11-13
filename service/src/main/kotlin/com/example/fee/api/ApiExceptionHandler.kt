@@ -1,10 +1,9 @@
 package com.example.fee.api
 
-import com.example.fee.application.FeeInProgressException
-import com.example.fee.contract.FeeStatusResponse
 import com.example.fee.contract.error.DuplicateTransactionException
 import com.example.fee.contract.error.FeeException
 import com.example.fee.contract.error.ValidationException
+import com.example.fee.contract.error.WorkflowTimeoutException
 import com.example.fee.validation.ValueDisplay
 import org.springframework.http.HttpHeaders
 import org.springframework.http.HttpStatusCode
@@ -26,16 +25,9 @@ import tools.jackson.databind.exc.InvalidFormatException
  *
  * A [FeeException] adds its `code`. A rejected field adds `field`, `value` (as sent, `null` when missing) and
  * `message`, which names the allowed values for a 422. A failure about one transaction adds `transaction_id`.
- *
- * The one exception that isn't a failure, [FeeInProgressException], is answered with the fee's status instead.
  */
 @RestControllerAdvice
 class ApiExceptionHandler : ResponseEntityExceptionHandler() {
-    /** A run Restate reports as not finished (470) after `restate.attach-timeout`: 202 and the `IN_PROGRESS` status. */
-    @ExceptionHandler(FeeInProgressException::class)
-    fun handleInProgress(exception: FeeInProgressException): ResponseEntity<FeeStatusResponse> =
-        ResponseEntity.accepted().body(FeeStatusResponse.inProgress(exception.transactionId))
-
     @ExceptionHandler(ValidationException::class)
     fun handleValidation(exception: ValidationException): ProblemDetail =
         problem(exception).apply {
@@ -46,6 +38,11 @@ class ApiExceptionHandler : ResponseEntityExceptionHandler() {
 
     @ExceptionHandler(DuplicateTransactionException::class)
     fun handleDuplicate(exception: DuplicateTransactionException): ProblemDetail =
+        problem(exception).apply { setProperty(TRANSACTION_ID, exception.transactionId) }
+
+    /** A run Restate reports as not finished (470) after `restate.attach-timeout`: 504, naming the transaction to resend. */
+    @ExceptionHandler(WorkflowTimeoutException::class)
+    fun handleTimeout(exception: WorkflowTimeoutException): ProblemDetail =
         problem(exception).apply { setProperty(TRANSACTION_ID, exception.transactionId) }
 
     // Any other FeeException, e.g. WorkflowUnavailableException: its cause is logged by FeeService and never shown.

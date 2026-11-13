@@ -63,7 +63,7 @@ class PackagedConfigurationTest {
         "restate.admin-url, http://localhost:9070",
         "restate.endpoint-port, 9080",
         "restate.advertised-host, localhost",
-        "restate.attach-timeout, 10s",
+        "restate.attach-timeout, 30s",
     )
     fun `restate setting has its packaged default when no variable is set`(
         key: String,
@@ -85,7 +85,7 @@ class PackagedConfigurationTest {
         "restate.admin-url, RESTATE_ADMIN_URL, http://restate:9070",
         "restate.endpoint-port, RESTATE_ENDPOINT_PORT, 19080",
         "restate.advertised-host, RESTATE_ADVERTISED_HOST, dev",
-        "restate.attach-timeout, RESTATE_ATTACH_TIMEOUT, 30s",
+        "restate.attach-timeout, RESTATE_ATTACH_TIMEOUT, 45s",
     )
     fun `restate setting is overridden by its readable environment variable`(
         key: String,
@@ -128,7 +128,7 @@ class PackagedConfigurationTest {
 
         // then
         assertThat(endpointPort).isEqualTo(9080)
-        assertThat(attachTimeout).isEqualTo(Duration.ofSeconds(10))
+        assertThat(attachTimeout).isEqualTo(Duration.ofSeconds(30))
     }
 
     @Test

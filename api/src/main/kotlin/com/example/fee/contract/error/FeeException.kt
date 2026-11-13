@@ -6,7 +6,7 @@ package com.example.fee.contract.error
  * [FeeProblem] and gets the exception back with [FeeProblem.toException].
  *
  * In the service, `FeeService` throws these at the gateway, built from the workflow's `FeeOutcome` or from a Restate
- * call that failed; the workflow itself never throws them. No Spring here: [status] is the plain HTTP status code,
+ * call that failed or didn't finish in time; the workflow itself never throws them. No Spring here: [status] is the plain HTTP status code,
  * so a consumer needs nothing but this module.
  *
  * Not durable (they never cross Restate's serde), but published: other services compile against them, so renaming a
@@ -38,6 +38,9 @@ enum class FeeErrorCode(
 
     /** Fee processing can't be reached right now ([WorkflowUnavailableException]). */
     WORKFLOW_UNAVAILABLE(503),
+
+    /** The run hasn't finished within the service's wait ([WorkflowTimeoutException]). */
+    WORKFLOW_TIMEOUT(504),
 }
 
 /**
@@ -81,4 +84,16 @@ class WorkflowUnavailableException(
         cause,
     ) {
     override val code: FeeErrorCode get() = FeeErrorCode.WORKFLOW_UNAVAILABLE
+}
+
+/**
+ * The run of [transactionId] hasn't finished within the service's wait, and Restate reports it as still running: 504.
+ * The run goes on. The same request sent again gets its fee once it is charged, and the fee is charged once.
+ */
+class WorkflowTimeoutException(
+    val transactionId: String,
+) : FeeException(
+        "The fee for transaction '$transactionId' is still being processed. Resend the same request later to get it",
+    ) {
+    override val code: FeeErrorCode get() = FeeErrorCode.WORKFLOW_TIMEOUT
 }

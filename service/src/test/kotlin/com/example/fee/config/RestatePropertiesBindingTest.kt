@@ -51,7 +51,7 @@ class RestatePropertiesBindingTest {
                 override("RESTATE_ADMIN_URL", "http://restate:9070", { it.adminUrl }, "http://restate:9070"),
                 override("RESTATE_ENDPOINT_PORT", "19080", { it.endpointPort }, 19080),
                 override("RESTATE_ADVERTISED_HOST", "dev", { it.advertisedHost }, "dev"),
-                override("RESTATE_ATTACH_TIMEOUT", "30s", { it.attachTimeout }, Duration.ofSeconds(30)),
+                override("RESTATE_ATTACH_TIMEOUT", "45s", { it.attachTimeout }, Duration.ofSeconds(45)),
             )
     }
 
@@ -71,7 +71,7 @@ class RestatePropertiesBindingTest {
         assertThat(properties.adminUrl).isEqualTo("http://localhost:9070")
         assertThat(properties.endpointPort).isEqualTo(9080)
         assertThat(properties.advertisedHost).isEqualTo("localhost")
-        assertThat(properties.attachTimeout).isEqualTo(Duration.ofSeconds(10))
+        assertThat(properties.attachTimeout).isEqualTo(Duration.ofSeconds(30))
     }
 
     @ParameterizedTest(name = "{0}={1} overrides its placeholder")
@@ -105,7 +105,7 @@ class RestatePropertiesBindingTest {
         assertThat(properties.adminUrl).isEqualTo("http://localhost:9070")
         assertThat(properties.endpointPort).isEqualTo(9080)
         assertThat(properties.advertisedHost).isEqualTo("localhost")
-        assertThat(properties.attachTimeout).isEqualTo(Duration.ofSeconds(10))
+        assertThat(properties.attachTimeout).isEqualTo(Duration.ofSeconds(30))
     }
 
     @Test

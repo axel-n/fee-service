@@ -3,7 +3,6 @@ package com.example.fee.api
 import com.example.fee.application.FeeService
 import com.example.fee.contract.FeeRequest
 import com.example.fee.contract.FeeResponse
-import com.example.fee.contract.FeeStatusResponse
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
@@ -59,15 +58,15 @@ class TransactionFeeControllerTest(
             amount = BigDecimal("1000"),
             asset = "USD",
             type = "Mobile Top Up",
-            fee = BigDecimal("1.50"),
+            fee = BigDecimal("1.5"),
             rate = BigDecimal("0.0015"),
             description = "Standard fee rate of 0.15%",
         )
 
     @Test
-    fun `a charged fee is 200 with the completed status and the fee in snake case`() {
+    fun `a charged fee is 200 with the fee in snake case and no other field`() {
         // given
-        runBlocking { `when`(feeService.submit(request)).thenReturn(FeeStatusResponse.completed(response)) }
+        runBlocking { `when`(feeService.submit(request)).thenReturn(response) }
 
         // when
         val result =
@@ -81,19 +80,19 @@ class TransactionFeeControllerTest(
             .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
             .andExpect(header().doesNotExist(HttpHeaders.LOCATION))
             .andExpect(jsonPath("$.transaction_id").value("txn_001"))
-            .andExpect(jsonPath("$.status").value("COMPLETED"))
+            .andExpect(jsonPath("$.status").doesNotExist())
             .andExpect(jsonPath("$.asset").value("USD"))
             .andExpect(jsonPath("$.type").value("Mobile Top Up"))
             .andExpect(jsonPath("$.description").value("Standard fee rate of 0.15%"))
         val body = result.andReturn().response.contentAsString
-        assertThat(body).contains("\"amount\":1000,", "\"fee\":1.50,", "\"rate\":0.0015,")
+        assertThat(body).contains("\"amount\":1000,", "\"fee\":1.5,", "\"rate\":0.0015,")
     }
 
     // Jackson 3 sorts properties alphabetically by default, but keeps constructor properties in declaration order
     @Test
-    fun `the body lists its fields in the contract's order, as the requirements' sample does`() {
+    fun `the body is the requirements' expected response payload, field for field and in its order`() {
         // given
-        runBlocking { `when`(feeService.submit(request)).thenReturn(FeeStatusResponse.completed(response)) }
+        runBlocking { `when`(feeService.submit(request)).thenReturn(response) }
 
         // when
         val result =
@@ -103,15 +102,15 @@ class TransactionFeeControllerTest(
 
         // then
         assertThat(result.andReturn().response.contentAsString).isEqualTo(
-            """{"transaction_id":"txn_001","status":"COMPLETED","amount":1000,"asset":"USD","type":"Mobile Top Up",""" +
-                """"fee":1.50,"rate":0.0015,"description":"Standard fee rate of 0.15%"}""",
+            """{"transaction_id":"txn_001","amount":1000,"asset":"USD","type":"Mobile Top Up",""" +
+                """"fee":1.5,"rate":0.0015,"description":"Standard fee rate of 0.15%"}""",
         )
     }
 
     @Test
     fun `the request body reaches the service with every snake case field`() {
         // given
-        runBlocking { `when`(feeService.submit(request)).thenReturn(FeeStatusResponse.completed(response)) }
+        runBlocking { `when`(feeService.submit(request)).thenReturn(response) }
 
         // when
         mockMvc.performToCompletion(post("/transaction/fee").contentType(MediaType.APPLICATION_JSON).content(requestJson))

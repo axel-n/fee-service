@@ -4,7 +4,7 @@ A Kotlin + Spring Boot service that calculates, charges and records the fee of a
 durable [Restate](https://restate.dev) workflow, so it survives crashes and restarts and never charges twice.
 
 ```
-POST /transaction/fee          → 200 with the fee (or 202 while it is still running)
+POST /transaction/fee          → 200 with the fee (or 504 when it is not charged within restate.attach-timeout)
 ```
 
 - [Requirements](requirements.md): the challenge
@@ -24,7 +24,7 @@ POST /transaction/fee          → 200 with the fee (or 202 while it is still ru
 3. **calculates** the fee with the rule of the transaction's type,
 4. **charges and records** the fee: it is stored permanently in Restate state as the transaction's charged fee.
 
-The caller waits for the result (up to `restate.attach-timeout`) and gets the fee, or 202 `IN_PROGRESS` when Restate
+The caller waits for the result (up to `restate.attach-timeout`, 30 s by default) and gets the fee, or a 504 problem when Restate
 then reports the run as not finished (its 470). The workflow is keyed by the
 `transaction_id`, so sending the same id again returns the first run's response without a second charge, whatever the
 payload; a rejected id stays rejected until Restate drops the finished run (1 day by default).
@@ -34,11 +34,10 @@ Nothing is stored outside Restate.
 // POST /transaction/fee                          // 200 OK
 {                                                 {
   "transaction_id": "txn_001",                      "transaction_id": "txn_001",
-                                                    "status": "COMPLETED",
   "amount": 1000,                                   "amount": 1000,
   "asset": "USD",                                   "asset": "USD",
   "asset_type": "FIAT",                             "type": "Mobile Top Up",
-  "type": "Mobile Top Up",                          "fee": 1.50,
+  "type": "Mobile Top Up",                          "fee": 1.5,
   "state": "SETTLED - PENDING FEE",                 "rate": 0.0015,
   "created_at": "2023-08-30 15:42:17.610059"        "description": "Standard fee rate of 0.15%"
 }                                                 }
@@ -52,7 +51,7 @@ POST /transaction/fee
 Spring app: TransactionFeeController → FeeService           (thin gateway, no business logic)
    │  1. transaction_id present and well-formed?  (it is the workflow key; otherwise 400)
    │  2. submit FeeWorkflow/txn_001/run, then attach  (the id sent again gets PREVIOUSLY_ACCEPTED
-   │     and the first run's result; no result within attach-timeout and Restate answers 470 → 202)
+   │     and the first run's result; no result within attach-timeout and Restate answers 470 → 504)
    ▼
 Restate server (external Docker) ── journals every step ───────────────────────────┐
    │ invokes the app's endpoint (port 9080)                                         │
@@ -90,7 +89,7 @@ Two Maven modules under the root `pom.xml` (the parent, `fee-service-parent`):
 
 | Module | Artifact | What it holds |
 |--------|----------|---------------|
-| [`api/`](api) | `com.example:fee-service-api` | the HTTP contract other services depend on: `contract/` (`FeeRequest`, `FeeResponse`, `FeeStatusResponse`) and `contract/error/` (the `FeeException` classes, `FeeErrorCode`, `FeeProblem`, the error body). Jackson and Kotlin only, no Spring, no Restate |
+| [`api/`](api) | `com.example:fee-service-api` | the HTTP contract other services depend on: `contract/` (`FeeRequest`, `FeeResponse`) and `contract/error/` (the `FeeException` classes, `FeeErrorCode`, `FeeProblem`, the error body). Jackson and Kotlin only, no Spring, no Restate |
 | [`service/`](service) | `com.example:fee-service` | the app: everything below, plus `application.yml` and every test of it |
 
 The packages of the service module:
@@ -170,7 +169,7 @@ app starts from (or `--spring.config.additional-location=file:/etc/fee-service/`
 | `restate.admin-url` | `RESTATE_ADMIN_URL` | `http://localhost:9070` | Restate's admin API, where the app registers its endpoint |
 | `restate.endpoint-port` | `RESTATE_ENDPOINT_PORT` | `9080` | port the Restate endpoint listens on, where Restate calls the workflow |
 | `restate.advertised-host` | `RESTATE_ADVERTISED_HOST` | `localhost` | host Restate reaches the endpoint at (`host.docker.internal` in the `local` profile) |
-| `restate.attach-timeout` | `RESTATE_ATTACH_TIMEOUT` | `10s` | how long `POST` waits for the result; then it answers 202 only if Restate reports the run as not finished (470) |
+| `restate.attach-timeout` | `RESTATE_ATTACH_TIMEOUT` | `30s` | how long `POST` waits for the result; then it answers 504 only if Restate reports the run as not finished (470) |
 | `fee.<type>.rate`, `.min`, `.fixed` | (use a file) | see [Fee table](#fee-table) | fee numbers per transaction type |
 
 Fees are easiest to change in a file next to the app. It needs only the keys that change:
@@ -209,7 +208,7 @@ curl -s -X POST localhost:8081/transaction/fee -H 'Content-Type: application/jso
   "type": "Mobile Top Up", "state": "SETTLED - PENDING FEE", "created_at": "2023-08-30 15:42:17.610059"}'
 ```
 ```json
-{"transaction_id":"txn_001","status":"COMPLETED","amount":1000,"asset":"USD","type":"Mobile Top Up","fee":1.50,"rate":0.0015,"description":"Standard fee rate of 0.15%"}
+{"transaction_id":"txn_001","amount":1000,"asset":"USD","type":"Mobile Top Up","fee":1.5,"rate":0.0015,"description":"Standard fee rate of 0.15%"}
 ```
 
 Sending the **same `transaction_id` again** returns the same body, whatever the payload, and the fee is not charged again.
@@ -222,7 +221,7 @@ curl -s -X POST localhost:8081/transaction/fee -H 'Content-Type: application/jso
   "type": "Bank Transfer", "state": "SETTLED - PENDING FEE", "created_at": "2023-08-30 15:42:17.610059"}'
 ```
 ```json
-{"transaction_id":"txn_002","status":"COMPLETED","amount":100,"asset":"EUR","type":"Bank Transfer","fee":1.00,"rate":0.005,"description":"Fee rate of 0.5% (min 1.00 EUR)"}
+{"transaction_id":"txn_002","amount":100,"asset":"EUR","type":"Bank Transfer","fee":1,"rate":0.005,"description":"Fee rate of 0.5% (min 1.00 EUR)"}
 ```
 
 
@@ -234,13 +233,13 @@ curl -s -X POST localhost:8081/transaction/fee -H 'Content-Type: application/jso
 | `"amount": -5` | 400 | `"code":"INVALID_REQUEST","detail":"Invalid amount '-5'. Allowed: a number greater than 0","field":"amount","value":"-5"` |
 | An id whose earlier run was killed after its claim, once Restate dropped that run | 409 | `"code":"DUPLICATE_TRANSACTION","detail":"Transaction 'txn_001' is claimed by an earlier run that has not finished","transaction_id":"txn_001"` |
 | Restate unreachable | 503 | `"code":"WORKFLOW_UNAVAILABLE"`; resending later is safe |
+| A run not finished within `restate.attach-timeout` | 504 | `"code":"WORKFLOW_TIMEOUT","detail":"The fee for transaction 'txn_001' is still being processed. Resend the same request later to get it","transaction_id":"txn_001"` |
 
 Spring MVC's own errors (a body that isn't JSON, 415, 405, an unknown path) are problems too, without a `code`.
 
-A run that takes longer than `restate.attach-timeout` answers **202** with `{"transaction_id":"…","status":"IN_PROGRESS"}`,
-but only when Restate itself reports it as not finished (470 on the run's output; a run that finished meanwhile answers
-its result). That includes a run Restate is retrying because it can't reach a working endpoint;
-send the transaction again to get the fee once it is charged.
+The 504 comes only when Restate itself reports the run as not finished (470 on the run's output), which includes a run
+Restate is retrying because it can't reach a working endpoint; a run that finished meanwhile answers its result. The run
+goes on, so send the same transaction again to get the fee once it is charged; it is charged once.
 
 A rejection is the `transaction_id`'s answer while Restate keeps the finished run (1 day by default): the corrected request
 sent with the same id gets the same rejection until then (e.g. `PENDING`, then `SETTLED - PENDING FEE`).
@@ -258,9 +257,9 @@ the local repository (no container engine needed):
 </dependency>
 ```
 
-It brings `FeeRequest`, `FeeResponse` and `FeeStatusResponse` with their snake_case JSON names, and the errors: read an
+It brings `FeeRequest` and `FeeResponse` with their snake_case JSON names, and the errors: read an
 error body as `FeeProblem`, and `toException()` gives back the `FeeException` the service raised
-(`DuplicateTransactionException`, `ValidationException`, …), or `null` for a problem without a known `code`.
+(`DuplicateTransactionException`, `ValidationException`, `WorkflowTimeoutException`, …), or `null` for a problem without a known `code`.
 
 ```kotlin
 val problem = objectMapper.readValue(errorBody, FeeProblem::class.java)
@@ -299,7 +298,7 @@ What the recovery tests prove (each counts the **CALCULATE executions**, not jus
 | `EndpointRestartIT`, `workflow_recovery.feature` | Stopping and restarting the endpoint in the middle of CALCULATE keeps its deployment and completes the workflow with one fee record |
 | `EndpointRegistrationIT` | The app registers itself at its advertised URL at startup, and a stop with nothing unfinished removes the registration |
 | `RestateOutageIT` | A workflow frozen mid-CALCULATE completes with one fee record once Restate thaws |
-| `InFlightStatusIT` | A run that outlasts the attach timeout, and that Restate reports as not finished (470), answers 202 `IN_PROGRESS`; the same payload sent again gets the fee |
+| `AttachTimeoutIT` | A run that outlasts the attach timeout, and that Restate reports as not finished (470), answers 504 `WORKFLOW_TIMEOUT`; the same payload sent again gets the fee, calculated once |
 | `AppContainerIT` | The packaged app in a container registers with Restate under its network alias and charges a fee (an unknown type gets 422 at once); a graceful stop removes the deployment; a run submitted while the app is killed waits (Restate answers 470) and is charged once when the app is back at the same URL, as the same deployment |
 | `DeterminismIT` | A validation result is journaled: moving the clock between a crash and the retry doesn't change it |
 | `DuplicatesIT`, `idempotency.feature` | One `transaction_id`, sequentially or 10 callers at once, with the same or different payloads, is charged once and every caller gets the first run's response; an id held by an unfinished run gets 409 |
@@ -342,7 +341,8 @@ order or the JSON of `FeeRequest`/`FeeResponse` is a breaking change for in-flig
 - An amount may not have more decimals than its asset (`10.001 USD` is 422); trailing zeros don't count.
 - An amount may not exceed 3,000,000,000 in its asset (`3000000000.01 USD` is 422); the bound is a constant
   (`MaxAmountValidator.MAX_AMOUNT`), the same number for USD and EUR.
-- `fee` is returned at the asset's scale (`1.50`, which equals the challenge's `1.5`); `amount` is echoed as sent.
+- `fee` is answered without trailing zeros (`1.5`, as in the challenge's sample; `5`, `10.3`), and stored at the asset's
+  2 decimals (`1.50`), the same value; `amount` is echoed as sent.
 - One `transaction_id` is processed once: sending it again, with any payload, returns the first run's response (the fee or
   the rejection) without charging again. A rejected id can be charged once Restate drops its run (1 day by default).
 - Charging a fee means recording it in Restate as the transaction's charged fee; there is no external wallet.

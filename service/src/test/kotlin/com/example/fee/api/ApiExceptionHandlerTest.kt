@@ -1,12 +1,12 @@
 package com.example.fee.api
 
-import com.example.fee.application.FeeInProgressException
 import com.example.fee.application.FeeService
 import com.example.fee.contract.FeeRequest
 import com.example.fee.contract.error.DuplicateTransactionException
 import com.example.fee.contract.error.FeeException
 import com.example.fee.contract.error.FeeProblem
 import com.example.fee.contract.error.ValidationException
+import com.example.fee.contract.error.WorkflowTimeoutException
 import com.example.fee.contract.error.WorkflowUnavailableException
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import kotlinx.coroutines.runBlocking
@@ -19,14 +19,12 @@ import org.mockito.Mockito.verifyNoInteractions
 import org.mockito.Mockito.`when`
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest
-import org.springframework.http.HttpHeaders
 import org.springframework.http.MediaType
 import org.springframework.test.context.bean.override.mockito.MockitoBean
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.ResultActions
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.content
-import org.springframework.test.web.servlet.result.MockMvcResultMatchers.header
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
 import java.net.ConnectException
@@ -163,22 +161,23 @@ class ApiExceptionHandlerTest(
     }
 
     @Test
-    fun `a fee still processing is 202 with an in progress body, not a problem`() {
+    fun `a run not finished within the attach timeout is 504 problem json with the transaction id`() {
         // given
-        submitThrows(FeeInProgressException("txn_001"))
+        submitThrows(WorkflowTimeoutException("txn_001"))
 
         // when
         val result = postFee()
 
         // then
         result
-            .andExpect(status().isAccepted)
-            .andExpect(content().contentType(MediaType.APPLICATION_JSON))
-            .andExpect(header().doesNotExist(HttpHeaders.LOCATION))
+            .andExpect(status().isGatewayTimeout)
+            .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
+            .andExpect(jsonPath("$.title").value("Gateway Timeout"))
+            .andExpect(jsonPath("$.status").value(504))
+            .andExpect(jsonPath("$.code").value("WORKFLOW_TIMEOUT"))
             .andExpect(jsonPath("$.transaction_id").value("txn_001"))
-            .andExpect(jsonPath("$.status").value("IN_PROGRESS"))
+            .andExpect(jsonPath("$.detail").value(WorkflowTimeoutException("txn_001").message))
             .andExpect(jsonPath("$.fee").doesNotExist())
-            .andExpect(jsonPath("$.code").doesNotExist())
     }
 
     @Test
@@ -277,6 +276,7 @@ class ApiExceptionHandlerTest(
                 ValidationException("state", "PENDING", "Unsupported state 'PENDING'", ValidationException.Kind.UNSUPPORTED),
                 DuplicateTransactionException("txn_001"),
                 WorkflowUnavailableException(ConnectException("Connection refused")),
+                WorkflowTimeoutException("txn_001"),
             )
         val mapper = jacksonObjectMapper()
 
@@ -303,5 +303,6 @@ class ApiExceptionHandlerTest(
             is ValidationException -> listOf(exception.field, exception.value, exception.kind)
             is DuplicateTransactionException -> listOf(exception.transactionId)
             is WorkflowUnavailableException -> emptyList()
+            is WorkflowTimeoutException -> listOf(exception.transactionId)
         }
 }

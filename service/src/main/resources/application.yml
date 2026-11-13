@@ -27,9 +27,9 @@ restate:
   endpoint-port: ${RESTATE_ENDPOINT_PORT:9080}
   # Host Restate reaches the endpoint at: localhost only when Restate runs on this machine outside a container
   advertised-host: ${RESTATE_ADVERTISED_HOST:localhost}
-  # How long POST /transaction/fee waits for the workflow's result; then it answers 202 only if Restate reports the run
+  # How long POST /transaction/fee waits for the workflow's result; then it answers 504 only if Restate reports the run
   # as not finished (470)
-  attach-timeout: ${RESTATE_ATTACH_TIMEOUT:10s}
+  attach-timeout: ${RESTATE_ATTACH_TIMEOUT:30s}
 
 # Fee numbers per transaction type, read by the *FeeProperties classes; descriptions are built from them.
 # Rates are fractions in [0, 1); min and fixed are amounts in the transaction's asset (USD or EUR, same numbers).

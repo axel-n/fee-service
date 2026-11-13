@@ -3,10 +3,9 @@ package com.example.fee.application
 import com.example.fee.config.RestateProperties
 import com.example.fee.contract.FeeRequest
 import com.example.fee.contract.FeeResponse
-import com.example.fee.contract.FeeStatusResponse
 import com.example.fee.contract.error.DuplicateTransactionException
-import com.example.fee.contract.error.FeeException
 import com.example.fee.contract.error.ValidationException
+import com.example.fee.contract.error.WorkflowTimeoutException
 import com.example.fee.contract.error.WorkflowUnavailableException
 import com.example.fee.restate.FeeWorkflowClients
 import com.example.fee.restate.FeeWorkflowRun
@@ -22,6 +21,8 @@ import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.assertj.core.api.ThrowableAssert.ThrowingCallable
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.CsvSource
 import org.springframework.http.HttpStatus
 import java.math.BigDecimal
 import java.net.ConnectException
@@ -51,6 +52,10 @@ class FeeServiceTest {
             description = "Standard fee rate of 0.15%",
         )
 
+    // What the API answers for [response]: the fee without trailing zeros. Data-class equality compares BigDecimal
+    // with equals, so it tells 1.5 from 1.50.
+    private val answered = response.copy(fee = BigDecimal("1.5"))
+
     private fun service(
         clients: FeeWorkflowClients,
         attachTimeout: Duration = Duration.ofSeconds(5),
@@ -76,7 +81,7 @@ class FeeServiceTest {
     ) = ThrowingCallable { runBlocking { service.submit(request) } }
 
     @Test
-    fun `a charged outcome completes with the workflow's response`() =
+    fun `a charged outcome answers the workflow's response with the fee as in the requirements' sample`() =
         runBlocking<Unit> {
             // given
             val clients = FakeClients(attach = { FeeOutcome.Charged(response) })
@@ -85,8 +90,25 @@ class FeeServiceTest {
             val submission = service(clients).submit(request)
 
             // then
-            assertThat(submission).isEqualTo(FeeStatusResponse.completed(response))
+            assertThat(submission).isEqualTo(answered)
         }
+
+    @ParameterizedTest(name = "stored {0} → answered {1}")
+    @CsvSource("1.50, 1.5", "10.30, 10.3", "2.00, 2", "50.00, 50", "1.01, 1.01", "0.38, 0.38", "0.00, 0")
+    fun `answers the charged fee without trailing zeros, at the same value`(
+        stored: BigDecimal,
+        expected: String,
+    ) = runBlocking<Unit> {
+        // given
+        val clients = FakeClients(attach = { FeeOutcome.Charged(response.copy(fee = stored)) })
+
+        // when
+        val fee = service(clients).submit(request).fee
+
+        // then
+        assertThat(fee.toPlainString()).isEqualTo(expected)
+        assertThat(fee).isEqualByComparingTo(stored)
+    }
 
     @Test
     fun `submits the request as sent to the workflow keyed by its transaction id`() =
@@ -126,7 +148,7 @@ class FeeServiceTest {
             val submission = service(clients).submit(request.copy(amount = BigDecimal("2000")))
 
             // then
-            assertThat(submission).isEqualTo(FeeStatusResponse.completed(response))
+            assertThat(submission).isEqualTo(answered)
             assertThat(clients.attaches).isEqualTo(1)
         }
 
@@ -237,20 +259,21 @@ class FeeServiceTest {
     }
 
     @Test
-    fun `a run Restate reports as not ready after the attach timeout is an in progress exception with the transaction id`() {
+    fun `a run Restate reports as not ready after the attach timeout is a 504 naming the transaction id`() {
         // given: the workflow was accepted but never finishes, and Restate answers its output with 470
         val clients = FakeClients(attach = { awaitCancellation() }, output = { null })
 
         // when / then
         assertThatThrownBy(submitting(service(clients, attachTimeout = Duration.ofMillis(50)), request))
-            .isInstanceOfSatisfying(FeeInProgressException::class.java) {
+            .isInstanceOfSatisfying(WorkflowTimeoutException::class.java) {
                 assertThat(it.transactionId).isEqualTo("txn_001")
+                assertThat(it.status).isEqualTo(HttpStatus.GATEWAY_TIMEOUT.value())
             }
         assertThat(clients.outputs).isEqualTo(1)
     }
 
     @Test
-    fun `a run that finished just after the attach timeout answers its outcome, not 202`() =
+    fun `a run that finished just after the attach timeout answers its outcome, not 504`() =
         runBlocking<Unit> {
             // given: the attach outlasts the timeout, but Restate already has the output when asked
             val clients = FakeClients(attach = { awaitCancellation() }, output = { FeeOutcome.Charged(response) })
@@ -259,11 +282,11 @@ class FeeServiceTest {
             val submission = service(clients, attachTimeout = Duration.ofMillis(50)).submit(request)
 
             // then
-            assertThat(submission).isEqualTo(FeeStatusResponse.completed(response))
+            assertThat(submission).isEqualTo(answered)
         }
 
     @Test
-    fun `an output request that fails after the attach timeout is a 503, not 202`() {
+    fun `an output request that fails after the attach timeout is a 503, not 504`() {
         // given
         val down = ingressDown()
         val clients = FakeClients(attach = { awaitCancellation() }, output = { throw down })
@@ -342,55 +365,5 @@ class FeeServiceTest {
                 }
             }
         }
-    }
-}
-
-class FeeInProgressExceptionTest {
-    @Test
-    fun `carries the transaction id of the run still in progress`() {
-        // given
-        val exception = FeeInProgressException("txn_001")
-
-        // when
-        val transactionId = exception.transactionId
-
-        // then
-        assertThat(transactionId).isEqualTo("txn_001")
-    }
-
-    @Test
-    fun `names the transaction in a readable message`() {
-        // given
-        val exception = FeeInProgressException("txn_001")
-
-        // when
-        val message = exception.message
-
-        // then
-        assertThat(message).isEqualTo("The fee for transaction 'txn_001' is still being processed")
-    }
-
-    @Test
-    fun `is not a fee exception, so it never becomes a problem body`() {
-        // given
-        val exception: RuntimeException = FeeInProgressException("txn_001")
-
-        // when
-        val isFailure = exception is FeeException
-
-        // then
-        assertThat(isFailure).isFalse()
-    }
-
-    @Test
-    fun `has no stack trace because a slow run is expected, not a bug`() {
-        // given
-        val exception = FeeInProgressException("txn_001")
-
-        // when
-        val stackTrace = exception.stackTrace
-
-        // then
-        assertThat(stackTrace).isEmpty()
     }
 }

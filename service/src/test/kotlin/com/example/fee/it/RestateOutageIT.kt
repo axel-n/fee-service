@@ -66,9 +66,9 @@ class RestateOutageIT
             assertThat((outcome as FeeOutcome.Charged).response.fee).isEqualByComparingTo(BigDecimal("1.50"))
             assertThat(StoredWorkflows.step(request)).isEqualTo(WorkflowStep.DONE)
 
-            // then: the caller got the result, or a 202 if the outage outlasted the attach timeout
+            // then: the caller got the result, or a 504 if the outage outlasted the attach timeout
             val response = post.get(2, TimeUnit.MINUTES)
-            assertThat(response.status).describedAs("POST status, body %s", response.body).isIn(200, 202)
+            assertThat(response.status).describedAs("POST status, body %s", response.body).isIn(200, 504)
             if (response.status == 200) {
                 assertThat(response.body["fee"].decimalValue()).isEqualByComparingTo(BigDecimal("1.50"))
             }

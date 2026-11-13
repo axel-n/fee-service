@@ -16,7 +16,6 @@ Feature: Fee calculation
     Then the response status is 200
     And the response body is:
       | transaction_id | txn_001                    |
-      | status         | COMPLETED                  |
       | amount         | 1000                       |
       | asset          | USD                        |
       | type           | Mobile Top Up              |

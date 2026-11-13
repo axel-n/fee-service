@@ -2,10 +2,11 @@ package com.example.fee.application
 
 import com.example.fee.config.RestateProperties
 import com.example.fee.contract.FeeRequest
-import com.example.fee.contract.FeeStatusResponse
+import com.example.fee.contract.FeeResponse
 import com.example.fee.contract.error.DuplicateTransactionException
 import com.example.fee.contract.error.FeeException
 import com.example.fee.contract.error.ValidationException
+import com.example.fee.contract.error.WorkflowTimeoutException
 import com.example.fee.contract.error.WorkflowUnavailableException
 import com.example.fee.restate.FeeWorkflowClients
 import com.example.fee.validation.ValidationError
@@ -19,34 +20,39 @@ import kotlin.time.toKotlinDuration
 
 /**
  * The thin gateway between the API and `FeeWorkflow`: it checks the `transaction_id`, which is the workflow key,
- * submits the workflow of that id and attaches to it, and maps the [FeeOutcome] to a `COMPLETED` [FeeStatusResponse]
- * or a [FeeException]. Every business decision is made inside the workflow.
+ * submits the workflow of that id and attaches to it, and maps the [FeeOutcome] to the charged [FeeResponse] or a
+ * [FeeException]. Every business decision is made inside the workflow.
  *
  * It always submits, then attaches: a `transaction_id` sent again gets `PREVIOUSLY_ACCEPTED`, its payload is ignored,
  * and the attach returns the first run's result, so a transaction is processed once. The attach waits at most
  * `restate.attach-timeout`, suspended rather than holding a thread. Then it asks Restate for the run's output, and only
- * Restate's answer 470 (not ready) makes it a [FeeInProgressException]; a run that finished meanwhile answers its
+ * Restate's answer 470 (not ready) makes it a [WorkflowTimeoutException]; a run that finished meanwhile answers its
  * outcome. A Restate call that failed is a [WorkflowUnavailableException], because resending is safe.
  */
+private val log = LoggerFactory.getLogger(FeeService::class.java)
+
 @Service
 class FeeService(
     private val transactionIdValidator: TransactionIdValidator,
     private val feeWorkflowClients: FeeWorkflowClients,
     private val restateProperties: RestateProperties,
 ) {
-    suspend fun submit(request: FeeRequest): FeeStatusResponse {
+    suspend fun submit(request: FeeRequest): FeeResponse {
         transactionIdValidator.validate(request)?.let { throw rejected(it) }
         val transactionId = checkNotNull(request.transactionId) { "transaction_id passed the pre-check but is null" }
 
         val attachTimeout = restateProperties.attachTimeout
         val run = restateCall(transactionId) { feeWorkflowClients.submit(transactionId, request) }
-        val outcome =
-            restateCall(transactionId) {
-                withTimeoutOrNull(attachTimeout.toKotlinDuration()) { run.attach() } ?: run.output()
-            }
+        val outcome = restateCall(transactionId) {
+            withTimeoutOrNull(attachTimeout.toKotlinDuration()) { run.attach() } ?: run.output()
+        }
         if (outcome == null) {
-            log.info("Restate reports workflow {} not finished (470) after {}; answering 202", transactionId, attachTimeout)
-            throw FeeInProgressException(transactionId)
+            log.info(
+                "Restate reports workflow {} not finished (470) after {}; answering 504",
+                transactionId,
+                attachTimeout
+            )
+            throw WorkflowTimeoutException(transactionId)
         }
         return toResponse(outcome)
     }
@@ -65,9 +71,11 @@ class FeeService(
             throw unavailable(transactionId, e)
         }
 
-    private fun toResponse(outcome: FeeOutcome): FeeStatusResponse =
+    // The fee is stored at the asset's decimals (1.50); the API answers it without trailing zeros (1.5), as the
+    // challenge's sample does. Same value, so nothing is rounded.
+    private fun toResponse(outcome: FeeOutcome): FeeResponse =
         when (outcome) {
-            is FeeOutcome.Charged -> FeeStatusResponse.completed(outcome.response)
+            is FeeOutcome.Charged -> outcome.response.let { it.copy(fee = it.fee.stripTrailingZeros()) }
             is FeeOutcome.Rejected -> throw rejected(outcome.error)
             is FeeOutcome.Conflict -> throw DuplicateTransactionException(outcome.transactionId)
         }
@@ -89,19 +97,4 @@ class FeeService(
         log.warn("Restate call for workflow {} failed: {}", transactionId, cause.toString())
         return WorkflowUnavailableException(cause)
     }
-
-    private companion object {
-        private val log = LoggerFactory.getLogger(FeeService::class.java)
-    }
 }
-
-/**
- * Thrown by [FeeService.submit] when Restate answers 470 (not ready) for the run after `restate.attach-timeout`. It isn't a failure, so
- * it isn't a [FeeException]: `ApiExceptionHandler` answers 202 with the `IN_PROGRESS` status as body. Resubmitting the
- * transaction attaches to the same run, so it charges once. HTTP only, never stored.
- */
-class FeeInProgressException(
-    val transactionId: String,
-) :
-    // No stack trace: an expected outcome of every slow run, not a bug to locate.
-    RuntimeException("The fee for transaction '$transactionId' is still being processed", null, false, false)

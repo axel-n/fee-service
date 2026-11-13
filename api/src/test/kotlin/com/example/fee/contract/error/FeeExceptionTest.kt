@@ -80,6 +80,21 @@ class FeeExceptionTest {
     }
 
     @Test
+    fun `a run not finished within the wait is a 504 naming the id and asking to resend`() {
+        // given
+        val transactionId = "txn_001"
+
+        // when
+        val exception = WorkflowTimeoutException(transactionId)
+
+        // then
+        assertThat(exception.status).isEqualTo(504)
+        assertThat(exception.code).isEqualTo(FeeErrorCode.WORKFLOW_TIMEOUT)
+        assertThat(exception.transactionId).isEqualTo("txn_001")
+        assertThat(exception.message).contains("'txn_001'").contains("still being processed").contains("Resend")
+    }
+
+    @Test
     fun `every kind of fee failure is a fee exception with its own code`() {
         // given
         val exceptions: List<FeeException> =
@@ -88,6 +103,7 @@ class FeeExceptionTest {
                 ValidationException("state", "PENDING", "Unsupported state 'PENDING'", ValidationException.Kind.UNSUPPORTED),
                 DuplicateTransactionException("txn_001"),
                 WorkflowUnavailableException(),
+                WorkflowTimeoutException("txn_001"),
             )
 
         // when
@@ -95,7 +111,7 @@ class FeeExceptionTest {
 
         // then
         assertThat(codes).containsExactlyElementsOf(FeeErrorCode.entries)
-        assertThat(exceptions.map { it.status }).containsExactly(400, 422, 409, 503)
+        assertThat(exceptions.map { it.status }).containsExactly(400, 422, 409, 503, 504)
         assertThat(exceptions).allSatisfy { assertThat(it).isInstanceOf(RuntimeException::class.java) }
     }
 
@@ -113,6 +129,7 @@ class FeeExceptionTest {
             entry("UNSUPPORTED_REQUEST", 422),
             entry("DUPLICATE_TRANSACTION", 409),
             entry("WORKFLOW_UNAVAILABLE", 503),
+            entry("WORKFLOW_TIMEOUT", 504),
         )
     }
 }

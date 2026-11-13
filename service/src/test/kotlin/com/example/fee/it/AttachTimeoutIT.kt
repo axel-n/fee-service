@@ -15,11 +15,11 @@ import java.util.concurrent.TimeUnit
 
 /**
  * A `POST` that outlasts `restate.attach-timeout` while its workflow is held inside its CALCULATE journaled step: Restate
- * answers 470 (not ready) for the run's output, so the `POST` answers 202 with the `IN_PROGRESS` status, and the record
- * claimed at CLAIM is `IN_PROGRESS`. Once the calculation is let go, resending the same payload returns the charged fee,
+ * answers 470 (not ready) for the run's output, so the `POST` answers 504 `WORKFLOW_TIMEOUT`, and the record claimed at
+ * CLAIM is `IN_PROGRESS`. Once the calculation is let go, resending the same payload returns the charged fee,
  * calculated once.
  */
-class InFlightStatusIT
+class AttachTimeoutIT
     @Autowired
     constructor(
         private val calculator: CountingFeeCalculator,
@@ -35,9 +35,9 @@ class InFlightStatusIT
         }
 
         @Test
-        fun `a POST that outlasts the attach timeout is 202 IN_PROGRESS and the resent payload gets the fee`() {
+        fun `a POST that outlasts the attach timeout is 504 WORKFLOW_TIMEOUT and the resent payload gets the fee`() {
             // given: the calculation of this transaction is held, and a request is on its way into it
-            val transactionId = "it-inflight-${UUID.randomUUID().toString().take(13)}"
+            val transactionId = "it-timeout-${UUID.randomUUID().toString().take(13)}"
             val request = validRequest(transactionId)
             calculator.block(transactionId)
             blockedIds += transactionId
@@ -46,30 +46,35 @@ class InFlightStatusIT
             assertThat(StoredWorkflows.step(request)).isEqualTo(WorkflowStep.CALCULATE)
 
             // when: the POST outlasts the attach timeout while CALCULATE is still blocked
-            val accepted = post.get(2, TimeUnit.MINUTES)
+            val timedOut = post.get(2, TimeUnit.MINUTES)
 
-            // then: 202 with the IN_PROGRESS status and no fee yet; the id is claimed
-            assertThat(accepted.status).describedAs("POST status, body %s", accepted.body).isEqualTo(202)
-            assertThat(accepted.body["transaction_id"].asText()).isEqualTo(transactionId)
-            assertThat(accepted.body["status"].asText()).isEqualTo("IN_PROGRESS")
-            assertThat(accepted.body.has("fee")).describedAs("fee present in %s", accepted.body).isFalse()
+            // then: a 504 problem naming the transaction, and no fee yet; the id is claimed
+            assertThat(timedOut.status).describedAs("POST status, body %s", timedOut.body).isEqualTo(504)
+            assertThat(timedOut.body["code"].asText()).isEqualTo("WORKFLOW_TIMEOUT")
+            assertThat(timedOut.body["transaction_id"].asText()).isEqualTo(transactionId)
+            assertThat(timedOut.body.has("fee")).describedAs("fee present in %s", timedOut.body).isFalse()
             assertThat(StoredFeeRecords.of(transactionId)?.status).isEqualTo(FeeRecordStatus.IN_PROGRESS)
 
             // when: the calculation is let go, the workflow finishes, and the same payload is sent again
             calculator.release(transactionId)
             awaitUntil("the workflow has returned") { StoredWorkflows.step(request) == WorkflowStep.DONE }
-            val completed = api.submit(bodyOf(request))
+            val charged = api.submit(bodyOf(request))
 
-            // then: the COMPLETED status with the charged fee
-            assertThat(completed.status).describedAs("POST status, body %s", completed.body).isEqualTo(200)
-            assertThat(completed.body["status"].asText()).isEqualTo("COMPLETED")
-            assertThat(completed.body["transaction_id"].asText()).isEqualTo(transactionId)
-            assertThat(completed.body["amount"].decimalValue()).isEqualByComparingTo(BigDecimal("1000"))
-            assertThat(completed.body["asset"].asText()).isEqualTo("USD")
-            assertThat(completed.body["type"].asText()).isEqualTo("Mobile Top Up")
-            assertThat(completed.body["fee"].decimalValue()).isEqualByComparingTo(BigDecimal("1.50"))
-            assertThat(completed.body["rate"].decimalValue()).isEqualByComparingTo(BigDecimal("0.0015"))
-            assertThat(completed.body["description"].asText()).isEqualTo("Standard fee rate of 0.15%")
+            // then: the charged fee, with exactly the fields of the requirements' expected response payload
+            assertThat(charged.status).describedAs("POST status, body %s", charged.body).isEqualTo(200)
+            assertThat(
+                charged.body
+                    .fieldNames()
+                    .asSequence()
+                    .toList(),
+            ).containsExactlyElementsOf(FeeApi.FEE_FIELDS)
+            assertThat(charged.body["transaction_id"].asText()).isEqualTo(transactionId)
+            assertThat(charged.body["amount"].decimalValue()).isEqualByComparingTo(BigDecimal("1000"))
+            assertThat(charged.body["asset"].asText()).isEqualTo("USD")
+            assertThat(charged.body["type"].asText()).isEqualTo("Mobile Top Up")
+            assertThat(charged.body["fee"].decimalValue()).isEqualByComparingTo(BigDecimal("1.50"))
+            assertThat(charged.body["rate"].decimalValue()).isEqualByComparingTo(BigDecimal("0.0015"))
+            assertThat(charged.body["description"].asText()).isEqualTo("Standard fee rate of 0.15%")
 
             // then: calculated once, and the record agrees
             assertThat(calculator.count(transactionId)).describedAs("CALCULATE executions").isEqualTo(1)

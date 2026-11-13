@@ -2,6 +2,7 @@ package com.example.fee.it
 
 import com.example.fee.record.FeeRecordStatus
 import org.assertj.core.api.Assertions.assertThat
+import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.CsvSource
 import org.springframework.beans.factory.annotation.Autowired
@@ -10,7 +11,8 @@ import java.math.BigDecimal
 import java.util.UUID
 
 /**
- * The happy path end to end: every transaction type in every supported asset goes through the real app and the shared
+ * The happy path end to end: the requirements' sample request gets exactly their expected response payload, and every
+ * transaction type in every supported asset goes through the real app and the shared
  * Restate (VALIDATE → MAP → CLAIM → CALCULATE → RECORD) and comes back charged with the packaged fees.
  */
 class HappyPathIT
@@ -20,6 +22,32 @@ class HappyPathIT
         @LocalServerPort apiPort: Int,
     ) : RestateIntegrationTest() {
         private val api = FeeApi(apiPort)
+
+        @Test
+        fun `the requirements' sample request gets exactly the expected response payload`() {
+            // given: the sample request payload of requirements.md, with an id of this run
+            val transactionId = "it-sample-${UUID.randomUUID().toString().take(13)}"
+            val request =
+                mapOf(
+                    "transaction_id" to transactionId,
+                    "amount" to 1_000,
+                    "asset" to "USD",
+                    "asset_type" to "FIAT",
+                    "type" to "Mobile Top Up",
+                    "state" to "SETTLED - PENDING FEE",
+                    "created_at" to "2023-08-30 15:42:17.610059",
+                )
+
+            // when
+            val response = api.submit(request)
+
+            // then: the expected response payload of requirements.md, as written
+            assertThat(response.status).describedAs("POST status, body %s", response.text).isEqualTo(200)
+            assertThat(response.text).isEqualTo(
+                """{"transaction_id":"$transactionId","amount":1000,"asset":"USD","type":"Mobile Top Up",""" +
+                    """"fee":1.5,"rate":0.0015,"description":"Standard fee rate of 0.15%"}""",
+            )
+        }
 
         @ParameterizedTest(name = "{0} {2} {1} → fee {3}")
         @CsvSource(
@@ -62,7 +90,7 @@ class HappyPathIT
             assertThat(response.status).describedAs("POST status, body %s", response.body).isEqualTo(200)
             val body = response.body
             assertThat(body["transaction_id"].asText()).isEqualTo(transactionId)
-            assertThat(body["status"].asText()).isEqualTo("COMPLETED")
+            assertThat(body.fieldNames().asSequence().toList()).containsExactlyElementsOf(FeeApi.FEE_FIELDS)
             assertThat(body["amount"].decimalValue()).isEqualByComparingTo(amount)
             assertThat(body["asset"].asText()).isEqualTo(asset)
             assertThat(body["type"].asText()).isEqualTo(type)

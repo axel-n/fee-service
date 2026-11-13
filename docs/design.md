@@ -25,17 +25,18 @@ Reference example (Mobile Top Up, 0.15%):
 Request                                     Response (200)
 {                                           {
   "transaction_id": "txn_001",                "transaction_id": "txn_001",
-                                              "status": "COMPLETED",
   "amount": 1000,                             "amount": 1000,
   "asset": "USD",                             "asset": "USD",
   "asset_type": "FIAT",                       "type": "Mobile Top Up",
-  "type": "Mobile Top Up",                    "fee": 1.50,
+  "type": "Mobile Top Up",                    "fee": 1.5,
   "state": "SETTLED - PENDING FEE",           "rate": 0.0015,
   "created_at": "2023-08-30 15:42:17.610059"  "description": "Standard fee rate of 0.15%"
 }                                           }
 ```
 
-`fee` is returned at the asset's scale (`1.50` equals the challenge's `1.5`).
+`fee` is answered without trailing zeros, as in the challenge's sample (`1.5`, `5`, `10.3`); the stored record keeps the
+asset's 2 decimals (`1.50`), the same value. When the run isn't finished within `restate.attach-timeout`, the answer is a 504
+problem (`WORKFLOW_TIMEOUT`); the same request sent again gets the fee once it is charged.
 
 ---
 
@@ -76,7 +77,7 @@ Spring app: TransactionFeeController → FeeService           (thin gateway, no 
    │  1. transaction_id present and well-formed?  (it is the workflow key; otherwise 400)
    │  2. submit FeeWorkflow/txn_001/run, then attach  (the id sent again gets PREVIOUSLY_ACCEPTED
    │     and the first run's result; no result within attach-timeout → ask Restate for the output once:
-   │     470 (not ready) → 202, the output → its result)
+   │     470 (not ready) → 504, the output → its result)
    ▼
 Restate server (external Docker) ── journals every step ───────────────────────────┐
    │ invokes the app's endpoint (port 9080)                                         │
@@ -102,7 +103,7 @@ services by calling that URL. The app can't find out how Restate reaches it (Res
 `host.docker.internal`), so the host is a setting; the port is the one the endpoint really got. `force` replaces a deployment
 with the same URL in place: it keeps its id, so a restart at the same URL resumes the invocations pinned to it, and a changed
 handler signature updates the services. The newest registration gets all new work. A failed registration fails startup, with
-the URL and the settings in the message: an app Restate can't reach would only ever answer 202.
+the URL and the settings in the message: an app Restate can't reach would only ever answer 504.
 
 **Shutdown.** The lifecycle closes the endpoint, then asks Restate how many invocations that haven't finished need its
 deployment: those pinned to it, and those of its services not started yet (they go to the newest deployment, which may be
@@ -139,30 +140,28 @@ com.example.fee
 │                                       init checks requiredRate / requiredAmount fail startup on a bad value
 │
 ├── api/                                HTTP only
-│   ├── TransactionFeeController.kt     POST /transaction/fee (200, or 202), answers FeeStatusResponse → calls only FeeService
-│   └── ApiExceptionHandler.kt          @RestControllerAdvice: FeeException (+ its `code`) and Spring MVC errors → ProblemDetail;
-│                                       FeeInProgressException → 202 + FeeStatusResponse IN_PROGRESS
+│   ├── TransactionFeeController.kt     POST /transaction/fee (200), answers FeeResponse → calls only FeeService
+│   └── ApiExceptionHandler.kt          @RestControllerAdvice: FeeException (+ its `code`, + `transaction_id` for 409 and 504) and
+│                                       Spring MVC errors → ProblemDetail
 │
 ├── contract/                           [api module] DTOs shared by HTTP and Restate (pure Kotlin + Jackson annotations, snake_case)
 │   ├── FeeRequest.kt                   all fields nullable; enums/dates as String, amount as BigDecimal. Journaled as the workflow input
-│   ├── FeeResponse.kt                  transaction_id, amount, asset, type, fee, rate, description. Stored permanently in TransactionFeeRecord;
-│   │                                   HTTP clients get it only inside FeeStatusResponse
-│   ├── FeeStatusResponse.kt            POST body: transaction_id, status, the FeeResponse fields once COMPLETED
-│   │                                   (HTTP only, never stored)
+│   ├── FeeResponse.kt                  transaction_id, amount, asset, type, fee, rate, description: the 200 body, exactly the
+│   │                                   requirements' Expected Response Payload. Stored permanently in TransactionFeeRecord
 │   ├── PlainBigDecimal.kt              @PlainBigDecimal: BigDecimal as a plain JSON number, with a serializer for each Jackson
 │   │                                   generation (3 for HTTP, 2 for Restate), bundled by @JacksonAnnotationsInside
 │   └── error/                          [api module] what the API answers instead of a fee
 │       ├── FeeException.kt             sealed, Spring-free: ValidationException(field, value, message, kind) (400/422), DuplicateTransactionException (409),
-│       │                               WorkflowUnavailableException (503);
+│       │                               WorkflowUnavailableException (503), WorkflowTimeoutException (504);
 │       │                               + FeeErrorCode: the problem's `code`, with its HTTP status. Gateway only: the workflow returns FeeOutcome
 │       │                               and never throws these
 │       └── FeeProblem.kt               the problem+json body as a client reads it; toException() rebuilds the FeeException from the `code`
 │
 ├── application/                        thin gateway to Restate
 │   └── FeeService.kt                   FeeService: transaction_id pre-check → submit/attach FeeWorkflow/{transaction_id} (bounded by attachTimeout) → FeeOutcome →
-│                                       FeeStatusResponse COMPLETED (200) or FeeException (a ValidationError becomes a ValidationException here);
-│                                       FeeInProgressException(transactionId): no result within attachTimeout and Restate answers 470
-│                                       (not ready) for the run's output → 202 (not a FeeException)
+│                                       FeeResponse (200, the fee without trailing zeros) or FeeException (a ValidationError becomes a
+│                                       ValidationException here); no result within attachTimeout and Restate answers 470 (not ready)
+│                                       for the run's output → WorkflowTimeoutException (504)
 │
 ├── validation/                         executed inside the workflow
 │   ├── TransactionValidator.kt         interface validate(request): ValidationError? + ValidationOrder: `const val`s spaced by 100
@@ -267,8 +266,8 @@ TransactionFeeController (suspend) ──▶ FeeService (only)
 FeeService (suspend; the attach waits at most restate.attach-timeout)
   ├─▶ TransactionIdValidator.validate(request)   key pre-check only (400 if bad): the transaction_id is the workflow key
   ├─▶ FeeWorkflowClients.submit(transaction_id, request) → FeeWorkflowRun.attach()  (also when PREVIOUSLY_ACCEPTED)
-  │     attach-timeout reached → FeeWorkflowRun.output(); Restate's 470 → throw FeeInProgressException
-  └─▶ FeeOutcome → FeeStatusResponse | throw FeeException
+  │     attach-timeout reached → FeeWorkflowRun.output(); Restate's 470 → throw WorkflowTimeoutException (504)
+  └─▶ FeeOutcome → FeeResponse (fee without trailing zeros) | throw FeeException
 
   ─ ─ ─ ─ Restate server (external) invokes the app's endpoint (port 9080) ─ ─ ─ ─
 
@@ -333,7 +332,7 @@ because a restart is enough.
 | `restate.admin-url` | `RESTATE_ADMIN_URL` | Restate's admin API, where the endpoint is registered at startup and removed at shutdown |
 | `restate.endpoint-port` | `RESTATE_ENDPOINT_PORT` | port the Restate endpoint listens on (0: the OS picks one); the registered URL takes the port it really got |
 | `restate.advertised-host` | `RESTATE_ADVERTISED_HOST` | host Restate reaches the endpoint at: `localhost` by default, `host.docker.internal` in the local profile, `dev` in the dev container |
-| `restate.attach-timeout` | `RESTATE_ATTACH_TIMEOUT` | how long `POST` waits for the result; then it answers 202 only if Restate reports the run as not finished (470) |
+| `restate.attach-timeout` | `RESTATE_ATTACH_TIMEOUT` | how long `POST` waits for the result (30 s by default); then it answers 504 only if Restate reports the run as not finished (470) |
 | `fee.<type>.rate`, `.min`, `.fixed` | (use a file) | fee numbers per transaction type, see the [fee table](#fee-table) |
 | `spring.mvc.async.request-timeout` | (fixed at `0`) | off: the controller is a `suspend` function served asynchronously, and `FeeService` bounds the wait for the result by `restate.attach-timeout`. Tomcat's own 30 s would cut a longer attach timeout short |
 

@@ -19,10 +19,14 @@ class FeeApi(
     host: String = "localhost",
     private val timeout: Duration = Duration.ofSeconds(60),
 ) {
-    /** A response: its status code and its body as JSON. */
+    /**
+     * A response: its status code, its body as JSON, and the body's [text] as sent. Only the text shows exactly how a number
+     * was written (`1.5` or `1.50`): the JSON tree normalizes decimals.
+     */
     data class Response(
         val status: Int,
         val body: JsonNode,
+        val text: String,
     )
 
     private val root = "http://$host:$port"
@@ -43,11 +47,14 @@ class FeeApi(
 
     private fun send(request: HttpRequest.Builder): Response {
         val response = http.send(request.timeout(timeout).build(), HttpResponse.BodyHandlers.ofString())
-        return Response(response.statusCode(), mapper.readTree(response.body()))
+        return Response(response.statusCode(), mapper.readTree(response.body()), response.body())
     }
 
     companion object {
         /** The path of the fee API. */
         const val FEE_PATH = "/transaction/fee"
+
+        /** The fields of a charged fee's body, in the order of the requirements' Expected Response Payload. */
+        val FEE_FIELDS = listOf("transaction_id", "amount", "asset", "type", "fee", "rate", "description")
     }
 }

@@ -31,7 +31,7 @@ import kotlin.io.path.name
  * The packaged app (`java -jar`) in a container next to a Restate container of its own, on a private network, as both
  * run in production: the app reaches Restate as `restate`, Restate reaches the app at its network alias `fee-service`, and
  * no host alias of the machine is involved. It shows that the app connects to Restate when it starts, disconnects when it
- * stops gracefully, and that a run submitted while the app is down waits (Restate answers 470, so the API answers 202)
+ * stops gracefully, and that a run submitted while the app is down waits (Restate answers 470, so the API answers 504)
  * and finishes once the app is back at the same URL.
  *
  * Its own Restate, not [RestateTestEnvironment]'s: an app registered there would be the newest deployment and take the
@@ -61,7 +61,12 @@ class AppContainerIT {
         // then
         assertThat(admin.deployments().map { it.uri }).containsExactly("$ADVERTISED_URL/")
         assertThat(response.status).describedAs("POST status, body %s", response.body).isEqualTo(200)
-        assertThat(response.body["status"].asText()).isEqualTo("COMPLETED")
+        assertThat(
+            response.body
+                .fieldNames()
+                .asSequence()
+                .toList(),
+        ).containsExactlyElementsOf(FeeApi.FEE_FIELDS)
         assertThat(response.body["fee"].decimalValue()).isEqualByComparingTo(BigDecimal("1.50"))
     }
 
@@ -107,7 +112,7 @@ class AppContainerIT {
         val sent = ingress("POST", "/FeeWorkflow/$transactionId/run/send", body(transactionId, "Mobile Top Up"))
         assertThat(sent.statusCode()).describedAs("send status, body %s", sent.body()).isIn(200, 202)
 
-        // then: Restate retries the run and reports it as not finished, 470, which the API answers with 202
+        // then: Restate retries the run and reports it as not finished, 470, which the API answers with 504
         awaitUntil("Restate retries the run") { runStatus(transactionId) == "backing-off" }
         assertThat(ingress("GET", "/restate/workflow/FeeWorkflow/$transactionId/output").statusCode()).isEqualTo(470)
 

@@ -81,8 +81,8 @@ class EndpointRestartIT
             assertThat((outcome as FeeOutcome.Charged).response.fee).isEqualByComparingTo(BigDecimal("1.50"))
             assertThat(StoredWorkflows.step(request)).isEqualTo(WorkflowStep.DONE)
 
-            // then: the first caller got the result, or a 202 if the restart outlasted the attach timeout
-            assertThat(first.status).describedAs("first POST status, body %s", first.body).isIn(200, 202)
+            // then: the first caller got the result, or a 504 if the restart outlasted the attach timeout
+            assertThat(first.status).describedAs("first POST status, body %s", first.body).isIn(200, 504)
             if (first.status == 200) {
                 assertThat(first.body["fee"].decimalValue()).isEqualByComparingTo(BigDecimal("1.50"))
             }

@@ -34,7 +34,7 @@ class RestateProperties(
     val advertisedHost: String = host("advertised-host", advertisedHost)
 
     /**
-     * How long `POST /transaction/fee` waits for the workflow's result. Then it asks Restate once more, and answers 202
+     * How long `POST /transaction/fee` waits for the workflow's result. Then it asks Restate once more, and answers 504
      * only if Restate says the run hasn't finished (470).
      */
     val attachTimeout: Duration = positive("attach-timeout", attachTimeout)

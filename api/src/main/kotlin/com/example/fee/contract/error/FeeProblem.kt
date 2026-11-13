@@ -42,6 +42,7 @@ data class FeeProblem(
             FeeErrorCode.UNSUPPORTED_REQUEST -> validation(ValidationException.Kind.UNSUPPORTED)
             FeeErrorCode.DUPLICATE_TRANSACTION -> transactionId?.let { DuplicateTransactionException(it) }
             FeeErrorCode.WORKFLOW_UNAVAILABLE -> WorkflowUnavailableException()
+            FeeErrorCode.WORKFLOW_TIMEOUT -> transactionId?.let { WorkflowTimeoutException(it) }
             null -> null
         }
 
