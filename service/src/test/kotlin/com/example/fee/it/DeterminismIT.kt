@@ -141,18 +141,16 @@ class DeterminismIT
 
         private fun format(instant: Instant): String = CREATED_AT_FORMAT.format(instant.atOffset(ZoneOffset.UTC))
 
-        private fun request(
-            transactionId: String,
-            createdAt: String,
-        ) = FeeRequest(
-            transactionId = transactionId,
-            amount = BigDecimal("1000"),
-            asset = "USD",
-            assetType = "FIAT",
-            type = "Mobile Top Up",
-            state = "SETTLED - PENDING FEE",
-            createdAt = createdAt,
-        )
+        private fun request(transactionId: String, createdAt: String) =
+            FeeRequest(
+                transactionId = transactionId,
+                amount = BigDecimal("1000"),
+                asset = "USD",
+                assetType = "FIAT",
+                type = "Mobile Top Up",
+                state = "SETTLED - PENDING FEE",
+                createdAt = createdAt,
+            )
 
         private fun bodyOf(request: FeeRequest): Map<String, Any?> =
             mapOf(

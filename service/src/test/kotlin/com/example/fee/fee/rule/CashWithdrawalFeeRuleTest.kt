@@ -41,10 +41,7 @@ class CashWithdrawalFeeRuleTest {
         "USD, Flat fee of 2.00 USD",
         "EUR, Flat fee of 2.00 EUR",
     )
-    fun `describes the flat fee in the transaction's asset`(
-        asset: Asset,
-        expected: String,
-    ) {
+    fun `describes the flat fee in the transaction's asset`(asset: Asset, expected: String) {
         // given
         val tx = transaction("1000", asset, TransactionType.CASH_WITHDRAWAL)
 

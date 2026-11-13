@@ -2,7 +2,9 @@ Feature: Idempotency
   A transaction is keyed by its transaction_id: Restate runs one workflow per transaction_id, and every submission of
   that id, one call after the other or by several callers at once, attaches to that run. The first payload Restate
   receives is the one processed and charged, once, and every caller gets that run's response, whatever payload it sent.
-  (A rejection is the id's answer in the same way: see transaction_state.feature.)
+  Once charged, the id is answered from the app's cache or Postgres without Restate, with the same response, and
+  Postgres holds one fee record per id. (A rejection is the id's answer while Restate keeps the run: see
+  transaction_state.feature.)
 
   Scenario: The same payload sent twice gets the same response and is charged once
     Given a "Mobile Top Up" transaction "txn_401" of 1000 "USD" "FIAT" in state "SETTLED - PENDING FEE"

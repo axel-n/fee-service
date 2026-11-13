@@ -25,16 +25,22 @@ class TestCoverageAuditTest {
     )
 
     // Keyed by "<module>/<path below src/main/kotlin/com/example/fee>", tests by the same form below src/test. Each
-    // listed test must exist and name the symbol, so an entry can't silently outlive the test it points to. Empty, because
-    // an interface or a type without logic shares the file (and so the test file) of the type it serves.
-    private val coveredElsewhere = emptyMap<String, CoveredElsewhere>()
+    // listed test must exist and name the symbol, so an entry can't silently outlive the test it points to. An interface
+    // or a type without logic shares the file (and so the test file) of the type it serves, so only the entry point is here.
+    private val coveredElsewhere =
+        mapOf(
+            "service/FeeServiceApplication.kt" to
+                CoveredElsewhere(
+                    symbol = "FeeServiceApplication",
+                    tests = listOf("service/it/DatabaseStartupIT.kt"),
+                    reason = "the entry point holds no logic; DatabaseStartupIT starts it, and every other IT boots it",
+                ),
+        )
 
     private val modules = listOf("api", "service")
 
-    private fun sourceRoot(
-        module: String,
-        sourceSet: String,
-    ): Path = ProjectLayout.rootDir.resolve("$module/src/$sourceSet/kotlin/com/example/fee")
+    private fun sourceRoot(module: String, sourceSet: String): Path =
+        ProjectLayout.rootDir.resolve("$module/src/$sourceSet/kotlin/com/example/fee")
 
     // "<module>/<path>" of every Kotlin file of the source set ("main" or "test"), in every module
     private fun kotlinFiles(sourceSet: String): List<String> =
@@ -51,10 +57,7 @@ class TestCoverageAuditTest {
 
     private fun testFile(file: String): Path = sourceRoot(file.substringBefore('/'), "test").resolve(file.substringAfter('/'))
 
-    private fun hasOwnTest(
-        productionFile: String,
-        testFiles: List<String>,
-    ): Boolean {
+    private fun hasOwnTest(productionFile: String, testFiles: List<String>): Boolean {
         val name = Path.of(productionFile).nameWithoutExtension
         val ownTest = productionFile.removeSuffix(".kt") + "Test.kt"
         return ownTest in testFiles || testFiles.any { Path.of(it).fileName.toString() == "${name}IT.kt" }

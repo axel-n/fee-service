@@ -16,10 +16,7 @@ class TransactionTypeTest {
         "Merchant Payment, MERCHANT_PAYMENT",
         "Cash Withdrawal, CASH_WITHDRAWAL",
     )
-    fun `parses the request value of every type`(
-        raw: String,
-        expected: TransactionType,
-    ) {
+    fun `parses the request value of every type`(raw: String, expected: TransactionType) {
         // given
         val input = raw
 

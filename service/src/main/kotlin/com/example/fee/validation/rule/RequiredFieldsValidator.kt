@@ -32,10 +32,7 @@ class RequiredFieldsValidator : TransactionValidator {
             "created_at" to request.createdAt,
         )
 
-    private fun missing(
-        field: String,
-        raw: String?,
-    ): ValidationError {
+    private fun missing(field: String, raw: String?): ValidationError {
         val message =
             if (raw == null) {
                 "Field '$field' is required"

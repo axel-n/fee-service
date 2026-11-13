@@ -42,7 +42,7 @@ class PackagedConfigurationTest {
         val port = Binder.get(environment).bind("server.port", Int::class.java).get()
 
         // then
-        assertThat(port).isEqualTo(8081)
+        assertThat(port).isEqualTo(8_081)
     }
 
     @Test
@@ -54,7 +54,7 @@ class PackagedConfigurationTest {
         val port = Binder.get(environment).bind("server.port", Int::class.java).get()
 
         // then
-        assertThat(port).isEqualTo(9999)
+        assertThat(port).isEqualTo(9_999)
     }
 
     @ParameterizedTest(name = "{0} defaults to {1}")
@@ -65,10 +65,7 @@ class PackagedConfigurationTest {
         "restate.advertised-host, localhost",
         "restate.attach-timeout, 30s",
     )
-    fun `restate setting has its packaged default when no variable is set`(
-        key: String,
-        expected: String,
-    ) {
+    fun `restate setting has its packaged default when no variable is set`(key: String, expected: String) {
         // given
         val environment = environment()
 
@@ -87,11 +84,7 @@ class PackagedConfigurationTest {
         "restate.advertised-host, RESTATE_ADVERTISED_HOST, dev",
         "restate.attach-timeout, RESTATE_ATTACH_TIMEOUT, 45s",
     )
-    fun `restate setting is overridden by its readable environment variable`(
-        key: String,
-        variable: String,
-        override: String,
-    ) {
+    fun `restate setting is overridden by its readable environment variable`(key: String, variable: String, override: String) {
         // given
         val environment = environment(mapOf(variable to override))
 
@@ -127,8 +120,44 @@ class PackagedConfigurationTest {
         val attachTimeout = binder.bind("restate.attach-timeout", Duration::class.java).get()
 
         // then
-        assertThat(endpointPort).isEqualTo(9080)
+        assertThat(endpointPort).isEqualTo(9_080)
         assertThat(attachTimeout).isEqualTo(Duration.ofSeconds(30))
+    }
+
+    @ParameterizedTest(name = "{0} defaults to {2}, {1} overrides it")
+    @CsvSource(
+        "spring.r2dbc.url, DATABASE_URL, r2dbc:postgresql://localhost:5432/fee, r2dbc:postgresql://postgres:5432/fee",
+        "spring.r2dbc.username, DATABASE_USERNAME, fee, fee_app",
+        "spring.r2dbc.password, DATABASE_PASSWORD, fee, secret",
+    )
+    fun `database setting has the dev default and is overridden by its readable environment variable`(
+        key: String,
+        variable: String,
+        default: String,
+        override: String,
+    ) {
+        // given
+        val packaged = environment()
+        val overridden = environment(mapOf(variable to override))
+
+        // when
+        val values = listOf(packaged.getProperty(key), overridden.getProperty(key))
+
+        // then
+        assertThat(values).containsExactly(default, override)
+    }
+
+    @Test
+    fun `schema_sql runs at every start, which also fails startup when the database can't be reached`() {
+        // given
+        val environment = environment()
+
+        // when
+        val mode = environment.getProperty("spring.sql.init.mode")
+
+        // then
+        assertThat(mode).isEqualTo("always")
+        assertThat(ClassPathResource("schema.sql").exists()).isTrue()
     }
 
     @Test

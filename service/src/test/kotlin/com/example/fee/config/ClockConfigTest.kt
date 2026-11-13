@@ -1,18 +1,18 @@
-package com.example.fee
+package com.example.fee.config
 
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import java.time.Instant
 import java.time.ZoneOffset
 
-class FeeServiceApplicationTest {
+class ClockConfigTest {
     @Test
     fun `clock bean uses UTC whatever the host zone is`() {
         // given
-        val application = FeeServiceApplication()
+        val config = ClockConfig()
 
         // when
-        val clock = application.clock()
+        val clock = config.clock()
 
         // then
         assertThat(clock.zone).isEqualTo(ZoneOffset.UTC)
@@ -21,7 +21,7 @@ class FeeServiceApplicationTest {
     @Test
     fun `clock bean follows the system time`() {
         // given
-        val clock = FeeServiceApplication().clock()
+        val clock = ClockConfig().clock()
         val before = Instant.now()
 
         // when

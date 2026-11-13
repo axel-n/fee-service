@@ -1,5 +1,5 @@
-# The local profile: the app runs on this machine (IDE or mvn spring-boot:run), only Restate runs in Docker or Podman,
-# started as in the README ("Run"). Activate it with the profile "local" in the IDE, or
+# The local profile: the app runs on this machine (IDE or mvn spring-boot:run), only Restate and Postgres run in Docker or
+# Podman, started as in the README ("Run"). Activate it with the profile "local" in the IDE, or
 # mvn spring-boot:run -Dspring-boot.run.profiles=local. Everything not set here keeps its packaged default, and every
 # RESTATE_* variable still overrides it: a plain value here would hide the variable's placeholder in application.yml.
 

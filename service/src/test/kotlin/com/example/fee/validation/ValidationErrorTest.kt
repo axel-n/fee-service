@@ -103,10 +103,7 @@ class UnsupportedValueTest {
 class ValueDisplayTest {
     @ParameterizedTest(name = "{0} is shown as {1}")
     @CsvSource("1E+3, 1000", "-1.50, -1.50", "0E-4, 0.0000", "-5, -5")
-    fun `shows an amount as a plain number keeping its scale`(
-        raw: String,
-        expected: String,
-    ) {
+    fun `shows an amount as a plain number keeping its scale`(raw: String, expected: String) {
         // given
         val amount = BigDecimal(raw)
 

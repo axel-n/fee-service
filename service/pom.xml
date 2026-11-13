@@ -46,6 +46,29 @@
             <groupId>dev.restate</groupId>
             <artifactId>sdk-serde-jackson</artifactId>
         </dependency>
+        <!-- The fee records in PostgreSQL, non-blocking: DatabaseClient and TransactionalOperator with their coroutine
+             extensions, and schema.sql run at every start -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-r2dbc</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.postgresql</groupId>
+            <artifactId>r2dbc-postgresql</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+        <!-- The connection pool: Boot pools R2DBC connections only when it is on the classpath, otherwise every
+             statement and transaction opens a new connection to Postgres -->
+        <dependency>
+            <groupId>io.r2dbc</groupId>
+            <artifactId>r2dbc-pool</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+        <!-- The local cache of charged fees in FeeService -->
+        <dependency>
+            <groupId>com.github.ben-manes.caffeine</groupId>
+            <artifactId>caffeine</artifactId>
+        </dependency>
 
         <!-- ContractMapper, for the tests of the durable types -->
         <dependency>

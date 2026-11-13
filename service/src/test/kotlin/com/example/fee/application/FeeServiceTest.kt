@@ -1,5 +1,6 @@
 package com.example.fee.application
 
+import com.example.fee.config.FeeCacheProperties
 import com.example.fee.config.RestateProperties
 import com.example.fee.contract.FeeRequest
 import com.example.fee.contract.FeeResponse
@@ -7,11 +8,15 @@ import com.example.fee.contract.error.DuplicateTransactionException
 import com.example.fee.contract.error.ValidationException
 import com.example.fee.contract.error.WorkflowTimeoutException
 import com.example.fee.contract.error.WorkflowUnavailableException
+import com.example.fee.record.FeeRecord
+import com.example.fee.record.InMemoryFeeRecordRepository
 import com.example.fee.restate.FeeWorkflowClients
 import com.example.fee.restate.FeeWorkflowRun
 import com.example.fee.validation.ValidationError
 import com.example.fee.validation.rule.TransactionIdValidator
 import com.example.fee.workflow.FeeOutcome
+import com.github.benmanes.caffeine.cache.Cache
+import com.github.benmanes.caffeine.cache.Caffeine
 import dev.restate.client.IngressException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
@@ -21,6 +26,7 @@ import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.assertj.core.api.ThrowableAssert.ThrowingCallable
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.Timeout
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.CsvSource
 import org.springframework.http.HttpStatus
@@ -56,29 +62,35 @@ class FeeServiceTest {
     // with equals, so it tells 1.5 from 1.50.
     private val answered = response.copy(fee = BigDecimal("1.5"))
 
-    private fun service(
-        clients: FeeWorkflowClients,
-        attachTimeout: Duration = Duration.ofSeconds(5),
-    ) = FeeService(
-        TransactionIdValidator(),
-        clients,
+    private val records = InMemoryFeeRecordRepository()
+
+    private val cache: Cache<String, FeeResponse> = Caffeine.newBuilder().build()
+
+    private fun service(clients: FeeWorkflowClients, attachTimeout: Duration = Duration.ofSeconds(5)) =
+        FeeService(
+            TransactionIdValidator(),
+            ChargedFees(cache, records, cacheProperties()),
+            clients,
+            restateProperties(attachTimeout),
+        )
+
+    private fun restateProperties(attachTimeout: Duration = Duration.ofSeconds(5)) =
         RestateProperties(
             ingressUrl = "http://localhost:8080",
             adminUrl = "http://localhost:9070",
-            endpointPort = 9080,
+            endpointPort = 9_080,
             advertisedHost = "localhost",
             attachTimeout = attachTimeout,
-        ),
-    )
+        )
+
+    private fun cacheProperties(lookupTimeout: Duration = Duration.ofSeconds(1)) =
+        FeeCacheProperties(maximumSize = 1_000, expireAfterWrite = Duration.ofDays(1), lookupTimeout = lookupTimeout)
 
     private fun ingressDown(): IngressException =
         IngressException("Error when executing the request", "POST", "http://localhost:8080", -1, null, ConnectException())
 
     // Runs submit in a coroutine; a failure comes back as the exception, so assertThatThrownBy can inspect it
-    private fun submitting(
-        service: FeeService,
-        request: FeeRequest,
-    ) = ThrowingCallable { runBlocking { service.submit(request) } }
+    private fun submitting(service: FeeService, request: FeeRequest) = ThrowingCallable { runBlocking { service.submit(request) } }
 
     @Test
     fun `a charged outcome answers the workflow's response with the fee as in the requirements' sample`() =
@@ -95,20 +107,18 @@ class FeeServiceTest {
 
     @ParameterizedTest(name = "stored {0} → answered {1}")
     @CsvSource("1.50, 1.5", "10.30, 10.3", "2.00, 2", "50.00, 50", "1.01, 1.01", "0.38, 0.38", "0.00, 0")
-    fun `answers the charged fee without trailing zeros, at the same value`(
-        stored: BigDecimal,
-        expected: String,
-    ) = runBlocking<Unit> {
-        // given
-        val clients = FakeClients(attach = { FeeOutcome.Charged(response.copy(fee = stored)) })
+    fun `answers the charged fee without trailing zeros, at the same value`(stored: BigDecimal, expected: String) =
+        runBlocking<Unit> {
+            // given
+            val clients = FakeClients(attach = { FeeOutcome.Charged(response.copy(fee = stored)) })
 
-        // when
-        val fee = service(clients).submit(request).fee
+            // when
+            val fee = service(clients).submit(request).fee
 
-        // then
-        assertThat(fee.toPlainString()).isEqualTo(expected)
-        assertThat(fee).isEqualByComparingTo(stored)
-    }
+            // then
+            assertThat(fee.toPlainString()).isEqualTo(expected)
+            assertThat(fee).isEqualByComparingTo(stored)
+        }
 
     @Test
     fun `submits the request as sent to the workflow keyed by its transaction id`() =
@@ -124,18 +134,155 @@ class FeeServiceTest {
         }
 
     @Test
-    fun `a changed payload with the same transaction id goes to the same workflow`() =
+    fun `a changed payload with the same transaction id that isn't charged goes to the same workflow`() {
+        // given: the first run rejected it, so nothing is charged
+        val error = ValidationError("state", "PENDING", "Unsupported state 'PENDING'", ValidationError.Kind.UNSUPPORTED)
+        val clients = FakeClients(attach = { FeeOutcome.Rejected(error) })
+        val service = service(clients)
+
+        // when
+        runCatching { runBlocking { service.submit(request.copy(state = "PENDING")) } }
+        runCatching { runBlocking { service.submit(request) } }
+
+        // then
+        assertThat(clients.submitted.map { it.first }).containsExactly("txn_001", "txn_001")
+    }
+
+    @Test
+    fun `a charged transaction id is answered from the cache without asking Postgres or Restate, whatever its payload`() =
+        runBlocking<Unit> {
+            // given
+            cache.put("txn_001", response)
+            val clients = FakeClients(attach = { error("Restate must not be called") })
+
+            // when
+            val submission = service(clients).submit(request.copy(amount = BigDecimal("2000")))
+
+            // then
+            assertThat(submission).isEqualTo(answered)
+            assertThat(records.calls).isEmpty()
+            assertThat(clients.submitted).isEmpty()
+        }
+
+    @Test
+    fun `a charged transaction id missing from the cache is answered from Postgres without Restate, and cached`() =
+        runBlocking<Unit> {
+            // given: charged earlier, by this instance before a restart or by another one
+            records.records["txn_001"] = FeeRecord.inProgress("earlier-run").complete(response)
+            val clients = FakeClients(attach = { error("Restate must not be called") })
+
+            // when
+            val submission = service(clients).submit(request)
+
+            // then
+            assertThat(submission).isEqualTo(answered)
+            assertThat(clients.submitted).isEmpty()
+            assertThat(cache.getIfPresent("txn_001")).isEqualTo(response)
+        }
+
+    @Test
+    fun `a transaction id claimed but not charged yet goes to Restate`() =
+        runBlocking<Unit> {
+            // given: a run holds the claim and is still going
+            records.records["txn_001"] = FeeRecord.inProgress("running")
+            val clients = FakeClients(attach = { FeeOutcome.Charged(response) })
+
+            // when
+            val submission = service(clients).submit(request)
+
+            // then
+            assertThat(submission).isEqualTo(answered)
+            assertThat(clients.submitted).containsExactly("txn_001" to request)
+        }
+
+    @Test
+    fun `a charge from Restate is remembered, so the same transaction id sent again doesn't reach Restate`() =
         runBlocking<Unit> {
             // given
             val clients = FakeClients(attach = { FeeOutcome.Charged(response) })
             val service = service(clients)
+            service.submit(request)
 
             // when
-            service.submit(request)
-            service.submit(request.copy(amount = BigDecimal("2000")))
+            val again = service.submit(request.copy(amount = BigDecimal("2000")))
 
             // then
-            assertThat(clients.submitted.map { it.first }).containsExactly("txn_001", "txn_001")
+            assertThat(again).isEqualTo(answered)
+            assertThat(clients.submitted).hasSize(1)
+            assertThat(cache.getIfPresent("txn_001")).isEqualTo(response)
+        }
+
+    @Test
+    fun `a conflict is not remembered`() {
+        // given
+        val clients = FakeClients(attach = { FeeOutcome.Conflict("txn_001") })
+
+        // when
+        runCatching { runBlocking { service(clients).submit(request) } }
+
+        // then
+        assertThat(cache.asMap()).isEmpty()
+    }
+
+    @Test
+    fun `a run not finished in time is not remembered`() {
+        // given
+        val clients = FakeClients(attach = { awaitCancellation() }, output = { null })
+
+        // when
+        runCatching { runBlocking { service(clients, attachTimeout = Duration.ofMillis(50)).submit(request) } }
+
+        // then
+        assertThat(cache.asMap()).isEmpty()
+    }
+
+    @Test
+    fun `a rejection is not remembered`() {
+        // given
+        val error = ValidationError("state", "PENDING", "Unsupported state 'PENDING'", ValidationError.Kind.UNSUPPORTED)
+        val clients = FakeClients(attach = { FeeOutcome.Rejected(error) })
+
+        // when
+        runCatching { runBlocking { service(clients).submit(request) } }
+
+        // then
+        assertThat(cache.asMap()).isEmpty()
+    }
+
+    @Test
+    fun `a failed Postgres lookup leaves the answer to Restate`() =
+        runBlocking<Unit> {
+            // given
+            val failingRecords =
+                InMemoryFeeRecordRepository(failing = mapOf("findCharged" to IllegalStateException("database unreachable")))
+            val clients = FakeClients(attach = { FeeOutcome.Charged(response) })
+            val service =
+                FeeService(TransactionIdValidator(), ChargedFees(cache, failingRecords, cacheProperties()), clients, restateProperties())
+
+            // when
+            val submission = service.submit(request)
+
+            // then
+            assertThat(submission).isEqualTo(answered)
+            assertThat(clients.submitted).containsExactly("txn_001" to request)
+        }
+
+    @Test
+    @Timeout(10)
+    fun `a Postgres lookup that hangs leaves the answer to Restate once the lookup timeout passed`() =
+        runBlocking<Unit> {
+            // given: a database that never answers
+            val hangingRecords = InMemoryFeeRecordRepository(hanging = setOf("findCharged"))
+            val clients = FakeClients(attach = { FeeOutcome.Charged(response) })
+            val chargedFees = ChargedFees(cache, hangingRecords, cacheProperties(lookupTimeout = Duration.ofMillis(50)))
+            val service = FeeService(TransactionIdValidator(), chargedFees, clients, restateProperties())
+
+            // when
+            val submission = service.submit(request)
+
+            // then
+            assertThat(submission).isEqualTo(answered)
+            assertThat(clients.submitted).containsExactly("txn_001" to request)
         }
 
     @Test
@@ -346,10 +493,7 @@ class FeeServiceTest {
         /** Completed once an attach started waiting. */
         val attaching = CompletableDeferred<Unit>()
 
-        override suspend fun submit(
-            transactionId: String,
-            request: FeeRequest,
-        ): FeeWorkflowRun {
+        override suspend fun submit(transactionId: String, request: FeeRequest): FeeWorkflowRun {
             submitted += transactionId to request
             submit()
             return object : FeeWorkflowRun {

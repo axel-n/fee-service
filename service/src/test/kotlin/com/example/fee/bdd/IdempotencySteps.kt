@@ -34,20 +34,14 @@ class IdempotencySteps(
 
     /** [callers] threads post the same request, released together by one gate so the requests reach the app at once. */
     @When("{int} callers submit the transaction to {string} at the same time")
-    fun callersSubmitAtTheSameTime(
-        callers: Int,
-        path: String,
-    ) {
+    fun callersSubmitAtTheSameTime(callers: Int, path: String) {
         val request = fee.request()
         submitTogether(path, List(callers) { request })
     }
 
     /** Like [callersSubmitAtTheSameTime], but caller `i` adds `i` to the amount: one transaction, different payloads. */
     @When("{int} callers submit the transaction to {string} at the same time, each with its own amount")
-    fun callersSubmitWithTheirOwnAmount(
-        callers: Int,
-        path: String,
-    ) {
+    fun callersSubmitWithTheirOwnAmount(callers: Int, path: String) {
         val request = fee.request()
         val amount = request["amount"] as? BigDecimal ?: error("The transaction has no amount to vary: $request")
         submitTogether(path, List(callers) { request + ("amount" to amount + BigDecimal(it)) })
@@ -91,10 +85,7 @@ class IdempotencySteps(
 
     // Each body on its own thread, all waiting on one gate. The pool is shut down once they are on their way, which
     // lets them finish; the gate opens in any case, so a failed start can't leave a thread waiting on it
-    private fun submitTogether(
-        path: String,
-        bodies: List<Map<String, Any?>>,
-    ) {
+    private fun submitTogether(path: String, bodies: List<Map<String, Any?>>) {
         val executor = Executors.newFixedThreadPool(bodies.size)
         val gate = CountDownLatch(1)
         val ready = CountDownLatch(bodies.size)

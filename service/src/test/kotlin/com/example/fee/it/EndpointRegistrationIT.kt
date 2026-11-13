@@ -31,7 +31,7 @@ class EndpointRegistrationIT
 
             // then
             assertThat(deployment).describedAs("deployments %s", admin.deployments()).isNotNull()
-            assertThat(checkNotNull(deployment).services.keys).contains("FeeWorkflow", "TransactionFeeRecord")
+            assertThat(checkNotNull(deployment).services.keys).containsExactly("FeeWorkflow")
         }
 
         @Test
@@ -57,7 +57,11 @@ class EndpointRegistrationIT
 
         private fun unfinishedInvocations(): Long =
             admin
-                .query("SELECT count(*) AS unfinished FROM sys_invocation WHERE status <> 'completed'")
+                .query(UNFINISHED_INVOCATIONS)
                 .single()["unfinished"]
                 .asLong()
+
+        private companion object {
+            const val UNFINISHED_INVOCATIONS = "SELECT count(*) AS unfinished FROM sys_invocation WHERE status <> 'completed'"
+        }
     }

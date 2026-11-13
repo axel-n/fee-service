@@ -11,7 +11,7 @@ POST /transaction/fee          → 200 with the fee (or 504 when it is not charg
 - [Design](docs/design.md): goal, fee table, how Restate is used, class design, wiring, call graph, guarantees
 - [Demo](docs/demo.md): curl commands with their expected responses: the requirements' sample, the same id again,
   the other transaction types, an unknown type
-- [Dev environment](dev-setup/README.md): the dev Restate and the dev container (`podman compose`)
+- [Dev environment](dev-setup/README.md): the dev Restate, the dev Postgres and the dev container (`podman compose`)
 - [How AI is used](docs/ai-usage.md): what every session reads, the gate, what a person decides
 
 ## What it does
@@ -22,13 +22,14 @@ POST /transaction/fee          → 200 with the fee (or 504 when it is not charg
    an amount up to 3,000,000,000),
 2. **claims** the `transaction_id`, so one transaction is charged at most once, whatever the payloads and callers,
 3. **calculates** the fee with the rule of the transaction's type,
-4. **charges and records** the fee: it is stored permanently in Restate state as the transaction's charged fee.
+4. **charges and records** the fee: it is stored permanently in PostgreSQL as the transaction's charged fee.
 
 The caller waits for the result (up to `restate.attach-timeout`, 30 s by default) and gets the fee, or a 504 problem when Restate
 then reports the run as not finished (its 470). The workflow is keyed by the
 `transaction_id`, so sending the same id again returns the first run's response without a second charge, whatever the
 payload; a rejected id stays rejected until Restate drops the finished run (1 day by default).
-Nothing is stored outside Restate.
+A charged id sent again is answered from a local cache (Caffeine) or from Postgres, without a call to Restate. The fee
+records live in Postgres, the workflow's journal in Restate, and nothing anywhere else.
 
 ```json
 // POST /transaction/fee                          // 200 OK
@@ -50,7 +51,8 @@ POST /transaction/fee
    ▼
 Spring app: TransactionFeeController → FeeService           (thin gateway, no business logic)
    │  1. transaction_id present and well-formed?  (it is the workflow key; otherwise 400)
-   │  2. submit FeeWorkflow/txn_001/run, then attach  (the id sent again gets PREVIOUSLY_ACCEPTED
+   │  2. already charged? the Caffeine cache, then Postgres → 200 with the stored response, no Restate call
+   │  3. submit FeeWorkflow/txn_001/run, then attach  (the id sent again gets PREVIOUSLY_ACCEPTED
    │     and the first run's result; no result within attach-timeout and Restate answers 470 → 504)
    ▼
 Restate server (external Docker) ── journals every step ───────────────────────────┐
@@ -59,25 +61,35 @@ Restate server (external Docker) ── journals every step ──────�
 FeeWorkflow.run(request)                                                            │
    step VALIDATE   journaled { RequestValidator.validate(request) } → Rejected? ────┤
    step MAP        TransactionMapper.toTransaction(request)  (pure, deterministic)  │
-   step CLAIM      TransactionFeeRecord/txn_001.claim()       → Conflict? / Done? ──┤
+   step CLAIM      journaled { Postgres: claim txn_001 with this run's token }      │
+                   → Conflict? / already charged? ──────────────────────────────────┤
    step CALCULATE  journaled { FeeCalculator.calculate(tx) }                     ───┤
-   step RECORD     TransactionFeeRecord/txn_001.complete(response)  (the charge) ───┘
+   step RECORD     journaled { Postgres: complete txn_001 with the response }       │
+                   (the charge) ────────────────────────────────────────────────────┘
    return FeeOutcome.Charged(response)
 ```
 
 - **`FeeWorkflow`** (a Restate *workflow*, keyed by `transaction_id`) runs each transaction exactly once. Every
-  submission of an id attaches to its one run instead of starting a second one, and gets that run's result.
-- **`TransactionFeeRecord`** (a Restate *virtual object*, keyed by `transaction_id`) holds the permanent fee record, so
-  a charged id is not charged again even after Restate has dropped the finished run.
-- Everything non-deterministic (the clock in validation, the fee numbers) runs inside a journaled step (Restate's `runBlock`), so its result is
-  journaled and replayed, never recomputed.
+  submission of an id attaches to its one run instead of starting a second one, and gets that run's result. Of several
+  payloads sent at once for one id, the first to reach Restate is the one charged, and every caller gets its response.
+- **The `fee_record` table in PostgreSQL** holds the permanent fee record of each `transaction_id`: every field of the
+  request, the charge, and when it was claimed and charged. A charged id is not charged again even after Restate has
+  dropped the finished run. Old records are deleted by the indexed `claimed_at`, never by the client's `created_at` (see
+  `docs/design.md`: a deleted record no longer protects its id). A Postgres transaction is opened only to write: at CLAIM,
+  after validation passed and only for an id that has no record yet, and at RECORD. The primary key lets one claim win, and
+  only the claim's token can record the charge. The lookup of a charged id waits at most `fee-cache.lookup-timeout` for
+  Postgres, then leaves the answer to Restate, so a database that hangs can't hold requests up.
+- Everything non-deterministic or with side effects (the clock in validation, the fee numbers, the claim token, Postgres)
+  runs inside a journaled step (Restate's `runBlock`), so its result is journaled and replayed, never recomputed.
 
 **Crash example.** The app dies right after CALCULATE. Restate retries the invocation, and the endpoint (restarted, or a
 new instance) receives the journal. VALIDATE, CLAIM and CALCULATE are **replayed from the journal and not executed
 again**. RECORD then runs once, and the waiting caller gets the result. If the app dies *while* CALCULATE is running,
-that step was not journaled yet, so it runs again; only its journaled result is recorded.
+that step was not journaled yet, so it runs again; only its journaled result is recorded. If it dies right after a
+Postgres write committed, the step runs again and finds its own write by the claim token: still one record.
 
-**Startup and shutdown.** The app starts its Restate endpoint on port 9080 and registers it with Restate's admin API
+**Startup and shutdown.** The app creates its table in Postgres (`schema.sql`) first: if Postgres can't be reached, it
+doesn't start. Then it starts its Restate endpoint on port 9080 and registers it with Restate's admin API
 (`restate.admin-url`) as `http://<restate.advertised-host>:<port>`, so it works at whatever host and port it runs on. If
 Restate can't register it, the app doesn't start and says which URL and settings to fix. At shutdown it removes its
 registration again, unless invocations that haven't finished still need it: those resume once the app is back at the same
@@ -95,14 +107,16 @@ Two Maven modules under the root `pom.xml` (the parent, `fee-service-parent`):
 The packages of the service module:
 
 ```
-config/            RestateProperties, FeeProperties                         every @ConfigurationProperties class: one file per
-                                                                            top-level section of application.yml
+config/            RestateProperties, FeeCacheProperties, FeeProperties,    every @Configuration and @ConfigurationProperties
+                   RestateConfig, ChargedFeesCacheConfig, ClockConfig       class: the bean definitions, and one properties file
+                                                                            per top-level section of application.yml
 api/               TransactionFeeController, ApiExceptionHandler            HTTP only, errors as RFC 7807 ProblemDetail
-application/       FeeService                                               thin gateway: transaction_id → submit/attach → HTTP result
+application/       FeeService, ChargedFees                                  thin gateway: transaction_id → charged? (cache,
+                                                                            Postgres) → submit/attach → HTTP result
 workflow/          FeeWorkflow, its durable types, StepHook                 the Restate workflow: every business step
-record/            TransactionFeeRecord, FeeRecord, ClaimDecider            the Restate virtual object: one fee per transaction_id
+record/            FeeRecordRepository, FeeRecord, ClaimDecider             the fee records in Postgres: one per transaction_id
 restate/           RestateEndpointLifecycle, RestateDeployments,            Restate plumbing: the endpoint and its registration,
-                   RestateConfig                                            the ingress client
+                   FeeWorkflowClients                                       the ingress client
 validation/        TransactionValidator, RequestValidator, ValidationError  run inside the workflow (VALIDATE)
 validation/rule/   one TransactionValidator bean per check, by @Order
 fee/               FeeRule, FeeCalculator                                   run inside the workflow (CALCULATE)
@@ -112,7 +126,7 @@ domain/            Transaction and its enums, TransactionMapper             pure
 ```
 
 The controller calls only `FeeService`, `FeeService` holds no business logic, and every business step runs inside
-`FeeWorkflow`. Spring builds every object, including the two Restate handlers, so constructor injection, `@Order` and the
+`FeeWorkflow`. Spring builds every object, including the Restate handler, so constructor injection, `@Order` and the
 injected rule and validator lists work behind the workflow too.
 
 The full class design, the wiring, the call graph and the idempotency and recovery guarantees are in
@@ -123,23 +137,29 @@ The full class design, the wiring, the call graph and the idempotency and recove
 ### Prerequisites
 
 - **JDK 25** and **Maven 3.9+** (the system `mvn`, there is no wrapper), or the dev container in [`dev-setup/`](dev-setup/README.md),
-  which has both, plus a dev Restate.
+  which has both, plus a dev Restate and a dev Postgres.
 - **A Restate server 1.8.x** running in Docker or Podman. The app doesn't start it.
+- **PostgreSQL** (18) running in Docker or Podman, with a database `fee` for the user `fee` by default. The app creates its
+  table itself, and doesn't start without the database.
 - For `mvn verify`: a container engine that Testcontainers can reach (Docker, or Podman with its socket).
 
 ### Run
 
-1. Start Restate. With the dev environment, `podman compose` in `dev-setup/` starts it (see its README). Without it:
+1. Start Restate and Postgres. With the dev environment, `podman compose up -d restate postgres` in `dev-setup/` starts
+   both (see its README). Without it:
 
    ```bash
    docker run --rm --name restate -p 8080:8080 -p 9070:9070 \
      --add-host=host.docker.internal:host-gateway \
      docker.restate.dev/restatedev/restate:1.8.1
+   docker run --rm --name fee-postgres -p 5432:5432 \
+     -e POSTGRES_DB=fee -e POSTGRES_USER=fee -e POSTGRES_PASSWORD=fee \
+     docker.io/library/postgres:18.7
    ```
 
    The `--add-host` lets Restate reach the app on the host as `host.docker.internal`, on Linux too.
 
-2. Start the app with the `local` profile (the app on this machine, Restate in a container):
+2. Start the app with the `local` profile (the app on this machine, Restate and Postgres in containers):
 
    ```bash
    mvn spring-boot:run -Dspring-boot.run.profiles=local
@@ -149,8 +169,9 @@ The full class design, the wiring, the call graph and the idempotency and recove
    `http://host.docker.internal:9080` (`Restate endpoint registered as …` in the log); there is nothing to register by
    hand. Another API or endpoint port works the same way: `SERVER_PORT`, `RESTATE_ENDPOINT_PORT`.
 
-Inside the dev container the environment sets `RESTATE_INGRESS_URL=http://restate:8080`, `RESTATE_ADMIN_URL=http://restate:9070`
-and `RESTATE_ADVERTISED_HOST=dev`, so plain `mvn spring-boot:run` registers the app as `http://dev:9080`.
+Inside the dev container the environment sets `RESTATE_INGRESS_URL=http://restate:8080`, `RESTATE_ADMIN_URL=http://restate:9070`,
+`RESTATE_ADVERTISED_HOST=dev` and `DATABASE_URL=r2dbc:postgresql://postgres:5432/fee`, so plain `mvn spring-boot:run`
+registers the app as `http://dev:9080` and records the fees in the dev Postgres.
 
 Whichever app started last gets the new work, so switching between the dev container and the local profile needs only
 a restart of the app you switch to.
@@ -170,6 +191,11 @@ app starts from (or `--spring.config.additional-location=file:/etc/fee-service/`
 | `restate.endpoint-port` | `RESTATE_ENDPOINT_PORT` | `9080` | port the Restate endpoint listens on, where Restate calls the workflow |
 | `restate.advertised-host` | `RESTATE_ADVERTISED_HOST` | `localhost` | host Restate reaches the endpoint at (`host.docker.internal` in the `local` profile) |
 | `restate.attach-timeout` | `RESTATE_ATTACH_TIMEOUT` | `30s` | how long `POST` waits for the result; then it answers 504 only if Restate reports the run as not finished (470) |
+| `spring.r2dbc.url` | `DATABASE_URL` | `r2dbc:postgresql://localhost:5432/fee` | the Postgres of the fee records |
+| `spring.r2dbc.username`, `.password` | `DATABASE_USERNAME`, `DATABASE_PASSWORD` | `fee`, `fee` | its credentials (the dev Postgres'; set them everywhere else) |
+| `fee-cache.maximum-size` | `FEE_CACHE_MAXIMUM_SIZE` | `1000` | how many charged fees `FeeService` caches at most |
+| `fee-cache.expire-after-write` | `FEE_CACHE_EXPIRE_AFTER_WRITE` | `1d` | how long a charged fee stays cached; charges never change, so both only bound memory |
+| `fee-cache.lookup-timeout` | `FEE_CACHE_LOOKUP_TIMEOUT` | `1s` | how long a cache miss waits for Postgres before it asks Restate |
 | `fee.<type>.rate`, `.min`, `.fixed` | (use a file) | see [Fee table](#fee-table) | fee numbers per transaction type |
 
 Fees are easiest to change in a file next to the app. It needs only the keys that change:
@@ -191,7 +217,8 @@ never go stale.
 | Change | Effect |
 |--------|--------|
 | Fee numbers | Safe. A workflow that already passed CALCULATE keeps its journaled fee; everything else uses the new numbers. Completed records are never recalculated: resending a charged transaction returns the original response |
-| `restate.ingress-url`, `admin-url`, `attach-timeout`, `server.port` | Safe |
+| `restate.ingress-url`, `admin-url`, `attach-timeout`, `server.port`, `fee-cache.*` | Safe |
+| The database (`DATABASE_URL`, credentials) | The app starts only if it reaches it. Keep it pointing at the database that holds the records: an empty one forgets every charge |
 | `restate.endpoint-port` or `advertised-host` | The app registers the new URL at startup, and it gets all new work. Invocations in flight stay on the old URL and keep retrying it, so let them finish first |
 
 Renaming a key or a variable breaks existing override files and environments.
@@ -212,6 +239,7 @@ curl -s -X POST localhost:8081/transaction/fee -H 'Content-Type: application/jso
 ```
 
 Sending the **same `transaction_id` again** returns the same body, whatever the payload, and the fee is not charged again.
+Once charged, it is answered from the cache or Postgres without a call to Restate.
 
 **Another type and asset**, with Bank Transfer's minimum applied:
 
@@ -275,35 +303,41 @@ when (val failure = problem.toException()) {
 ```bash
 mvn ktlint:format     # formats the Kotlin sources: every build runs the ktlint check first and fails on a problem
 mvn test              # unit tests: no Docker, no Spring context except @WebMvcTest slices
-mvn verify            # + integration tests (Testcontainers Restate 1.8.1) and Cucumber features; needs a container engine
+mvn verify            # + integration tests (Testcontainers Restate 1.8.1, Postgres 18.7) and Cucumber features; needs a container engine
 scripts/check.sh      # the project's gate: rule checks + mvn clean verify, and every test must actually run
 ```
 
 - **Unit tests** (`*Test`) cover every production class: each validator and its messages, each fee rule and building
-  block (rounding, minimums, `BigDecimal` comparisons), the claim rules, the serde of every durable type,
-  the gateway's HTTP mapping, the packaged configuration. `TestCoverageAuditTest` fails when a production file has no test.
+  block (rounding, minimums, `BigDecimal` comparisons), the claim rules, the serde of every durable type, the cache of
+  charged fees, the gateway's HTTP mapping, the packaged configuration. Postgres is faked in memory
+  (`InMemoryFeeRecordRepository`). `TestCoverageAuditTest` fails when a production file has no test.
 - **BDD features** ([`service/src/test/resources/features/`](service/src/test/resources/features)) describe the behaviour end to end against
-  a real Restate: fee calculation per type and asset, validation, transaction state (a rejected id stays rejected), idempotency
-  and workflow recovery.
-- **Integration tests** (`*IT`) share one Testcontainers Restate and use only random ports, so a Restate or an app already
-  running on the machine can't interfere. `AppContainerIT` is the exception: it runs the packaged jar in a container
-  next to a Restate of its own, on a private network, so it needs `service/target/fee-service-*.jar` (`mvn verify` builds
-  it; in an IDE, run `mvn -pl service -am package -DskipTests` first).
+  a real Restate and Postgres: fee calculation per type and asset, validation, transaction state (a rejected id stays
+  rejected), idempotency and workflow recovery.
+- **Integration tests** (`*IT`) share one Testcontainers Restate and one Postgres and use only random ports, so a Restate,
+  Postgres or app already running on the machine can't interfere. They read the fee records in Postgres itself, past the
+  app. `AppContainerIT` is the exception: it runs the packaged jar in a container next to a Restate and a Postgres of its
+  own, on a private network, so it needs `service/target/fee-service-*.jar` (`mvn verify` builds it; in an IDE, run
+  `mvn -pl service -am package -DskipTests` first).
 
 What the recovery tests prove (each counts the **CALCULATE executions**, not just the response):
 
 | Test | Proves |
 |------|--------|
-| `CrashRecoveryIT`, `workflow_recovery.feature` | A crash before or after any step boundary is retried by Restate, and the journaled steps are replayed, not run again (validation and calculation closures each run once): one fee, record `COMPLETED` |
+| `CrashRecoveryIT`, `workflow_recovery.feature` | A crash before or after any step boundary is retried by Restate, and the journaled steps are replayed, not run again (validation and calculation closures each run once): one fee, record `COMPLETED`. A crash right after the CLAIM or RECORD write committed, before Restate journaled it: the step runs again and finds its own write, still one record |
+| `FeeRecordRepositoryIT` | Against Postgres: a claim inserts only an id without a record, in one transaction, and a claim of an existing id opens none; 10 claims of one id at once leave one, and only its token can complete it; completing with another token rolls back; every value keeps its scale |
+| `DatabaseStartupIT` | With Postgres unreachable, or its `fee_record` table lacking a column, the app doesn't start, and its Restate endpoint never starts or registers |
 | `EndpointRestartIT`, `workflow_recovery.feature` | Stopping and restarting the endpoint in the middle of CALCULATE keeps its deployment and completes the workflow with one fee record |
 | `EndpointRegistrationIT` | The app registers itself at its advertised URL at startup, and a stop with nothing unfinished removes the registration |
 | `RestateOutageIT` | A workflow frozen mid-CALCULATE completes with one fee record once Restate thaws |
+| `PostgresOutageIT` | With Postgres down while the app runs: a new transaction is accepted by Restate and waits at CLAIM, then is charged once when Postgres is back; an outage between CLAIM and RECORD reports nothing charged until the record is written, then charges once (CALCULATE ran once); a charged id is still answered from the cache, then from Restate; a rejection is still answered and never stored. With Postgres frozen (connections open, nothing answers), the lookup gives up after `fee-cache.lookup-timeout` and Restate answers a charged id or a rejection within seconds |
 | `AttachTimeoutIT` | A run that outlasts the attach timeout, and that Restate reports as not finished (470), answers 504 `WORKFLOW_TIMEOUT`; the same payload sent again gets the fee, calculated once |
 | `AppContainerIT` | The packaged app in a container registers with Restate under its network alias and charges a fee (an unknown type gets 422 at once); a graceful stop removes the deployment; a run submitted while the app is killed waits (Restate answers 470) and is charged once when the app is back at the same URL, as the same deployment |
 | `DeterminismIT` | A validation result is journaled: moving the clock between a crash and the retry doesn't change it |
-| `DuplicatesIT`, `idempotency.feature` | One `transaction_id`, sequentially or 10 callers at once, with the same or different payloads, is charged once and every caller gets the first run's response; an id held by an unfinished run gets 409 |
+| `DuplicatesIT`, `idempotency.feature` | One `transaction_id`, sequentially or 10 callers at once, with the same or different payloads, is charged once, every caller gets the first run's response, and Postgres holds exactly that one record; valid and invalid payloads at once all get the accepted payload's answer; an id held by an unfinished run gets 409 |
 | `RejectedIT`, `transaction_state.feature` | A rejected id is neither charged nor recorded, and the corrected request with the same id gets the same rejection |
-| `RetentionExpiredIT` | After Restate dropped a finished run, a charged id returns the stored response without charging again, and a rejected id is charged normally |
+| `RetentionExpiredIT` | After Restate dropped a finished run, a charged id is answered from the cache, or from Postgres when it isn't cached, without a new run or a second charge; a run sent past the app is stopped at CLAIM by the record; a rejected id is charged normally |
+
 ## Fee table
 
 The defaults in the packaged `application.yml`, changeable with a restart (see [Configuration](#configuration)). Fixed
@@ -329,7 +363,8 @@ Extending means **adding a class**; no central `when` grows:
 | a workflow step | a `WorkflowStep` value + a step in `FeeWorkflow` wrapped with `StepHook` + a row in the crash-recovery tests |
 
 Details: [Extension points in `docs/design.md`](docs/design.md#extension-points). Changing a handler signature, the step
-order or the JSON of `FeeRequest`/`FeeResponse` is a breaking change for in-flight workflows and stored records.
+order or the JSON of `FeeRequest`/`FeeResponse` is a breaking change for in-flight workflows; renaming or removing a
+`fee_record` column or status breaks stored records.
 
 ## Assumptions
 
@@ -345,7 +380,7 @@ order or the JSON of `FeeRequest`/`FeeResponse` is a breaking change for in-flig
   2 decimals (`1.50`), the same value; `amount` is echoed as sent.
 - One `transaction_id` is processed once: sending it again, with any payload, returns the first run's response (the fee or
   the rejection) without charging again. A rejected id can be charged once Restate drops its run (1 day by default).
-- Charging a fee means recording it in Restate as the transaction's charged fee; there is no external wallet.
+- Charging a fee means recording it in Postgres as the transaction's charged fee; there is no external wallet.
 - Bank Transfer has a minimum and no maximum.
 
 ## Future work

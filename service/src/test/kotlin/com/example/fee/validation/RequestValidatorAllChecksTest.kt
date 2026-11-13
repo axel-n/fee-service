@@ -77,10 +77,7 @@ class RequestValidatorAllChecksTest {
 
     @ParameterizedTest(name = "{0}")
     @MethodSource("structuralProblems")
-    fun `reports a 400 problem before every 422 problem`(
-        field: String,
-        broken: (FeeRequest) -> FeeRequest,
-    ) {
+    fun `reports a 400 problem before every 422 problem`(field: String, broken: (FeeRequest) -> FeeRequest) {
         // given
         val request = broken(unsupportedEverywhere)
 
@@ -206,9 +203,6 @@ class RequestValidatorAllChecksTest {
                 problem("created_at") { it.copy(createdAt = "2099-01-01 00:00:00") },
             )
 
-        private fun problem(
-            field: String,
-            broken: (FeeRequest) -> FeeRequest,
-        ): Arguments = Arguments.of(field, broken)
+        private fun problem(field: String, broken: (FeeRequest) -> FeeRequest): Arguments = Arguments.of(field, broken)
     }
 }

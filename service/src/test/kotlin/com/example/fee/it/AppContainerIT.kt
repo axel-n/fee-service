@@ -2,11 +2,15 @@ package com.example.fee.it
 
 import com.example.fee.ProjectLayout
 import com.fasterxml.jackson.databind.ObjectMapper
+import io.r2dbc.spi.ConnectionFactories
+import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import org.slf4j.LoggerFactory
+import org.springframework.r2dbc.core.DatabaseClient
+import org.springframework.r2dbc.core.awaitSingle
 import org.testcontainers.DockerClientFactory
 import org.testcontainers.containers.GenericContainer
 import org.testcontainers.containers.Network
@@ -28,15 +32,16 @@ import kotlin.io.path.listDirectoryEntries
 import kotlin.io.path.name
 
 /**
- * The packaged app (`java -jar`) in a container next to a Restate container of its own, on a private network, as both
- * run in production: the app reaches Restate as `restate`, Restate reaches the app at its network alias `fee-service`, and
- * no host alias of the machine is involved. It shows that the app connects to Restate when it starts, disconnects when it
- * stops gracefully, and that a run submitted while the app is down waits (Restate answers 470, so the API answers 504)
- * and finishes once the app is back at the same URL.
+ * The packaged app (`java -jar`) in a container next to a Restate and a Postgres container of its own, on a private
+ * network, as they run in production: the app reaches Restate as `restate` and Postgres as `postgres`, Restate reaches
+ * the app at its network alias `fee-service`, and no host alias of the machine is involved. It shows that the app
+ * connects to Restate when it starts, disconnects when it stops gracefully, and that a run submitted while the app is
+ * down waits (Restate answers 470, so the API answers 504) and finishes once the app is back at the same URL.
  *
  * Its own Restate, not [RestateTestEnvironment]'s: an app registered there would be the newest deployment and take the
- * in-process ITs' work. The app's ports are fixed but internal to the network; the test reaches the API and Restate
- * through mapped ports. It needs the packaged jar in `service/target`, which `mvn verify` builds before the ITs run.
+ * in-process ITs' work. The app's ports are fixed but internal to the network; the test reaches the API, Restate and
+ * Postgres through mapped ports. It needs the packaged jar in `service/target`, which `mvn verify` builds before the ITs
+ * run.
  */
 class AppContainerIT {
     private val apps = mutableListOf<GenericContainer<*>>()
@@ -125,7 +130,7 @@ class AppContainerIT {
         val response = api(second).submit(body(transactionId, "Mobile Top Up"))
         assertThat(response.status).describedAs("POST status, body %s", response.body).isEqualTo(200)
         assertThat(response.body["fee"].decimalValue()).isEqualByComparingTo(BigDecimal("1.50"))
-        assertThat(invocations("TransactionFeeRecord/$transactionId/complete")).describedAs("charges").isEqualTo(1)
+        assertThat(completedRecords(transactionId)).describedAs("charges").isEqualTo(1)
     }
 
     /** Starts the packaged app on the network; it is ready once it registered its endpoint at [ADVERTISED_URL]. */
@@ -142,6 +147,10 @@ class AppContainerIT {
                     "RESTATE_ADMIN_URL" to "http://$RESTATE_ALIAS:${RestateTestEnvironment.ADMIN_PORT}",
                     "RESTATE_ENDPOINT_PORT" to "$ENDPOINT_PORT",
                     "RESTATE_ADVERTISED_HOST" to APP_ALIAS,
+                    "DATABASE_URL" to
+                        "r2dbc:postgresql://$POSTGRES_ALIAS:${PostgresTestEnvironment.PORT}/${PostgresTestEnvironment.DATABASE}",
+                    "DATABASE_USERNAME" to PostgresTestEnvironment.USERNAME,
+                    "DATABASE_PASSWORD" to PostgresTestEnvironment.PASSWORD,
                 ),
             ).withExposedPorts(APP_PORT)
             .withLogConsumer(Slf4jLogConsumer(log).withPrefix("app"))
@@ -179,23 +188,23 @@ class AppContainerIT {
 
     private fun runStatus(transactionId: String): String? =
         admin
-            .query("SELECT status FROM sys_invocation WHERE target = 'FeeWorkflow/$transactionId/run'")
+            .query("$RUN_STATUS 'FeeWorkflow/$transactionId/run'")
             .singleOrNull()
             ?.get("status")
             ?.asText()
 
-    private fun invocations(target: String): Long =
-        admin
-            .query("SELECT count(*) AS invocations FROM sys_invocation WHERE target = '$target'")
-            .single()["invocations"]
-            .asLong()
+    // Read in the app's own Postgres, past the app
+    private fun completedRecords(transactionId: String): Long =
+        runBlocking {
+            database
+                .sql(COUNT_COMPLETED)
+                .bind("id", transactionId)
+                .map { row -> checkNotNull(row.get("records", Long::class.javaObjectType)) }
+                .awaitSingle()
+        }
 
     /** A call to Restate's ingress past the app, with [body] as JSON if given. */
-    private fun ingress(
-        method: String,
-        path: String,
-        body: Map<String, Any?>? = null,
-    ): HttpResponse<String> {
+    private fun ingress(method: String, path: String, body: Map<String, Any?>? = null): HttpResponse<String> {
         val request =
             HttpRequest
                 .newBuilder(URI("$ingressUrl$path"))
@@ -211,10 +220,7 @@ class AppContainerIT {
 
     private fun newTransactionId() = "it-container-${UUID.randomUUID().toString().take(13)}"
 
-    private fun body(
-        transactionId: String,
-        type: String,
-    ): Map<String, Any?> =
+    private fun body(transactionId: String, type: String): Map<String, Any?> =
         mapOf(
             "transaction_id" to transactionId,
             "amount" to BigDecimal("1000"),
@@ -228,11 +234,17 @@ class AppContainerIT {
     companion object {
         private const val JAVA_IMAGE = "docker.io/library/eclipse-temurin:25-jre"
         private const val RESTATE_ALIAS = "restate"
+        private const val POSTGRES_ALIAS = "postgres"
         private const val APP_ALIAS = "fee-service"
-        private const val APP_PORT = 8081
-        private const val ENDPOINT_PORT = 9080
+        private const val APP_PORT = 8_081
+        private const val ENDPOINT_PORT = 9_080
         private const val ADVERTISED_URL = "http://$APP_ALIAS:$ENDPOINT_PORT"
         private const val STOP_TIMEOUT_SECONDS = 30
+
+        // Restate's query API takes no parameters: the run's target is appended, quoted
+        private const val RUN_STATUS = "SELECT status FROM sys_invocation WHERE target ="
+        private const val COUNT_COMPLETED =
+            "SELECT count(*) AS records FROM fee_record WHERE transaction_id = :id AND status = 'COMPLETED'"
 
         private val log = LoggerFactory.getLogger(AppContainerIT::class.java)
         private val mapper = ObjectMapper()
@@ -250,6 +262,20 @@ class AppContainerIT {
 
         private val admin = RestateAdminApi("http://${restate.host}:${restate.getMappedPort(RestateTestEnvironment.ADMIN_PORT)}")
 
+        private val postgres: GenericContainer<*> =
+            postgresContainer()
+                .withNetwork(network)
+                .withNetworkAliases(POSTGRES_ALIAS)
+                .also { it.start() }
+
+        private val database: DatabaseClient =
+            DatabaseClient.create(
+                ConnectionFactories.get(
+                    "r2dbc:postgresql://${PostgresTestEnvironment.USERNAME}:${PostgresTestEnvironment.PASSWORD}@" +
+                        "${postgres.host}:${postgres.getMappedPort(PostgresTestEnvironment.PORT)}/${PostgresTestEnvironment.DATABASE}",
+                ),
+            )
+
         /** The jar `mvn package` built; in an IDE, run `mvn -pl service -am package -DskipTests` first. */
         private val appJar: Path by lazy {
             val target = ProjectLayout.serviceDir.resolve("target")
@@ -263,8 +289,9 @@ class AppContainerIT {
 
         @JvmStatic
         @AfterAll
-        fun stopRestate() {
+        fun stopRestateAndPostgres() {
             restate.stop()
+            postgres.stop()
             network.close()
         }
     }

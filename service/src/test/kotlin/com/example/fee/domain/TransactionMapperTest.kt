@@ -60,10 +60,7 @@ class TransactionMapperTest {
 
     @ParameterizedTest(name = "{0}")
     @MethodSource("supportedTypes")
-    fun `maps every supported transaction type`(
-        raw: String,
-        expected: TransactionType,
-    ) {
+    fun `maps every supported transaction type`(raw: String, expected: TransactionType) {
         // given
         val request = valid.copy(type = raw)
 
@@ -91,10 +88,7 @@ class TransactionMapperTest {
 
     @ParameterizedTest(name = "{0}")
     @MethodSource("unvalidatedRequests")
-    fun `returns null instead of throwing for a request that would not pass validation`(
-        case: String,
-        request: FeeRequest,
-    ) {
+    fun `returns null instead of throwing for a request that would not pass validation`(case: String, request: FeeRequest) {
         // given
         val input = request
 

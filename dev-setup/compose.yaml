@@ -1,6 +1,7 @@
 # Dev environment for fee-service, on one network:
-#   restate  the dev Restate server
-#   dev      the sandboxed dev container (JDK, Maven, Claude Code, nested podman for Testcontainers)
+#   restate   the dev Restate server
+#   postgres  the dev PostgreSQL, where the app records the fees
+#   dev       the sandboxed dev container (JDK, Maven, Claude Code, nested podman for Testcontainers)
 # On the host:  podman compose up -d --build   then   podman compose exec dev bash
 # Details: README.md
 name: fee-service
@@ -13,6 +14,21 @@ services:
     ports:
       - "127.0.0.1:8080:8080"   # ingress
       - "127.0.0.1:9070:9070"   # admin API and UI: http://localhost:9070
+
+  postgres:
+    # the version the tests use (PostgresTestEnvironment)
+    image: docker.io/library/postgres:18.7
+    container_name: fee-service-postgres
+    environment:
+      # the app's packaged defaults (application.yml: DATABASE_URL, DATABASE_USERNAME, DATABASE_PASSWORD)
+      POSTGRES_DB: fee
+      POSTGRES_USER: fee
+      POSTGRES_PASSWORD: fee
+    ports:
+      - "127.0.0.1:5432:5432"   # for the app on the host (IDE, profile local) and psql
+    volumes:
+      # Postgres 18 images keep their data below /var/lib/postgresql (PGDATA is a versioned directory inside it)
+      - postgres-data:/var/lib/postgresql
 
   dev:
     build:
@@ -51,6 +67,8 @@ services:
       RESTATE_INGRESS_URL: http://restate:8080
       RESTATE_ADMIN_URL: http://restate:9070
       RESTATE_ADVERTISED_HOST: dev
+      # The dev Postgres above, over this network. Tests ignore it and start their own
+      DATABASE_URL: r2dbc:postgresql://postgres:5432/fee
     # The host's podman socket is deliberately not mounted: holding it means controlling the host's podman.
     volumes:
       - ../:/workspace/project:rw,Z
@@ -63,11 +81,12 @@ services:
       - claude-state:/home/${USER}/.claude
       # nested image storage: overlay can't sit on the container's own overlay filesystem
       - containers:/home/${USER}/.local/share/containers
-    depends_on: [restate]
+    depends_on: [restate, postgres]
 
 volumes:
   claude-state:
   containers:
+  postgres-data:
 
 x-podman:
   in_pod: false                 # keep-id can't be used inside a pod (podman-compose)

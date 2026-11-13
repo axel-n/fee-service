@@ -34,10 +34,7 @@ class FeeApi(
     private val mapper = ObjectMapper().enable(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS)
 
     /** `POST /transaction/fee` (or another [path] of the app) with [body] as the JSON request. */
-    fun submit(
-        body: Map<String, Any?>,
-        path: String = FEE_PATH,
-    ): Response =
+    fun submit(body: Map<String, Any?>, path: String = FEE_PATH): Response =
         send(
             HttpRequest
                 .newBuilder(URI("$root$path"))

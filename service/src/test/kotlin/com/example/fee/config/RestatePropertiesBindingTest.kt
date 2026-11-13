@@ -37,12 +37,8 @@ class RestatePropertiesBindingTest {
     }
 
     companion object {
-        private fun override(
-            variable: String,
-            value: String,
-            setting: (RestateProperties) -> Any,
-            expected: Any,
-        ) = Arguments.of(variable, value, setting, expected)
+        private fun override(variable: String, value: String, setting: (RestateProperties) -> Any, expected: Any) =
+            Arguments.of(variable, value, setting, expected)
 
         @JvmStatic
         fun overrides(): List<Arguments> =
@@ -69,7 +65,7 @@ class RestatePropertiesBindingTest {
         // then
         assertThat(properties.ingressUrl).isEqualTo("http://localhost:8080")
         assertThat(properties.adminUrl).isEqualTo("http://localhost:9070")
-        assertThat(properties.endpointPort).isEqualTo(9080)
+        assertThat(properties.endpointPort).isEqualTo(9_080)
         assertThat(properties.advertisedHost).isEqualTo("localhost")
         assertThat(properties.attachTimeout).isEqualTo(Duration.ofSeconds(30))
     }
@@ -103,7 +99,7 @@ class RestatePropertiesBindingTest {
         // then
         assertThat(properties.ingressUrl).isEqualTo("http://restate:8080")
         assertThat(properties.adminUrl).isEqualTo("http://localhost:9070")
-        assertThat(properties.endpointPort).isEqualTo(9080)
+        assertThat(properties.endpointPort).isEqualTo(9_080)
         assertThat(properties.advertisedHost).isEqualTo("localhost")
         assertThat(properties.attachTimeout).isEqualTo(Duration.ofSeconds(30))
     }

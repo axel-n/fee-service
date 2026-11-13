@@ -4,16 +4,27 @@
 
 ## 1. run all locally
 
-### app and restate in containers
+### app, restate and postgres in containers
 
 ```bash
 podman compose up -d --build
 podman compose exec dev bash
 ```
 
-### or just restate in container
+### or just restate and postgres in containers (the app runs on the host, e.g. from the IDE with the `local` profile)
 ```bash
-podman compose up -d restate
+podman compose up -d restate postgres
+```
+
+### the dev postgres
+
+Database `fee`, user `fee`, password `fee`, on `127.0.0.1:5432` (the app's defaults). Its data lives in the
+`postgres-data` volume, so the fee records survive a restart. The app creates `fee_record` at startup and refuses to start
+when an existing one lacks a column. It checks columns only, so drop it whenever `schema.sql` changed (every dev record
+goes with it):
+
+```bash
+podman compose exec postgres psql -U fee -d fee -c 'DROP TABLE fee_record'
 ```
 
 

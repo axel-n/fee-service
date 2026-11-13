@@ -1,6 +1,7 @@
 package com.example.fee.it
 
 import com.example.fee.fee.FeeRule
+import com.example.fee.record.PostgresFeeRecordRepository
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Primary
 
@@ -29,4 +30,10 @@ class IntegrationTestBeans {
     @Bean
     @Primary
     fun testClock(): TestClock = TestClock()
+
+    // @Primary over the app's PostgresFeeRecordRepository, which stays a bean and does every write; unarmed it adds nothing
+    @Bean
+    @Primary
+    fun faultInjectingFeeRecordRepository(postgres: PostgresFeeRecordRepository): FaultInjectingFeeRecordRepository =
+        FaultInjectingFeeRecordRepository(postgres)
 }

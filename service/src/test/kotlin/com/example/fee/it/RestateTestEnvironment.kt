@@ -23,10 +23,10 @@ import java.time.Duration
  */
 object RestateTestEnvironment {
     /** Restate's ingress port inside its container. */
-    const val INGRESS_PORT = 8080
+    const val INGRESS_PORT = 8_080
 
     /** Restate's admin API port inside its container. */
-    const val ADMIN_PORT = 9070
+    const val ADMIN_PORT = 9_070
 
     // How the container reaches the machine the tests run on, and so the app's endpoint (exposeHostPorts below)
     private const val ADVERTISED_HOST = "host.testcontainers.internal"

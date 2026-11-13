@@ -3,19 +3,11 @@ package com.example.fee
 import org.springframework.boot.autoconfigure.SpringBootApplication
 import org.springframework.boot.context.properties.ConfigurationPropertiesScan
 import org.springframework.boot.runApplication
-import org.springframework.context.annotation.Bean
-import java.time.Clock
 
+/** The entry point. Its beans are defined in `config`. */
 @SpringBootApplication
 @ConfigurationPropertiesScan
-class FeeServiceApplication {
-    /**
-     * The only source of "now". UTC rather than the host's zone, so a `created_at` without a zone is judged
-     * the same way on every machine.
-     */
-    @Bean
-    fun clock(): Clock = Clock.systemUTC()
-}
+class FeeServiceApplication
 
 fun main(args: Array<String>) {
     runApplication<FeeServiceApplication>(*args)

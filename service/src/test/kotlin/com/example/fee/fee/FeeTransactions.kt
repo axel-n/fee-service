@@ -9,11 +9,7 @@ import java.math.BigDecimal
 import java.time.LocalDateTime
 
 /** A validated transaction for fee tests; only amount, asset and type matter to a rule. */
-fun transaction(
-    amount: String,
-    asset: Asset = Asset.USD,
-    type: TransactionType = TransactionType.MOBILE_TOP_UP,
-): Transaction =
+fun transaction(amount: String, asset: Asset = Asset.USD, type: TransactionType = TransactionType.MOBILE_TOP_UP): Transaction =
     Transaction(
         transactionId = "txn_001",
         amount = BigDecimal(amount),

@@ -20,7 +20,7 @@ import java.util.concurrent.CompletableFuture
 import java.util.concurrent.TimeUnit
 
 /**
- * The steps of a fee request: build it, submit it to the app, check the response, the charge and the record in Restate.
+ * The steps of a fee request: build it, submit it to the app, check the response, the charge and the record in Postgres.
  *
  * A new instance per scenario (Cucumber's glue scope), so its fields are the scenario's state. Transaction ids written in
  * a feature are scoped to the scenario: `txn_001` is sent as `txn_001-<suffix>`, one random suffix per scenario, so
@@ -64,14 +64,7 @@ class FeeSteps(
     }
 
     @Given("a {string} transaction {string} of {bigdecimal} {string} {string} in state {string}")
-    fun aTransaction(
-        type: String,
-        featureId: String,
-        amount: BigDecimal,
-        asset: String,
-        assetType: String,
-        state: String,
-    ) {
+    fun aTransaction(type: String, featureId: String, amount: BigDecimal, asset: String, assetType: String, state: String) {
         request =
             mapOf(
                 "transaction_id" to transactionId(featureId),
@@ -87,10 +80,7 @@ class FeeSteps(
 
     /** Changes one field of the scenario's request, e.g. to send the transaction again in a corrected state. */
     @When("the transaction's {string} is changed to {string}")
-    fun theTransactionFieldIsChangedTo(
-        field: String,
-        value: String,
-    ) {
+    fun theTransactionFieldIsChangedTo(field: String, value: String) {
         val current = checkNotNull(request) { "No transaction was given before it was changed" }
         request = current + (field to requestValue(field, value))
     }
@@ -108,10 +98,7 @@ class FeeSteps(
      * into a number like an amount. For values that only make sense verbatim, such as a malformed transaction id.
      */
     @When("the transaction's {string} is sent exactly as {string}")
-    fun theTransactionFieldIsSentExactlyAs(
-        field: String,
-        value: String,
-    ) {
+    fun theTransactionFieldIsSentExactlyAs(field: String, value: String) {
         val current = checkNotNull(request) { "No transaction was given before it was changed" }
         request = current + (field to value)
     }
@@ -156,11 +143,7 @@ class FeeSteps(
      * exactly, also as the problem's `detail`.
      */
     @Then("the request is rejected on field {string} with value {string} and message {string}")
-    fun theRequestIsRejectedOn(
-        field: String,
-        value: String,
-        message: String,
-    ) {
+    fun theRequestIsRejectedOn(field: String, value: String, message: String) {
         val problem = response().body
         assertThat(problem["field"]?.asText()).describedAs("field of %s", problem).isEqualTo(field)
         assertThat(problem["value"]?.asText()).describedAs("value of %s", problem).isEqualTo(value)
@@ -170,10 +153,7 @@ class FeeSteps(
 
     /** The response is the problem of a missing [field]: its `value` is `null`, and the [message] is exact. */
     @Then("the request is rejected on missing field {string} with message {string}")
-    fun theRequestIsRejectedOnMissingField(
-        field: String,
-        message: String,
-    ) {
+    fun theRequestIsRejectedOnMissingField(field: String, message: String) {
         val problem = response().body
         assertThat(problem["field"]?.asText()).describedAs("field of %s", problem).isEqualTo(field)
         assertThat(problem.has("value")).describedAs("value present in %s", problem).isTrue()
@@ -202,11 +182,7 @@ class FeeSteps(
     }
 
     @Then("the fee is {bigdecimal} with rate {bigdecimal} and description {string}")
-    fun theFeeIs(
-        fee: BigDecimal,
-        rate: BigDecimal,
-        description: String,
-    ) {
+    fun theFeeIs(fee: BigDecimal, rate: BigDecimal, description: String) {
         theFeeIs(fee)
         val body = response().body
         assertThat(body["rate"].decimalValue()).isEqualByComparingTo(rate)
@@ -221,7 +197,7 @@ class FeeSteps(
     }
 
     /**
-     * Counted at CALCULATE, not read from the response: one workflow calculated the fee, and the fee recorded in Restate
+     * Counted at CALCULATE, not read from the response: one workflow calculated the fee, and the fee recorded in Postgres
      * is the fee of the charged response.
      */
     @Then("the fee was charged exactly once")
@@ -238,21 +214,37 @@ class FeeSteps(
         assertThat(calculator.count(submittedTransactionId())).describedAs("CALCULATE executions").isZero()
     }
 
-    /** Read from Restate itself, once the response is in: no fee record, so the `transaction_id` is not used up. */
+    /** Read from Postgres itself, once the response is in: no fee record, so the `transaction_id` is not used up. */
     @Then("no fee is recorded")
     fun noFeeIsRecorded() {
         response()
         assertThat(StoredFeeRecords.of(submittedTransactionId())).isNull()
     }
 
-    /** Read from Restate itself, past the app's API: the fee and the amount of the charged response. */
+    /** Read from Postgres itself, past the app's API: one record, with the fee and the amount of the charged response. */
     @Then("the fee is recorded as completed")
     fun theFeeIsRecordedAsCompleted() {
+        assertThat(StoredFeeRecords.count(submittedTransactionId())).describedAs("fee records").isEqualTo(1)
         val record = StoredFeeRecords.of(submittedTransactionId())
         val charged = chargedResponse().body
         assertThat(record?.status).isEqualTo(FeeRecordStatus.COMPLETED)
         assertThat(record?.response?.fee).isEqualByComparingTo(charged["fee"].decimalValue())
         assertThat(record?.response?.amount).isEqualByComparingTo(charged["amount"].decimalValue())
+    }
+
+    /** Read from Postgres itself: the record holds every field of the request as sent, and when it was claimed and charged. */
+    @Then("the request is stored with the fee record")
+    fun theRequestIsStoredWithTheFeeRecord() {
+        val sent = checkNotNull(request) { "No transaction request was given" }
+        val stored = checkNotNull(StoredFeeRecords.transactionOf(submittedTransactionId())) { "No fee record" }
+        assertThat(stored.amount).isEqualByComparingTo(sent["amount"] as BigDecimal)
+        assertThat(stored.asset.value).isEqualTo(sent["asset"])
+        assertThat(stored.assetType.value).isEqualTo(sent["asset_type"])
+        assertThat(stored.type.value).isEqualTo(sent["type"])
+        assertThat(stored.state.value).isEqualTo(sent["state"])
+        assertThat(stored.createdAt).isEqualTo(CreatedAtFormat.parseOrNull(sent["created_at"] as String))
+        val times = checkNotNull(StoredFeeRecords.timesOf(submittedTransactionId()))
+        assertThat(times.chargedAt).isNotNull().isAfterOrEqualTo(times.claimedAt)
     }
 
     /** The response of the scenario's latest submission, waiting for it if it is still in flight. */
@@ -282,10 +274,7 @@ class FeeSteps(
         submission.get(RESPONSE_TIMEOUT_SECONDS, TimeUnit.SECONDS)
 
     // A feature's value as the request carries it: the id scoped to the scenario, the amount as a number
-    private fun requestValue(
-        field: String,
-        value: String?,
-    ): Any? =
+    private fun requestValue(field: String, value: String?): Any? =
         when (field) {
             "transaction_id" -> value?.let(::transactionId)
             "amount" -> value?.let(::BigDecimal)

@@ -1,9 +1,6 @@
 package com.example.fee.restate
 
 import com.example.fee.config.RestateProperties
-import com.example.fee.record.ClaimDecider
-import com.example.fee.record.RestateFeeRecordState
-import com.example.fee.record.TransactionFeeRecord
 import com.example.fee.workflow.FeeWorkflow
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
@@ -46,7 +43,7 @@ class RestateEndpointLifecycleTest {
     }
 
     @Test
-    fun `serves the FeeWorkflow and TransactionFeeRecord handlers to Restate's discovery`() {
+    fun `serves the FeeWorkflow handlers to Restate's discovery`() {
         // given
         lifecycle.start()
 
@@ -57,7 +54,6 @@ class RestateEndpointLifecycleTest {
         assertThat(response.statusCode()).isEqualTo(200)
         assertThat(response.body())
             .contains("\"FeeWorkflow\"")
-            .contains("\"TransactionFeeRecord\"")
     }
 
     @Test
@@ -258,7 +254,6 @@ class RestateEndpointLifecycleTest {
     private fun lifecycle(endpointPort: Int) =
         RestateEndpointLifecycle(
             feeWorkflow = mock(FeeWorkflow::class.java),
-            transactionFeeRecord = TransactionFeeRecord(ClaimDecider(), RestateFeeRecordState()),
             deployments = deployments,
             properties =
                 RestateProperties(
@@ -304,7 +299,7 @@ class RestateEndpointLifecycleTest {
         // Not this machine's name, so a test proves the registered URL takes the setting, not a guess
         const val ADVERTISED_HOST = "fee.restate-reaches-it.test"
 
-        val DEPLOYMENT = Deployment("dp_test", listOf("FeeWorkflow", "TransactionFeeRecord"))
+        val DEPLOYMENT = Deployment("dp_test", listOf("FeeWorkflow"))
 
         fun freePort(): Int = ServerSocket(0).use { it.localPort }
 

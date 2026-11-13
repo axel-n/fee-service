@@ -3,7 +3,8 @@ package com.example.fee.config
 import org.springframework.boot.context.properties.ConfigurationProperties
 import java.math.BigDecimal
 
-// Every @ConfigurationProperties class lives in this package, one file per top-level section of application.yml.
+// Every @Configuration and @ConfigurationProperties class lives in this package; properties classes one file per
+// top-level section of application.yml.
 // This file is the `fee:` section: one class per transaction type, so a new type adds a class here.
 
 /** The numbers of `MobileTopUpFeeRule`, from `fee.mobile-top-up`. A missing or invalid value fails startup. */
@@ -67,20 +68,14 @@ class CashWithdrawalFeeProperties(
 // message that names the configuration key, without the Bean Validation starter.
 
 /** [value] of the configuration key [key] as a rate: present and in [0, 1). */
-internal fun requiredRate(
-    key: String,
-    value: BigDecimal?,
-): BigDecimal {
+internal fun requiredRate(key: String, value: BigDecimal?): BigDecimal {
     requireNotNull(value) { "$key is missing: set it to a rate in [0, 1), e.g. \"0.005\"" }
     require(value.signum() >= 0 && value < BigDecimal.ONE) { "$key must be in [0, 1), was ${value.toPlainString()}" }
     return value
 }
 
 /** [value] of the configuration key [key] as an amount in the transaction's asset: present and not negative. */
-internal fun requiredAmount(
-    key: String,
-    value: BigDecimal?,
-): BigDecimal {
+internal fun requiredAmount(key: String, value: BigDecimal?): BigDecimal {
     requireNotNull(value) { "$key is missing: set it to an amount of 0 or more, e.g. \"1.00\"" }
     require(value.signum() >= 0) { "$key must not be negative, was ${value.toPlainString()}" }
     return value

@@ -1,11 +1,12 @@
 package com.example.fee.it
 
 import com.example.fee.contract.FeeRequest
-import com.example.fee.record.ClaimResult
+import com.example.fee.contract.FeeResponse
 import com.example.fee.record.FeeRecord
 import com.example.fee.record.FeeRecordStatus
 import com.example.fee.workflow.FeeOutcome
 import com.example.fee.workflow.WorkflowStep
+import com.github.benmanes.caffeine.cache.Cache
 import dev.restate.client.SendResponse
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
@@ -15,9 +16,10 @@ import java.math.BigDecimal
 import java.util.UUID
 
 /**
- * A `transaction_id` after Restate forgot its run (workflow retention, 1 day on 1.8.1). The workflow key no longer finds
- * the old run, so a new workflow starts. A charged id is stopped at CLAIM by its permanent record: `AlreadyCompleted` →
- * the stored response, no second charge. A rejected id has no record, so it is processed normally then.
+ * A `transaction_id` after Restate forgot its run (workflow retention, 1 day on 1.8.1). A charged id is answered by
+ * `FeeService` from its cache or from Postgres, so no new run starts. A run that starts anyway, sent past the app, is
+ * stopped at CLAIM by the permanent record: `AlreadyCompleted` → the stored response, no second charge. A rejected id has
+ * no record, so it is processed normally then.
  *
  * Waiting a day is not an option, so the tests purge the old run through the admin API, as retention would.
  */
@@ -25,27 +27,13 @@ class RetentionExpiredIT
     @Autowired
     constructor(
         private val calculator: CountingFeeCalculator,
+        private val chargedFeesCache: Cache<String, FeeResponse>,
         @LocalServerPort apiPort: Int,
     ) : RestateIntegrationTest() {
         private val api = FeeApi(apiPort)
 
         @Test
-        fun `CLAIM on a completed record is AlreadyCompleted with the stored response`() {
-            // given
-            val request = chargedRequest()
-            val recorded = completedRecord(request)
-
-            // when
-            val claim = StoredFeeRecords.claim(transactionIdOf(request))
-
-            // then: the stored response, and the record is untouched
-            assertThat(claim).isEqualTo(ClaimResult.AlreadyCompleted(checkNotNull(recorded.response)))
-            assertThat(StoredFeeRecords.of(transactionIdOf(request))).isEqualTo(recorded)
-            assertChargedOnce(request)
-        }
-
-        @Test
-        fun `the same payload after its run was purged gets the same response through the API and is not charged again`() {
+        fun `a charged transaction_id whose run was purged is answered from the cache, without a new run or a second charge`() {
             // given: the payload charged through the API, then its run purged as retention would
             val request = validRequest(newTransactionId())
             val first = api.submit(bodyOf(request))
@@ -56,12 +44,51 @@ class RetentionExpiredIT
             // when
             val second = api.submit(bodyOf(request))
 
-            // then: the same response as the first time
+            // then: the same response, and Restate was not asked: the purged run has no successor
             assertThat(second.status).describedAs("second POST status, body %s", second.body).isEqualTo(200)
             assertThat(second.body).isEqualTo(first.body)
+            assertThat(StoredWorkflows.step(request)).isNull()
+            assertThat(StoredFeeRecords.of(transactionIdOf(request))).isEqualTo(recorded)
+            assertChargedOnce(request)
+        }
 
-            // then: a new run under the same key (the purged one had no step left), which CLAIM answered from the record.
-            // A workflow's invocation id is derived from its key, so it is the same for both runs and proves nothing.
+        @Test
+        fun `a charged transaction_id no longer cached is answered from Postgres, without a new run, and cached again`() {
+            // given: charged, its run purged, and its cache entry gone (expired, evicted or another instance)
+            val request = validRequest(newTransactionId())
+            val first = api.submit(bodyOf(request))
+            assertThat(first.status).describedAs("first POST status, body %s", first.body).isEqualTo(200)
+            val recorded = completedRecord(request)
+            purgeRunOf(request)
+            chargedFeesCache.invalidate(transactionIdOf(request))
+
+            // when: sent again with a changed amount
+            val second = api.submit(bodyOf(request.copy(amount = BigDecimal("2000"))))
+
+            // then: the stored response, and no new run
+            assertThat(second.status).describedAs("second POST status, body %s", second.body).isEqualTo(200)
+            assertThat(second.body).isEqualTo(first.body)
+            assertThat(StoredWorkflows.step(request)).isNull()
+            assertThat(chargedFeesCache.getIfPresent(transactionIdOf(request))).isEqualTo(recorded.response)
+            assertChargedOnce(request)
+        }
+
+        @Test
+        fun `a run sent past the app for a charged transaction_id is stopped at CLAIM with the stored response`() {
+            // given: the payload charged through the API, then its run purged as retention would
+            val request = validRequest(newTransactionId())
+            val first = api.submit(bodyOf(request))
+            assertThat(first.status).describedAs("first POST status, body %s", first.body).isEqualTo(200)
+            val recorded = completedRecord(request)
+            purgeRunOf(request)
+
+            // when: a new run under the same key, straight through the ingress
+            val sent = StoredWorkflows.submit(request)
+            awaitUntil("the new run of ${StoredWorkflows.keyOf(request)} has finished") { StoredWorkflows.outcome(request) != null }
+
+            // then: a new run, which CLAIM answered from the record. A workflow's invocation id is derived from its key,
+            // so it is the same for both runs and proves nothing.
+            assertThat(sent.sendStatus()).isEqualTo(SendResponse.SendStatus.ACCEPTED)
             assertThat(StoredWorkflows.step(request)).isEqualTo(WorkflowStep.DONE)
             assertThat(StoredWorkflows.outcome(request)).isEqualTo(FeeOutcome.Charged(checkNotNull(recorded.response)))
 
@@ -77,6 +104,7 @@ class RetentionExpiredIT
             val rejected = valid.copy(state = "PENDING")
             val rejection = api.submit(bodyOf(rejected))
             assertThat(rejection.status).describedAs("first POST status, body %s", rejection.body).isEqualTo(422)
+            assertThat(StoredFeeRecords.of(transactionIdOf(valid))).isNull()
             purgeRunOf(rejected)
 
             // when
@@ -88,15 +116,6 @@ class RetentionExpiredIT
             assertThat(StoredWorkflows.outcome(valid)).isInstanceOf(FeeOutcome.Charged::class.java)
             assertThat(completedRecord(valid).response?.amount).isEqualByComparingTo(valid.amount)
             assertChargedOnce(valid)
-        }
-
-        // A payload charged through the API, so its record is COMPLETED and its fee calculated once
-        private fun chargedRequest(): FeeRequest {
-            val request = validRequest(newTransactionId())
-            val response = api.submit(bodyOf(request))
-            assertThat(response.status).describedAs("POST status, body %s", response.body).isEqualTo(200)
-            assertChargedOnce(request)
-            return request
         }
 
         private fun completedRecord(request: FeeRequest): FeeRecord {
@@ -121,6 +140,7 @@ class RetentionExpiredIT
 
         private fun assertChargedOnce(request: FeeRequest) {
             assertThat(calculator.count(transactionIdOf(request))).describedAs("CALCULATE executions").isEqualTo(1)
+            assertThat(StoredFeeRecords.count(transactionIdOf(request))).describedAs("fee records").isEqualTo(1)
             assertThat(StoredFeeRecords.of(transactionIdOf(request))?.response?.fee).isEqualByComparingTo(BigDecimal("1.50"))
         }
 

@@ -18,6 +18,9 @@ Your challenge is to build a RESTful API for a fees workflow that uses Kotlin se
 
 Your workflow should persist the result of the fee calculations and charges. If you have time, introduce other transaction types and implement fees for them.
 
+> **Clarification (from the company):** the results of the fee calculations and charges are persisted in a database of
+> the service's own, in addition to Restate.
+
 ## 3. Test Case & API Specification
 
 Your test case should create a transaction and submit it to the fees endpoint:

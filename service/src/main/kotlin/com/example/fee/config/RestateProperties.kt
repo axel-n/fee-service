@@ -43,23 +43,15 @@ class RestateProperties(
         const val PREFIX = "restate"
         private const val MAX_PORT = 65_535
 
-        private fun <T : Any> present(
-            key: String,
-            value: T?,
-        ): T = requireNotNull(value) { "$PREFIX.$key is missing; set it in application.yml" }
+        private fun <T : Any> present(key: String, value: T?): T =
+            requireNotNull(value) { "$PREFIX.$key is missing; set it in application.yml" }
 
-        private fun positive(
-            key: String,
-            value: Duration?,
-        ): Duration =
+        private fun positive(key: String, value: Duration?): Duration =
             present(key, value).also {
                 require(it.isPositive) { "$PREFIX.$key must be positive, was $it" }
             }
 
-        private fun host(
-            key: String,
-            value: String?,
-        ): String {
+        private fun host(key: String, value: String?): String {
             val host = present(key, value)
             val uri = runCatching { URI("http://$host:1") }.getOrNull()
             require(uri != null && uri.host == host && uri.port == 1) {
@@ -68,10 +60,7 @@ class RestateProperties(
             return host
         }
 
-        private fun httpUrl(
-            key: String,
-            value: String?,
-        ): String {
+        private fun httpUrl(key: String, value: String?): String {
             val url = present(key, value)
             val uri = runCatching { URI(url) }.getOrNull()
             require(uri != null && uri.scheme in setOf("http", "https") && !uri.host.isNullOrEmpty()) {

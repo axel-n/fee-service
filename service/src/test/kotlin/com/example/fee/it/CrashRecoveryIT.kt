@@ -7,6 +7,7 @@ import com.example.fee.workflow.WorkflowStep
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.Arguments
+import org.junit.jupiter.params.provider.EnumSource
 import org.junit.jupiter.params.provider.MethodSource
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.web.server.LocalServerPort
@@ -17,7 +18,8 @@ import java.util.stream.Stream
 /**
  * A crash at every step boundary: [FaultInjectingStepHook] throws once before or after a step, Restate retries
  * the invocation from the top, replays the journaled steps and runs the rest. The caller still gets `Charged`, and the
- * record is `COMPLETED`.
+ * record is `COMPLETED`. [FaultInjectingFeeRecordRepository] crashes right after a Postgres write committed, before its
+ * step is journaled: the step runs again and finds what it wrote, so there is still one record, `COMPLETED`.
  *
  * "Not re-executed" is asserted by counting the journaled closures (validator, calculator), never hook calls: the
  * handler, hooks included, runs again on every replay. Each closure runs exactly once whichever boundary crashed: a step
@@ -27,6 +29,7 @@ class CrashRecoveryIT
     @Autowired
     constructor(
         private val hook: FaultInjectingStepHook,
+        private val records: FaultInjectingFeeRecordRepository,
         private val validator: CountingValidator,
         private val calculator: CountingFeeCalculator,
         @LocalServerPort apiPort: Int,
@@ -65,6 +68,34 @@ class CrashRecoveryIT
             assertThat(calculator.count(transactionId)).describedAs("CALCULATE executions").isEqualTo(1)
 
             // then: the record is completed with the charged response
+            val record = StoredFeeRecords.of(transactionId)
+            assertThat(record?.status).isEqualTo(FeeRecordStatus.COMPLETED)
+            assertThat(record?.response?.fee).isEqualByComparingTo(BigDecimal("1.50"))
+        }
+
+        @ParameterizedTest(name = "crash right after the {0} committed")
+        @EnumSource(FaultInjectingFeeRecordRepository.Write::class)
+        fun `a crash after a Postgres write committed but before Restate journaled it is retried to one fee record`(
+            write: FaultInjectingFeeRecordRepository.Write,
+        ) {
+            // given: the write commits, then the app dies before the step's result is journaled
+            val transactionId = "it-commit-crash-${UUID.randomUUID().toString().take(13)}"
+            val request = validRequest(transactionId)
+            records.crashAfterCommitOnce(transactionId, write)
+
+            // when
+            val response = api.submit(bodyOf(request))
+
+            // then: the crash happened, and the step ran again: the claim found its own record by its token, and the
+            // record was completed with the same response
+            assertThat(records.crashCount(transactionId)).describedAs("injected crashes").isEqualTo(1)
+            assertThat(response.status).describedAs("POST status, body %s", response.body).isEqualTo(200)
+            assertThat(response.body["fee"].decimalValue()).isEqualByComparingTo(BigDecimal("1.50"))
+            assertThat(StoredWorkflows.outcome(request)).isInstanceOf(FeeOutcome.Charged::class.java)
+
+            // then: calculated once, one record, completed
+            assertThat(calculator.count(transactionId)).describedAs("CALCULATE executions").isEqualTo(1)
+            assertThat(StoredFeeRecords.count(transactionId)).describedAs("fee records").isEqualTo(1)
             val record = StoredFeeRecords.of(transactionId)
             assertThat(record?.status).isEqualTo(FeeRecordStatus.COMPLETED)
             assertThat(record?.response?.fee).isEqualByComparingTo(BigDecimal("1.50"))

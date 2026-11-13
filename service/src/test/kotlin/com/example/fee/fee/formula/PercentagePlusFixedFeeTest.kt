@@ -28,10 +28,7 @@ class PercentagePlusFixedFeeTest {
         "0.5, 0.30", // 0.305: half to even (down), the sum is rounded once
         "1.5, 0.32", // 0.315: half to even (up)
     )
-    fun `charges the rate plus the fixed amount, rounded once`(
-        amount: String,
-        expected: String,
-    ) {
+    fun `charges the rate plus the fixed amount, rounded once`(amount: String, expected: String) {
         // given
         val tx = transaction(amount, type = TransactionType.MERCHANT_PAYMENT)
 

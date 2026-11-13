@@ -1,7 +1,6 @@
 package com.example.fee.restate
 
 import com.example.fee.config.RestateProperties
-import com.example.fee.record.TransactionFeeRecord
 import com.example.fee.workflow.FeeWorkflow
 import dev.restate.sdk.endpoint.Endpoint
 import dev.restate.sdk.http.vertx.RestateHttpServer
@@ -13,9 +12,9 @@ import java.util.concurrent.CompletionStage
 import java.util.concurrent.ExecutionException
 
 /**
- * Serves the Spring-built [FeeWorkflow] and [TransactionFeeRecord] beans as a Restate endpoint on
- * `restate.endpoint-port`, and keeps it registered with Restate while it runs. It is the only place that starts or stops
- * the endpoint, so tests stop and start it to simulate a crash or a restart.
+ * Serves the Spring-built [FeeWorkflow] bean as a Restate endpoint on `restate.endpoint-port`, and keeps it registered
+ * with Restate while it runs. It is the only place that starts or stops the endpoint, so tests stop and start it to
+ * simulate a crash or a restart.
  *
  * Start listens, then registers the endpoint as `http://<restate.advertised-host>:<port>`. Registering the same URL again
  * after a restart keeps its deployment, so invocations pinned to it resume. A failed registration fails the start: an app
@@ -32,7 +31,6 @@ import java.util.concurrent.ExecutionException
 @Component
 class RestateEndpointLifecycle(
     private val feeWorkflow: FeeWorkflow,
-    private val transactionFeeRecord: TransactionFeeRecord,
     private val deployments: RestateDeployments,
     private val properties: RestateProperties,
 ) : SmartLifecycle {
@@ -49,7 +47,6 @@ class RestateEndpointLifecycle(
                 Endpoint
                     .builder()
                     .bind(feeWorkflow)
-                    .bind(transactionFeeRecord)
                     .build()
             val server = RunningServer.listen(endpoint, properties.endpointPort)
             log.info("Restate endpoint listening on port {}", server.port)
@@ -138,10 +135,7 @@ class RestateEndpointLifecycle(
             private val FUTURE: Class<*> = Class.forName("io.vertx.core.Future")
 
             /** Listens on [port] (0: the OS picks one); fails naming the port, leaving no Vert.x instance behind. */
-            fun listen(
-                endpoint: Endpoint,
-                port: Int,
-            ): RunningServer {
+            fun listen(endpoint: Endpoint, port: Int): RunningServer {
                 val vertx = checkNotNull(invoke(null, VERTX, "vertx")) { "Vertx.vertx() returned null" }
                 try {
                     val httpServer =
@@ -164,11 +158,7 @@ class RestateEndpointLifecycle(
                 }
             }
 
-            private fun invoke(
-                target: Any?,
-                type: Class<*>,
-                method: String,
-            ): Any? = unwrapping { type.getMethod(method).invoke(target) }
+            private fun invoke(target: Any?, type: Class<*>, method: String): Any? = unwrapping { type.getMethod(method).invoke(target) }
 
             // Vert.x completes a bind or a close (successfully or not) by itself, so the wait needs no timeout of its own.
             private fun await(future: Any?) {

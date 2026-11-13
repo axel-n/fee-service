@@ -28,13 +28,13 @@ class RestateDeploymentsTest {
     @Test
     fun `register posts the uri with force and returns the deployment Restate answers`() {
         // given
-        adminApi.answer(201, """{"id":"dp_1","services":[{"name":"FeeWorkflow"},{"name":"TransactionFeeRecord"}]}""")
+        adminApi.answer(201, """{"id":"dp_1","services":[{"name":"FeeWorkflow"},{"name":"OtherService"}]}""")
 
         // when
         val deployment = deployments.register("http://dev:9080")
 
         // then
-        assertThat(deployment).isEqualTo(Deployment("dp_1", listOf("FeeWorkflow", "TransactionFeeRecord")))
+        assertThat(deployment).isEqualTo(Deployment("dp_1", listOf("FeeWorkflow", "OtherService")))
         val request = adminApi.requests.single()
         assertThat(request.method).isEqualTo("POST")
         assertThat(request.path).isEqualTo("/deployments")
@@ -73,7 +73,7 @@ class RestateDeploymentsTest {
         adminApi.answer(200, """{"rows":[{"unfinished":3}]}""")
 
         // when
-        val unfinished = deployments.unfinishedInvocations(Deployment("dp_1", listOf("FeeWorkflow", "TransactionFeeRecord")))
+        val unfinished = deployments.unfinishedInvocations(Deployment("dp_1", listOf("FeeWorkflow", "OtherService")))
 
         // then
         assertThat(unfinished).isEqualTo(3)
@@ -85,7 +85,7 @@ class RestateDeploymentsTest {
             .contains("FROM sys_invocation")
             .contains("status <> 'completed'")
             .contains("pinned_deployment_id = 'dp_1'")
-            .contains("pinned_deployment_id IS NULL AND target_service_name IN ('FeeWorkflow', 'TransactionFeeRecord')")
+            .contains("pinned_deployment_id IS NULL AND target_service_name IN ('FeeWorkflow', 'OtherService')")
     }
 
     @Test
@@ -181,7 +181,7 @@ class RestateDeploymentsTest {
         RestateProperties(
             ingressUrl = "http://localhost:8080",
             adminUrl = adminUrl,
-            endpointPort = 9080,
+            endpointPort = 9_080,
             advertisedHost = "dev",
             attachTimeout = Duration.ofSeconds(10),
         )
@@ -225,10 +225,7 @@ class RestateDeploymentsTest {
             server.start()
         }
 
-        fun answer(
-            status: Int,
-            body: String,
-        ) {
+        fun answer(status: Int, body: String) {
             this.status = status
             this.body = body
         }

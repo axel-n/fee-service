@@ -71,6 +71,7 @@ rule "Constructor injection only: no @Autowired in production code" "$(g '@Autow
 rule "No !! and no lateinit in production code" "$(g '!!|\blateinit\b' "${ALL_MAIN[@]}")"
 rule "No disabled tests: every test must run" "$(g '@(Disabled[A-Za-z]*|Ignore)\b' "${ALL_TEST[@]}")"
 mapfile -t POMS < <(existing pom.xml "${MODULES[@]/%//pom.xml}")
+# Postgres is reached through R2DBC only (AGENTS.md stack): no JDBC driver or starter, no migration tool, no JPA
 if ((${#POMS[@]})); then
   rule "Dependencies the project ruled out (AGENTS.md hard rule 1)" \
     "$(grep -nE '<artifactId>(spring-boot-starter-(actuator|validation|data-jpa|jdbc)|lombok|mockito-kotlin|kotest[a-z-]*|sdk-testing|flyway[a-z-]*|postgresql|h2|spring-cloud-[a-z-]*)</artifactId>' "${POMS[@]}")"

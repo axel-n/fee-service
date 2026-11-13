@@ -13,39 +13,39 @@ class ClaimDeciderTest {
     private val decider = ClaimDecider()
 
     @Test
-    fun `no record yet is a new claim`() {
+    fun `a record in progress claimed with this run's token is a new claim`() {
         // given
-        val record: FeeRecord? = null
+        val record = FeeRecord.inProgress("token-a")
 
         // when
-        val result = decider.decide(record)
+        val result = decider.decide(record, "token-a")
 
         // then
         assertThat(result).isEqualTo(ClaimResult.New)
     }
 
     @Test
-    fun `a record in progress is reported as in progress`() {
+    fun `a record in progress claimed with another token is reported as in progress`() {
         // given
-        val record = FeeRecord.inProgress()
+        val record = FeeRecord.inProgress("token-a")
 
         // when
-        val result = decider.decide(record)
+        val result = decider.decide(record, "token-b")
 
         // then
         assertThat(result).isEqualTo(ClaimResult.InProgress)
     }
 
     @Test
-    fun `a completed record returns its stored response`() {
+    fun `a completed record returns its stored response, whoever claimed it`() {
         // given
-        val record = FeeRecord.inProgress().complete(response)
+        val record = FeeRecord.inProgress("token-a").complete(response)
 
         // when
-        val result = decider.decide(record)
+        val results = listOf(decider.decide(record, "token-a"), decider.decide(record, "token-b"))
 
         // then
-        assertThat(result).isEqualTo(ClaimResult.AlreadyCompleted(response))
+        assertThat(results).containsOnly(ClaimResult.AlreadyCompleted(response))
     }
 }
 
@@ -54,10 +54,7 @@ class ClaimResultTest {
 
     @ParameterizedTest
     @MethodSource("results")
-    fun `is journaled under its explicit type name and read back equal`(
-        result: ClaimResult,
-        typeName: String,
-    ) {
+    fun `is journaled under its explicit type name and read back equal`(result: ClaimResult, typeName: String) {
         // given
         val claim = result
 

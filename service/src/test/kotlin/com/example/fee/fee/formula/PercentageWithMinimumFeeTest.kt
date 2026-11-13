@@ -31,10 +31,7 @@ class PercentageWithMinimumFeeTest {
         "201, 1.00", // 1.005: half to even (down)
         "203, 1.02", // 1.015: half to even (up)
     )
-    fun `charges the rate but at least the minimum`(
-        amount: String,
-        expected: String,
-    ) {
+    fun `charges the rate but at least the minimum`(amount: String, expected: String) {
         // given
         val tx = transaction(amount, type = TransactionType.BANK_TRANSFER)
 

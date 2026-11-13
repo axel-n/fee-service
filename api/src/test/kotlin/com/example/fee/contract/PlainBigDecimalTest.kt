@@ -20,11 +20,7 @@ class PlainBigDecimalTest {
 
     @ParameterizedTest(name = "{0}: {1} is written as {2}")
     @MethodSource("plainNumbers")
-    fun `writes a plain number that keeps its scale`(
-        mapper: ContractMapper,
-        value: String,
-        expected: String,
-    ) {
+    fun `writes a plain number that keeps its scale`(mapper: ContractMapper, value: String, expected: String) {
         // given
         val amount = Amount(BigDecimal(value))
 
@@ -37,11 +33,7 @@ class PlainBigDecimalTest {
 
     @ParameterizedTest(name = "{0}: {1} is written plain, {2} characters")
     @MethodSource("scaleBounds")
-    fun `writes plain up to the scale bound`(
-        mapper: ContractMapper,
-        value: String,
-        length: Int,
-    ) {
+    fun `writes plain up to the scale bound`(mapper: ContractMapper, value: String, length: Int) {
         // given
         val amount = Amount(BigDecimal(value))
 
@@ -55,10 +47,7 @@ class PlainBigDecimalTest {
 
     @ParameterizedTest(name = "{0}: {1} stays scientific")
     @MethodSource("extremeScales")
-    fun `keeps scientific notation for an extreme scale instead of building a huge string`(
-        mapper: ContractMapper,
-        value: String,
-    ) {
+    fun `keeps scientific notation for an extreme scale instead of building a huge string`(mapper: ContractMapper, value: String) {
         // given
         val amount = Amount(BigDecimal(value))
 

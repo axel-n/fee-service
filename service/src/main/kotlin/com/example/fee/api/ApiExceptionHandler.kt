@@ -68,10 +68,7 @@ class ApiExceptionHandler : ResponseEntityExceptionHandler() {
             setProperty(CODE, exception.code.name)
         }
 
-    private fun unreadableBodyProblem(
-        status: HttpStatusCode,
-        cause: Throwable?,
-    ): ProblemDetail {
+    private fun unreadableBodyProblem(status: HttpStatusCode, cause: Throwable?): ProblemDetail {
         val field =
             (cause as? DatabindException)?.path?.takeIf { it.isNotEmpty() }?.joinToString(".") {
                 it.propertyName ?: "[${it.index}]"

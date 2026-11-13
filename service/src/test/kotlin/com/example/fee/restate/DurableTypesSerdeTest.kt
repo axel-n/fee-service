@@ -4,7 +4,6 @@ import com.example.fee.contract.FeeRequest
 import com.example.fee.contract.FeeResponse
 import com.example.fee.fee.FeeQuote
 import com.example.fee.record.ClaimResult
-import com.example.fee.record.FeeRecord
 import com.example.fee.record.FeeRecords.response
 import com.example.fee.restate.serde.KotlinJacksonSerdeFactory
 import com.example.fee.validation.ValidationError
@@ -27,11 +26,7 @@ class DurableTypesSerdeTest {
 
     @ParameterizedTest(name = "{0}")
     @MethodSource("durableValues")
-    fun `reads back what it journaled, unchanged`(
-        label: String,
-        value: Any,
-        declaredType: Class<*>,
-    ) {
+    fun `reads back what it journaled, unchanged`(label: String, value: Any, declaredType: Class<*>) {
         // given
         val serde = factory.create(KtTypeTag<Any>(declaredType.kotlin, declaredType.kotlin.createType()))
 
@@ -64,8 +59,6 @@ class DurableTypesSerdeTest {
                 Arguments.of("ClaimResult.New", ClaimResult.New, ClaimResult::class.java),
                 Arguments.of("ClaimResult.AlreadyCompleted", ClaimResult.AlreadyCompleted(response), ClaimResult::class.java),
                 Arguments.of("ClaimResult.InProgress", ClaimResult.InProgress, ClaimResult::class.java),
-                Arguments.of("FeeRecord IN_PROGRESS", FeeRecord.inProgress(), FeeRecord::class.java),
-                Arguments.of("FeeRecord COMPLETED", FeeRecord.inProgress().complete(response), FeeRecord::class.java),
                 Arguments.of("ValidationError", error, ValidationError::class.java),
                 Arguments.of("FeeRequest (the workflow input)", request, FeeRequest::class.java),
                 Arguments.of("FeeRequest with missing fields", FeeRequest(transactionId = "txn_001"), FeeRequest::class.java),

@@ -86,10 +86,7 @@ class CountingFeeCalculator(
 
     // Bounded, so a test that never releases can't leave a thread waiting for the rest of the run. The plain exception
     // makes Restate retry the closure.
-    private fun awaitRelease(
-        transactionId: String,
-        gate: CountDownLatch,
-    ) {
+    private fun awaitRelease(transactionId: String, gate: CountDownLatch) {
         check(gate.await(MAX_BLOCK.toMillis(), TimeUnit.MILLISECONDS)) {
             "calculation for $transactionId was not released within $MAX_BLOCK"
         }

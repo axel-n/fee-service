@@ -60,12 +60,7 @@ class FeeCalculatorTest {
         "MERCHANT_PAYMENT, 10.3, 0.01,   Fee rate of 1% plus 0.30 USD fixed",
         "CASH_WITHDRAWAL,  2.0,  0,      Flat fee of 2.00 USD",
     )
-    fun `calculates with the rule of the transaction's type`(
-        type: TransactionType,
-        fee: String,
-        rate: String,
-        description: String,
-    ) {
+    fun `calculates with the rule of the transaction's type`(type: TransactionType, fee: String, rate: String, description: String) {
         // given
         val calculator = FeeCalculator(allRules)
         val tx = transaction("1000", Asset.USD, type)

@@ -15,40 +15,23 @@ enum class ContractMapper {
     HTTP {
         private val mapper: JsonMapper = JsonMapper.builder().findAndAddModules().build()
 
-        override fun <T> write(
-            value: T,
-            type: Class<T>,
-        ): String = mapper.writerFor(type).writeValueAsString(value)
+        override fun <T> write(value: T, type: Class<T>): String = mapper.writerFor(type).writeValueAsString(value)
 
-        override fun <T> read(
-            json: String,
-            type: Class<T>,
-        ): T = mapper.readValue(json, type)
+        override fun <T> read(json: String, type: Class<T>): T = mapper.readValue(json, type)
     },
     RESTATE {
         private val factory = JacksonSerdeFactory()
 
-        override fun <T> write(
-            value: T,
-            type: Class<T>,
-        ): String = String(factory.create(type).serialize(value).toByteArray(), Charsets.UTF_8)
+        override fun <T> write(value: T, type: Class<T>): String =
+            String(factory.create(type).serialize(value).toByteArray(), Charsets.UTF_8)
 
-        override fun <T> read(
-            json: String,
-            type: Class<T>,
-        ): T = factory.create(type).deserialize(Slice.wrap(json))
+        override fun <T> read(json: String, type: Class<T>): T = factory.create(type).deserialize(Slice.wrap(json))
     },
     ;
 
-    abstract fun <T> write(
-        value: T,
-        type: Class<T>,
-    ): String
+    abstract fun <T> write(value: T, type: Class<T>): String
 
-    abstract fun <T> read(
-        json: String,
-        type: Class<T>,
-    ): T
+    abstract fun <T> read(json: String, type: Class<T>): T
 
     companion object {
         private val tree = ObjectMapper()

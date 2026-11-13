@@ -272,9 +272,9 @@ EOF
 AUTONOMOUS_RULES='AUTONOMOUS RUN: the user is away for hours, and nobody will answer. This overrides "Stop and ask" below: never
 return status "blocked". Where you would ask, decide yourself:
 - Take the option you would recommend, as long as it stays within AGENTS.md: the hard rules still hold (no dependency
-  outside the approved stack, no software installs, no storage outside Restate, money as BigDecimal), and so do the
-  protected files. Record the decision in docs/decisions.md as a new D row whose text ends with "(autonomous decision,
-  review)". An open question you answer this way moves into the decisions the same way.
+  outside the approved stack, no software installs, fee records only in Postgres and no other storage, money as
+  BigDecimal), and so do the protected files. Record the decision in docs/decisions.md as a new D row whose text ends
+  with "(autonomous decision, review)". An open question you answer this way moves into the decisions the same way.
 - If code from an earlier task is broken or lacks something this task needs, fix or add it here, minimally, and say so.
 - If something can'"'"'t be done in this environment (a live demo, a manual step), do the closest useful thing (a script,
   written steps) and say what is left for a person.

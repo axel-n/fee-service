@@ -10,7 +10,7 @@ import java.math.BigDecimal
  * doesn't depend on enum names. [rate] is the configured rate that produced [fee] (`0` for a flat fee). The stored
  * [fee] has the asset's decimals (`1.50`); the API answers it without trailing zeros (`1.5`), as the challenge's sample does.
  *
- * Stored permanently in `TransactionFeeRecord`, so this JSON shape is stored state: renaming or removing a field
+ * Stored permanently in the `fee_record` table and journaled by the workflow, so this shape is stored state: renaming or removing a field
  * breaks existing records; adding a nullable field is safe.
  */
 data class FeeResponse(

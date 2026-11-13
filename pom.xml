@@ -41,6 +41,8 @@
         <kotlin.version>2.4.21</kotlin.version>
         <kotlin-coroutines.version>1.11.0</kotlin-coroutines.version>
         <jackson-2-bom.version>2.22.4</jackson-2-bom.version>
+        <!-- Caffeine: its latest release; Boot 4.1 would pin 3.2.4 -->
+        <caffeine.version>3.3.1</caffeine.version>
         <!-- Bundles ktlint 1.8.0 -->
         <ktlint-maven-plugin.version>3.7.1</ktlint-maven-plugin.version>
         <!-- mvn spring-boot:run from the root runs only the app: service sets it back to false -->
@@ -130,8 +132,8 @@
                     </dependency>
                 </dependencies>
             </plugin>
-            <!-- ktlint (ktlint_official style, main and test sources): a format problem fails every build,
-                 mvn test included. mvn ktlint:format fixes what it can -->
+            <!-- ktlint (ktlint_official style, adjusted by the root .editorconfig; main and test sources): a format
+                 problem fails every build, mvn test included. mvn ktlint:format fixes what it can -->
             <plugin>
                 <groupId>com.github.gantsign.maven</groupId>
                 <artifactId>ktlint-maven-plugin</artifactId>

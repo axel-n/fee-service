@@ -57,13 +57,13 @@ enum class WorkflowStep {
     /** `TransactionMapper`: pure and deterministic, so not journaled. */
     MAP,
 
-    /** `TransactionFeeRecord.claim()`: the fee record of the `transaction_id`, kept beyond the run's retention. */
+    /** `FeeRecordRepository.claim` in a journaled step: the `transaction_id`'s permanent fee record in Postgres. */
     CLAIM,
 
     /** `FeeCalculator` in a journaled step, because the fee numbers come from configuration. */
     CALCULATE,
 
-    /** `TransactionFeeRecord.complete(response)`: the fee is charged by recording it. */
+    /** `FeeRecordRepository.complete` in a journaled step: the fee is charged by recording it in Postgres. */
     RECORD,
 
     /** The workflow returned its outcome. */

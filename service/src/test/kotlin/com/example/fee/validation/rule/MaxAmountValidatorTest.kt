@@ -57,10 +57,7 @@ class MaxAmountValidatorTest {
         "1E+10, 10000000000",
         "9999999999999.99, 9999999999999.99",
     )
-    fun `rejects an amount above the maximum with readable message`(
-        amount: String,
-        shown: String,
-    ) {
+    fun `rejects an amount above the maximum with readable message`(amount: String, shown: String) {
         // given
         val request = validRequest.copy(amount = BigDecimal(amount))
 

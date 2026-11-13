@@ -18,7 +18,8 @@ curl -i -X POST localhost:8082/transaction/fee -H 'Content-Type: application/jso
 
 ## 2. The same `transaction_id` again: no second charge
 
-The workflow is keyed by `transaction_id`: sending the id again attaches to its first run and gets that run's response.
+The workflow is keyed by `transaction_id`: sending the id again gets the first charge's response, from the local cache or
+Postgres once it is charged, otherwise by attaching to its first run.
 
 Tested by: `DuplicatesIT`; `idempotency.feature`
 

@@ -1,6 +1,5 @@
 package com.example.fee.restate
 
-import com.example.fee.config.RestateProperties
 import com.example.fee.contract.FeeRequest
 import com.example.fee.workflow.FeeOutcome
 import dev.restate.client.Client
@@ -19,22 +18,10 @@ import org.mockito.ArgumentMatchers.isNull
 import org.mockito.Mockito.mock
 import org.mockito.Mockito.verify
 import org.mockito.Mockito.`when`
-import java.time.Duration
 import java.util.concurrent.CompletableFuture
 
-class RestateConfigTest {
-    private val config = RestateConfig()
-
+class FeeWorkflowClientsTest {
     private val request = FeeRequest(transactionId = "txn_001")
-
-    private fun properties(ingressUrl: String) =
-        RestateProperties(
-            ingressUrl = ingressUrl,
-            adminUrl = "http://localhost:9070",
-            endpointPort = 9080,
-            advertisedHost = "localhost",
-            attachTimeout = Duration.ofSeconds(10),
-        )
 
     /**
      * An ingress [Client] that acknowledges every send with [status], for a run that ends with [outcome]. Asked for the
@@ -66,23 +53,11 @@ class RestateConfigTest {
     }
 
     @Test
-    fun `creates the ingress client without contacting Restate`() {
-        // given: nothing listens on this port
-        val properties = properties("http://127.0.0.1:1")
-
-        // when
-        val client = config.restateIngressClient(properties)
-
-        // then
-        assertThat(client).isNotNull()
-    }
-
-    @Test
     fun `submits the request to the run handler of the FeeWorkflow keyed by the transaction id`() =
         runBlocking<Unit> {
             // given
             val client = ingressAnswering(SendResponse.SendStatus.ACCEPTED, FeeOutcome.Conflict("txn_001"))
-            val clients = config.feeWorkflowClients(client)
+            val clients = IngressFeeWorkflowClients(client)
 
             // when
             clients.submit("txn_001", request)
@@ -100,7 +75,7 @@ class RestateConfigTest {
         runBlocking<Unit> {
             // given
             val client = ingressAnswering(SendResponse.SendStatus.ACCEPTED, FeeOutcome.Conflict("txn_001"))
-            val run = config.feeWorkflowClients(client).submit("txn_001", request)
+            val run = IngressFeeWorkflowClients(client).submit("txn_001", request)
 
             // when
             val outcome = run.attach()
@@ -114,7 +89,7 @@ class RestateConfigTest {
         runBlocking<Unit> {
             // given: Restate already has a run for the key, so it ignores the payload and names that run
             val client = ingressAnswering(SendResponse.SendStatus.PREVIOUSLY_ACCEPTED, FeeOutcome.Conflict("txn_001"))
-            val run = config.feeWorkflowClients(client).submit("txn_001", request.copy(asset = "EUR"))
+            val run = IngressFeeWorkflowClients(client).submit("txn_001", request.copy(asset = "EUR"))
 
             // when
             val outcome = run.attach()
@@ -128,7 +103,7 @@ class RestateConfigTest {
         runBlocking<Unit> {
             // given
             val client = ingressAnswering(SendResponse.SendStatus.ACCEPTED, FeeOutcome.Conflict("txn_001"), Output.notReady())
-            val run = config.feeWorkflowClients(client).submit("txn_001", request)
+            val run = IngressFeeWorkflowClients(client).submit("txn_001", request)
 
             // when
             val output = run.output()
@@ -142,7 +117,7 @@ class RestateConfigTest {
         runBlocking<Unit> {
             // given
             val client = ingressAnswering(SendResponse.SendStatus.PREVIOUSLY_ACCEPTED, FeeOutcome.Conflict("txn_001"))
-            val run = config.feeWorkflowClients(client).submit("txn_001", request)
+            val run = IngressFeeWorkflowClients(client).submit("txn_001", request)
 
             // when
             val output = run.output()

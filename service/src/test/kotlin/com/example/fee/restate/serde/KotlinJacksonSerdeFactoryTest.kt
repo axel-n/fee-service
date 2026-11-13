@@ -1,6 +1,7 @@
 package com.example.fee.restate.serde
 
-import com.example.fee.record.FeeRecord
+import com.example.fee.contract.FeeResponse
+import com.example.fee.record.ClaimResult
 import com.example.fee.record.FeeRecords.response
 import com.example.fee.validation.ValidationError
 import dev.restate.common.Slice
@@ -17,16 +18,16 @@ class KotlinJacksonSerdeFactoryTest {
     private fun json(slice: Slice): String = String(slice.toByteArray())
 
     @Test
-    fun `writes the same JSON as Restate's Jackson serde, so stored records keep their shape`() {
+    fun `writes the same JSON as Restate's Jackson serde, so journaled results keep their shape`() {
         // given
-        val record = FeeRecord.inProgress().complete(response)
+        val claim: ClaimResult = ClaimResult.AlreadyCompleted(response)
 
         // when
-        val kotlinSdk = json(factory.create(typeTag<FeeRecord>()).serialize(record))
-        val javaSdk = json(JacksonSerdeFactory().create(FeeRecord::class.java).serialize(record))
+        val kotlinSdk = json(factory.create(typeTag<ClaimResult>()).serialize(claim))
+        val javaSdk = json(JacksonSerdeFactory().create(ClaimResult::class.java).serialize(claim))
 
         // then
-        assertThat(kotlinSdk).isEqualTo(javaSdk).contains("\"status\":\"COMPLETED\"", "\"transaction_id\":\"txn_001\"")
+        assertThat(kotlinSdk).isEqualTo(javaSdk).contains("\"@type\":\"ALREADY_COMPLETED\"", "\"transaction_id\":\"txn_001\"")
     }
 
     @Test
@@ -57,24 +58,24 @@ class KotlinJacksonSerdeFactoryTest {
     @Test
     fun `falls back to the class when a type tag carries no Kotlin type`() {
         // given
-        val serde = factory.create(KtTypeTag<FeeRecord>(FeeRecord::class, null))
+        val serde = factory.create(KtTypeTag<FeeResponse>(FeeResponse::class, null))
 
         // when
-        val restored = serde.deserialize(serde.serialize(FeeRecord.inProgress()))
+        val restored = serde.deserialize(serde.serialize(response))
 
         // then
-        assertThat(restored).isEqualTo(FeeRecord.inProgress())
+        assertThat(restored).isEqualTo(response)
     }
 
     @Test
     fun `still reads the Java type tags the client uses`() {
         // given
-        val serde = factory.create(TypeTag.of(FeeRecord::class.java))
+        val serde = factory.create(TypeTag.of(FeeResponse::class.java))
 
         // when
-        val restored = serde.deserialize(serde.serialize(FeeRecord.inProgress()))
+        val restored = serde.deserialize(serde.serialize(response))
 
         // then
-        assertThat(restored).isEqualTo(FeeRecord.inProgress())
+        assertThat(restored).isEqualTo(response)
     }
 }

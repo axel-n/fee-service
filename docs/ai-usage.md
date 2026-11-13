@@ -16,7 +16,7 @@ the plan lives in three files, and every session reads them before it changes an
 
 | File | Role for the AI |
 |------|-----------------|
-| [`AGENTS.md`](../AGENTS.md) | The rules: priorities and approach (KISS, YAGNI, DRY, SOLID), the fixed stack, the hard rules (no new dependencies, no storage outside Restate, money is `BigDecimal`, …), the architecture and call graph rules, Restate determinism, tests, and "stop and ask instead of guessing" |
+| [`AGENTS.md`](../AGENTS.md) | The rules: priorities and approach (KISS, YAGNI, DRY, SOLID), the fixed stack, the hard rules (no new dependencies, fee records only in Postgres and nothing stored anywhere else, money is `BigDecimal`, …), the architecture and call graph rules, Restate determinism, tests, and "stop and ask instead of guessing" |
 | [`docs/design.md`](design.md) | What is built: fee table, how Restate is used, classes, wiring, call graph, extension points, configuration, recovery guarantees |
 | [`requirements.md`](../requirements.md) | The scope: nothing beyond it without asking |
 
@@ -47,10 +47,10 @@ These guards target the ways an AI agent tends to go wrong:
 | Quietly adding a library | Hard rule 1; `check.sh` fails on the dependencies `AGENTS.md` rules out |
 | Eroding the architecture | `check.sh` rules: pure packages import no Restate, the api module imports no Spring and nothing of the service, nothing outside `api` imports `api`, constructor injection only, `Clock` injected, no `!!` or `lateinit` |
 | Money as floating point | `check.sh` rules: no `Double`/`Float` in code that handles money, `BigDecimal` only from a `String` |
-| Plausible but untested claims about recovery | Crash at every step boundary, endpoint restart, Restate outage, each counting the **CALCULATE executions** (README, "Tests") |
-| Mocking the library instead of testing it | Integration and BDD tests run against a real Restate (Testcontainers) |
+| Plausible but untested claims about recovery | Crash at every step boundary and right after a Postgres write, endpoint restart, Restate outage, Postgres down or hanging, each counting the **CALCULATE executions** (README, "Tests") |
+| Mocking the library instead of testing it | Integration and BDD tests run against a real Restate and a real Postgres (Testcontainers) |
 | Non-deterministic workflow code | `AGENTS.md`'s Restate rules (clock and fee numbers only inside a journaled step), checked by `DeterminismIT` and the crash tests |
-| Tests that depend on the machine | Only random ports; every `restate.*` setting from `@DynamicPropertySource` |
+| Tests that depend on the machine | Only random ports; every `restate.*` and `spring.r2dbc.*` setting from `@DynamicPropertySource` |
 | Docs drifting from the code | The design is updated in the same change, and the docs hold only the current state |
 
 ## What a person decides

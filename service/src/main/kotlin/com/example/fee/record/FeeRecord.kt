@@ -1,17 +1,16 @@
 package com.example.fee.record
 
 import com.example.fee.contract.FeeResponse
-import com.fasterxml.jackson.annotation.JsonProperty
 
 /**
- * The permanent fee record of one `transaction_id`, the state of `TransactionFeeRecord`. [response] is set exactly when
- * [FeeRecordStatus.COMPLETED]; the constructor rejects any other combination, also when Restate reads the state back.
- *
- * Stored state: renaming or removing a field breaks existing records; adding a nullable field is safe.
+ * The fee record of one `transaction_id`: its row in the `fee_record` table. [claimToken] names the workflow run that
+ * claimed it, the only one that may complete it. [response] is set exactly when [FeeRecordStatus.COMPLETED]; the
+ * constructor rejects any other combination, and so does the table.
  */
 data class FeeRecord(
-    @JsonProperty("status") val status: FeeRecordStatus,
-    @JsonProperty("response") val response: FeeResponse? = null,
+    val status: FeeRecordStatus,
+    val claimToken: String,
+    val response: FeeResponse? = null,
 ) {
     init {
         require((status == FeeRecordStatus.COMPLETED) == (response != null)) {
@@ -20,17 +19,17 @@ data class FeeRecord(
     }
 
     /** The same claim, now charged and recorded with [response]. */
-    fun complete(response: FeeResponse): FeeRecord = FeeRecord(FeeRecordStatus.COMPLETED, response)
+    fun complete(response: FeeResponse): FeeRecord = FeeRecord(FeeRecordStatus.COMPLETED, claimToken, response)
 
     companion object {
-        /** A new claim, not charged yet. */
-        fun inProgress(): FeeRecord = FeeRecord(FeeRecordStatus.IN_PROGRESS)
+        /** A new claim by the run holding [claimToken], not charged yet. */
+        fun inProgress(claimToken: String): FeeRecord = FeeRecord(FeeRecordStatus.IN_PROGRESS, claimToken)
     }
 }
 
 /**
- * Where the fee for a `transaction_id` stands in its [FeeRecord]. Stored by name in `TransactionFeeRecord` state, so
- * renaming or removing a value is a breaking change for existing records.
+ * Where the fee for a `transaction_id` stands in its [FeeRecord]. Stored by name in the `status` column, so renaming or
+ * removing a value is a breaking change for existing records.
  */
 enum class FeeRecordStatus {
     /** Claimed by a run that has not finished: another run of the same id gets a conflict. */

@@ -29,10 +29,7 @@ class RequiredFieldsValidatorTest {
 
     @ParameterizedTest(name = "{0}")
     @MethodSource("withoutField")
-    fun `rejects a missing field with a readable message`(
-        field: String,
-        request: FeeRequest,
-    ) {
+    fun `rejects a missing field with a readable message`(field: String, request: FeeRequest) {
         // given
         val input = request
 
@@ -47,10 +44,7 @@ class RequiredFieldsValidatorTest {
 
     @ParameterizedTest(name = "{0}")
     @MethodSource("withBlankField")
-    fun `rejects a blank text field and shows the blank value`(
-        field: String,
-        request: FeeRequest,
-    ) {
+    fun `rejects a blank text field and shows the blank value`(field: String, request: FeeRequest) {
         // given
         val input = request
 

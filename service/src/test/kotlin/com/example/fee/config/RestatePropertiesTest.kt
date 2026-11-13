@@ -11,7 +11,7 @@ class RestatePropertiesTest {
     private fun properties(
         ingressUrl: String? = "http://localhost:8080",
         adminUrl: String? = "http://localhost:9070",
-        endpointPort: Int? = 9080,
+        endpointPort: Int? = 9_080,
         advertisedHost: String? = "localhost",
         attachTimeout: Duration? = Duration.ofSeconds(10),
     ) = RestateProperties(ingressUrl, adminUrl, endpointPort, advertisedHost, attachTimeout)
@@ -29,7 +29,7 @@ class RestatePropertiesTest {
         // then
         assertThat(properties.ingressUrl).isEqualTo("https://restate.example:8080")
         assertThat(properties.adminUrl).isEqualTo("https://restate.example:9070")
-        assertThat(properties.endpointPort).isEqualTo(9080)
+        assertThat(properties.endpointPort).isEqualTo(9_080)
         assertThat(properties.advertisedHost).isEqualTo("host.docker.internal")
         assertThat(properties.attachTimeout).isEqualTo(Duration.ofSeconds(10))
     }
@@ -104,7 +104,7 @@ class RestatePropertiesTest {
     }
 
     @ParameterizedTest(name = "rejects port {0}")
-    @ValueSource(ints = [-1, 65536])
+    @ValueSource(ints = [-1, 65_536])
     fun `rejects an endpoint port out of range with a readable message`(port: Int) {
         // given / when / then
         assertThatThrownBy { properties(endpointPort = port) }

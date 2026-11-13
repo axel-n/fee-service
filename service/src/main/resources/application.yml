@@ -11,6 +11,17 @@ spring:
   mvc:
     async:
       request-timeout: 0
+  # PostgreSQL, where the workflow records the fees (the fee_record table). The defaults match the dev Postgres in
+  # dev-setup/compose.yaml; elsewhere set the variables. Explicit placeholders, like restate.* below
+  r2dbc:
+    url: ${DATABASE_URL:r2dbc:postgresql://localhost:5432/fee}
+    username: ${DATABASE_USERNAME:fee}
+    password: ${DATABASE_PASSWORD:fee}
+  # schema.sql (CREATE TABLE IF NOT EXISTS) runs at every start. That is also the startup check: the app doesn't start
+  # when the database can't be reached
+  sql:
+    init:
+      mode: always
 
 server:
   port: 8081
@@ -30,6 +41,17 @@ restate:
   # How long POST /transaction/fee waits for the workflow's result; then it answers 504 only if Restate reports the run
   # as not finished (470)
   attach-timeout: ${RESTATE_ATTACH_TIMEOUT:30s}
+
+# The local cache of charged fees: FeeService answers a charged transaction_id from it, then from Postgres, before it
+# asks Restate. Charged fees never change, so the size and expiry only bound its memory
+fee-cache:
+  # How many charged fees it holds at most
+  maximum-size: ${FEE_CACHE_MAXIMUM_SIZE:1000}
+  # How long a charged fee stays after it was put there
+  expire-after-write: ${FEE_CACHE_EXPIRE_AFTER_WRITE:1d}
+  # How long FeeService waits for Postgres on a cache miss. Past it, as on a failed read, it asks Restate, which answers
+  # every transaction_id correctly: a database that hangs (a network partition) can't hold requests up
+  lookup-timeout: ${FEE_CACHE_LOOKUP_TIMEOUT:1s}
 
 # Fee numbers per transaction type, read by the *FeeProperties classes; descriptions are built from them.
 # Rates are fractions in [0, 1); min and fixed are amounts in the transaction's asset (USD or EUR, same numbers).

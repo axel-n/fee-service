@@ -32,11 +32,7 @@ data class ValidationError(
  */
 object UnsupportedValue {
     /** [raw] of [field] is not one of [supported]; the message names both, in the order given. */
-    fun error(
-        field: String,
-        raw: String,
-        supported: List<String>,
-    ): ValidationError =
+    fun error(field: String, raw: String, supported: List<String>): ValidationError =
         ValidationError(
             field,
             raw,

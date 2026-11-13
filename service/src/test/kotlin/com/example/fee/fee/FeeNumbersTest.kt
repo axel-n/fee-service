@@ -17,11 +17,7 @@ class FeeRoundingTest {
         "1.5, USD, 1.50",
         "2.5, UNKNOWN, 2",
     )
-    fun `rounds half to even at the asset's decimals`(
-        value: String,
-        asset: Asset,
-        expected: String,
-    ) {
+    fun `rounds half to even at the asset's decimals`(value: String, asset: Asset, expected: String) {
         // given
         val amount = BigDecimal(value)
 
@@ -65,10 +61,7 @@ class FeeDescriptionsTest {
         "0.000, 0%",
         "0.00125, 0.125%",
     )
-    fun `writes a rate as a percentage without trailing zeros`(
-        rate: String,
-        expected: String,
-    ) {
+    fun `writes a rate as a percentage without trailing zeros`(rate: String, expected: String) {
         // given
         val value = BigDecimal(rate)
 
@@ -87,11 +80,7 @@ class FeeDescriptionsTest {
         "2.005, USD, 2.00 USD",
         "1000, USD, 1000.00 USD",
     )
-    fun `writes an amount at the asset's decimals followed by the asset`(
-        amount: String,
-        asset: Asset,
-        expected: String,
-    ) {
+    fun `writes an amount at the asset's decimals followed by the asset`(amount: String, asset: Asset, expected: String) {
         // given
         val value = BigDecimal(amount)
 

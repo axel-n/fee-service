@@ -17,11 +17,7 @@ class FeeOutcomeTest {
 
     @ParameterizedTest
     @MethodSource("outcomes")
-    fun `is stored under its explicit type name with snake_case fields`(
-        outcome: FeeOutcome,
-        typeName: String,
-        fields: List<String>,
-    ) {
+    fun `is stored under its explicit type name with snake_case fields`(outcome: FeeOutcome, typeName: String, fields: List<String>) {
         // given
         val value = outcome
 

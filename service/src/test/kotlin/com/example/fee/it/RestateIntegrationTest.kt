@@ -6,11 +6,12 @@ import org.springframework.test.context.DynamicPropertyRegistry
 import org.springframework.test.context.DynamicPropertySource
 
 /**
- * The base of every IT that boots the app with `@SpringBootTest`: the real app against [RestateTestEnvironment], where
- * it registers its endpoint itself at startup. The HTTP API is on a random port (`@LocalServerPort`).
+ * The base of every IT that boots the app with `@SpringBootTest`: the real app against [RestateTestEnvironment] and
+ * [PostgresTestEnvironment]: it registers its endpoint with that Restate and creates its table in that Postgres itself at
+ * startup. The HTTP API is on a random port (`@LocalServerPort`).
  *
  * Only the packaged configuration is loaded (`spring.config.location=classpath:/`), so a local `config/application.yml`
- * can't change the fees under test, and every `restate.*` setting comes from `@DynamicPropertySource`.
+ * can't change the fees under test, and every `restate.*` and `spring.r2dbc.*` setting comes from `@DynamicPropertySource`.
  *
  * All subclasses share one cached application context, which owns the run's endpoint port. A subclass must not change the
  * context (no `@MockitoBean`, no extra properties or configuration): a second context would fail to bind that port. Test
@@ -26,8 +27,9 @@ abstract class RestateIntegrationTest {
     companion object {
         @JvmStatic
         @DynamicPropertySource
-        fun restateProperties(registry: DynamicPropertyRegistry) {
+        fun environmentProperties(registry: DynamicPropertyRegistry) {
             RestateTestEnvironment.registerProperties(registry)
+            PostgresTestEnvironment.registerProperties(registry)
         }
     }
 }

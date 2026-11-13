@@ -42,10 +42,7 @@ class CreatedAtValidator(
         )
     }
 
-    private fun error(
-        raw: String,
-        message: String,
-    ) = ValidationError(FIELD, raw, message, ValidationError.Kind.INVALID)
+    private fun error(raw: String, message: String) = ValidationError(FIELD, raw, message, ValidationError.Kind.INVALID)
 
     private companion object {
         const val FIELD = "created_at"

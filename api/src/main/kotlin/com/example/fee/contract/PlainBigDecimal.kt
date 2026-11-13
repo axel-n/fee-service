@@ -30,29 +30,21 @@ import com.fasterxml.jackson.databind.ser.std.StdSerializer as Jackson2StdSerial
 annotation class PlainBigDecimal {
     /** HTTP bodies: Spring MVC on Boot 4, and consumers on Jackson 3. */
     class Jackson3Serializer : StdSerializer<BigDecimal>(BigDecimal::class.java) {
-        override fun serialize(
-            value: BigDecimal,
-            gen: JsonGenerator,
-            ctxt: SerializationContext,
-        ) {
+        override fun serialize(value: BigDecimal, gen: JsonGenerator, ctxt: SerializationContext) {
             if (isPlain(value)) gen.writeNumber(value.toPlainString()) else gen.writeNumber(value)
         }
     }
 
     /** The Restate journal and state, and consumers still on Jackson 2. */
     class Jackson2Serializer : Jackson2StdSerializer<BigDecimal>(BigDecimal::class.java) {
-        override fun serialize(
-            value: BigDecimal,
-            gen: Jackson2Generator,
-            provider: Jackson2Provider,
-        ) {
+        override fun serialize(value: BigDecimal, gen: Jackson2Generator, provider: Jackson2Provider) {
             if (isPlain(value)) gen.writeNumber(value.toPlainString()) else gen.writeNumber(value)
         }
     }
 
     companion object {
         /** The bound Jackson itself uses for `WRITE_BIGDECIMAL_AS_PLAIN`. */
-        const val MAX_PLAIN_SCALE = 9999
+        const val MAX_PLAIN_SCALE = 9_999
 
         private fun isPlain(value: BigDecimal): Boolean = value.scale() in -MAX_PLAIN_SCALE..MAX_PLAIN_SCALE
     }

@@ -1,6 +1,6 @@
 Feature: Fee calculation
   A transaction in state "SETTLED - PENDING FEE" is charged the fee of its type, in its own asset, once, and the fee is
-  recorded in Restate. Fees are rounded HALF_EVEN to 2 decimals; amounts compare by value (1.5 equals 1.50).
+  recorded in Postgres with every field of the request. Fees are rounded HALF_EVEN to 2 decimals; amounts compare by value (1.5 equals 1.50).
   Transaction ids are scoped to their scenario, so scenarios never share a fee record or a charge.
 
   Scenario: The sample transaction from the requirements is charged the Mobile Top Up fee
@@ -24,6 +24,7 @@ Feature: Fee calculation
       | description    | Standard fee rate of 0.15% |
     And the fee was charged exactly once
     And the fee is recorded as completed
+    And the request is stored with the fee record
 
   Scenario Outline: A <type> of <amount> <asset> is charged <fee> <asset>
     Given a "<type>" transaction "<id>" of <amount> "<asset>" "FIAT" in state "SETTLED - PENDING FEE"
@@ -32,6 +33,7 @@ Feature: Fee calculation
     And the fee is <fee> with rate <rate> and description "<description>"
     And the fee was charged exactly once
     And the fee is recorded as completed
+    And the request is stored with the fee record
 
     Examples: One of each type in each supported asset
       | id      | type             | amount | asset | fee  | rate   | description                        |

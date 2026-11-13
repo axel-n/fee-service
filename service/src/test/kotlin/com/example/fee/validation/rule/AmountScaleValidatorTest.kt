@@ -30,11 +30,7 @@ class AmountScaleValidatorTest {
 
     @ParameterizedTest(name = "{0} {1}")
     @CsvSource("10.001, USD, 3", "10.0010, USD, 3", "0.0000001, EUR, 7", "1.999, EUR, 3")
-    fun `rejects more decimals than the asset allows with readable message`(
-        amount: String,
-        asset: String,
-        decimals: Int,
-    ) {
+    fun `rejects more decimals than the asset allows with readable message`(amount: String, asset: String, decimals: Int) {
         // given
         val request = validRequest.copy(amount = BigDecimal(amount), asset = asset)
 

@@ -30,10 +30,7 @@ class RecoverySteps(
 
     /** Arms one crash, a plain exception Restate retries, at the [moment] (`before` / `after`) side of [step]. */
     @Given("the service will crash {word} the {string} step")
-    fun theServiceWillCrash(
-        moment: String,
-        step: String,
-    ) {
+    fun theServiceWillCrash(moment: String, step: String) {
         val phase =
             FaultInjectingStepHook.Phase.entries.singleOrNull { it.name.equals(moment, ignoreCase = true) }
                 ?: error("Unknown moment '$moment', expected one of ${FaultInjectingStepHook.Phase.entries.map { it.name.lowercase() }}")

@@ -63,8 +63,13 @@ class AdminApiRestateDeployments(
                     .takeIf { it.isNotEmpty() }
                     ?.joinToString(", ", "(pinned_deployment_id IS NULL AND target_service_name IN (", "))") { sqlString(it) },
             ).joinToString(" OR ")
-        val sql = "SELECT count(*) AS unfinished FROM sys_invocation WHERE status <> 'completed' AND ($needed)"
-        val unfinished = send("POST", "/query", mapOf("query" to sql)).present("rows").present(0).present("unfinished")
+        // Restate's query API takes no parameters, so only the deployment's part is built, with quoted values
+        val unfinished =
+            send(
+                "POST",
+                "/query",
+                mapOf("query" to "$UNFINISHED_INVOCATIONS ($needed)"),
+            ).present("rows").present(0).present("unfinished")
         // A missing or odd count must never read as 0: that would remove a deployment invocations still need.
         check(unfinished.isNumber) { "Restate admin API answered a count that is not a number: $unfinished" }
         return unfinished.longValue()
@@ -74,11 +79,7 @@ class AdminApiRestateDeployments(
         send("DELETE", "/deployments/${URLEncoder.encode(deployment.id, Charsets.UTF_8)}?force=true", body = null)
     }
 
-    private fun send(
-        method: String,
-        path: String,
-        body: Any?,
-    ): JsonNode {
+    private fun send(method: String, path: String, body: Any?): JsonNode {
         val request =
             HttpRequest
                 .newBuilder(URI(adminUrl + path))
@@ -103,4 +104,9 @@ class AdminApiRestateDeployments(
         path(index).also { check(!it.isMissingNode && !it.isNull) { "Restate admin API answered without item $index: $this" } }
 
     private fun sqlString(value: String) = "'" + value.replace("'", "''") + "'"
+
+    private companion object {
+        /** The unfinished invocations, narrowed by a condition appended in parentheses. */
+        const val UNFINISHED_INVOCATIONS = "SELECT count(*) AS unfinished FROM sys_invocation WHERE status <> 'completed' AND"
+    }
 }

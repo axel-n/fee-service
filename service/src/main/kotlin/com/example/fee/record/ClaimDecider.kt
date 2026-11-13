@@ -7,32 +7,32 @@ import com.fasterxml.jackson.annotation.JsonTypeInfo
 import org.springframework.stereotype.Component
 
 /**
- * Decides a claim on a `transaction_id` from its stored [FeeRecord]. Pure, so the rules are unit-tested without
- * Restate; `TransactionFeeRecord.claim` applies the result (a [ClaimResult.New] stores [FeeRecord.inProgress]).
+ * Decides a claim on a `transaction_id` from its [FeeRecord] as it stands after the claim attempt
+ * (`FeeRecordRepository.claim`), for the run holding a claim token. Pure, so the rules are unit-tested without Restate or
+ * Postgres.
  *
  * The workflow key is the `transaction_id`, so Restate already runs one workflow per id while it keeps the run. The
  * record still decides once Restate has dropped a finished run: a charged id answers with its stored response.
  */
 @Component
 class ClaimDecider {
-    fun decide(record: FeeRecord?): ClaimResult {
-        if (record == null) return ClaimResult.New
-        return when (record.status) {
+    fun decide(record: FeeRecord, claimToken: String): ClaimResult =
+        when (record.status) {
+            // also when this run claimed it before and runs the step again after a crash
             FeeRecordStatus.IN_PROGRESS -> {
-                ClaimResult.InProgress
+                if (record.claimToken == claimToken) ClaimResult.New else ClaimResult.InProgress
             }
 
             FeeRecordStatus.COMPLETED -> {
                 ClaimResult.AlreadyCompleted(checkNotNull(record.response) { "COMPLETED fee record without a response" })
             }
         }
-    }
 }
 
 /**
- * What a claim on `TransactionFeeRecord` decided, as [ClaimDecider] computes it. Returned by the `claim` handler and
- * journaled in the workflow, so it is durable: the type ids are the explicit `@JsonSubTypes` names, never class
- * names, and renaming one breaks in-flight workflows. Compare the field-less results with `==`, `is` or `when`.
+ * What a claim on a `transaction_id` decided, as [ClaimDecider] computes it. Journaled in the workflow, so it is
+ * durable: the type ids are the explicit `@JsonSubTypes` names, never class names, and renaming one breaks in-flight
+ * workflows. Compare the field-less results with `==`, `is` or `when`.
  */
 @JsonTypeInfo(use = JsonTypeInfo.Id.NAME, property = "@type")
 @JsonSubTypes(
@@ -41,7 +41,7 @@ class ClaimDecider {
     JsonSubTypes.Type(value = ClaimResult.InProgress::class, name = "IN_PROGRESS"),
 )
 sealed interface ClaimResult {
-    /** The id was never claimed: this run owns it now and goes on to charge it. */
+    /** The id is claimed by this run, which goes on to charge it. */
     data object New : ClaimResult
 
     /** The id was already charged: return the stored [response] without charging again. */
