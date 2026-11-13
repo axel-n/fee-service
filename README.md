@@ -9,6 +9,8 @@ POST /transaction/fee          → 200 with the fee (or 202 while it is still ru
 
 - [Requirements](requirements.md): the challenge
 - [Design](docs/design.md): goal, fee table, how Restate is used, class design, wiring, call graph, guarantees
+- [Demo](docs/demo.md): curl commands with their expected responses: the requirements' sample, the same id again,
+  the other transaction types, an unknown type
 - [Dev environment](dev-setup/README.md): the dev Restate and the dev container (`podman compose`)
 - [How AI is used](docs/ai-usage.md): what every session reads, the gate, what a person decides
 

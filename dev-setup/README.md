@@ -1,13 +1,24 @@
 # Dev environment
 
-Dev Restate (UI: <http://localhost:9070>) plus a dev container with JDK 25, Maven and nested podman for Testcontainers.
-Needs podman-compose.
+
+
+## 1. run all locally
+
+### app and restate in containers
 
 ```bash
 podman compose up -d --build
 podman compose exec dev bash
 ```
-## for run integration tests on host machine
+
+### or just restate in container
+```bash
+podman compose up -d restate
+```
+
+
+
+## 2. for run integration tests on host machine
 
 ### for podman users
 ```bash
