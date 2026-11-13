@@ -10,7 +10,7 @@ import org.junit.jupiter.api.Test
 import org.mockito.Mockito.verify
 import org.mockito.Mockito.`when`
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest
+import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest
 import org.springframework.http.HttpHeaders
 import org.springframework.http.MediaType
 import org.springframework.test.context.bean.override.mockito.MockitoBean
@@ -87,6 +87,25 @@ class TransactionFeeControllerTest(
             .andExpect(jsonPath("$.description").value("Standard fee rate of 0.15%"))
         val body = result.andReturn().response.contentAsString
         assertThat(body).contains("\"amount\":1000,", "\"fee\":1.50,", "\"rate\":0.0015,")
+    }
+
+    // Jackson 3 sorts properties alphabetically by default, but keeps constructor properties in declaration order
+    @Test
+    fun `the body lists its fields in the contract's order, as the requirements' sample does`() {
+        // given
+        runBlocking { `when`(feeService.submit(request)).thenReturn(FeeStatusResponse.completed(response)) }
+
+        // when
+        val result =
+            mockMvc.performToCompletion(
+                post("/transaction/fee").contentType(MediaType.APPLICATION_JSON).content(requestJson),
+            )
+
+        // then
+        assertThat(result.andReturn().response.contentAsString).isEqualTo(
+            """{"transaction_id":"txn_001","status":"COMPLETED","amount":1000,"asset":"USD","type":"Mobile Top Up",""" +
+                """"fee":1.50,"rate":0.0015,"description":"Standard fee rate of 0.15%"}""",
+        )
     }
 
     @Test

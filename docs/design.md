@@ -104,7 +104,7 @@ Two Maven modules under the root `pom.xml` (`fee-service-parent`):
 
 | Module | Artifact | Holds |
 |--------|----------|-------|
-| `api/` | `com.example:fee-service-api` | the HTTP contract other services depend on: `contract` and `contract.error` below. Compile dependencies: Jackson and the Kotlin stdlib only |
+| `api/` | `com.example:fee-service-api` | the HTTP contract other services depend on: `contract` and `contract.error` below. Compile dependencies: Jackson (the Kotlin modules of Jackson 3 and Jackson 2) and the Kotlin stdlib only |
 | `service/` | `com.example:fee-service` | the app: every other package below, `application.yml`, and all the ITs and BDD features |
 
 Base package: `com.example.fee`. The tree lists **files**. A package holds one kind of class, and an extension point's
@@ -134,7 +134,8 @@ com.example.fee
 │   │                                   HTTP clients get it only inside FeeStatusResponse
 │   ├── FeeStatusResponse.kt            POST body: transaction_id, status, the FeeResponse fields once COMPLETED
 │   │                                   (HTTP only, never stored)
-│   ├── PlainBigDecimalSerializer.kt    BigDecimal as a plain JSON number
+│   ├── PlainBigDecimal.kt              @PlainBigDecimal: BigDecimal as a plain JSON number, with a serializer for each Jackson
+│   │                                   generation (3 for HTTP, 2 for Restate), bundled by @JacksonAnnotationsInside
 │   └── error/                          [api module] what the API answers instead of a fee
 │       ├── FeeException.kt             sealed, Spring-free: ValidationException(field, value, message, kind) (400/422), DuplicateTransactionException (409),
 │       │                               WorkflowUnavailableException (503);
@@ -231,6 +232,9 @@ com.example.fee
   Restate serializes them with its own Jackson mapper, not Spring's, and that mapper rejects unknown properties. The Kotlin
   SDK would default to kotlinx-serialization, so both services name `KotlinJacksonSerdeFactory` with `@CustomSerdeFactory`.
   It keeps the JSON exactly as the Java SDK wrote it.
+  Restate's mapper is **Jackson 2**, while Spring MVC (Boot 4) writes HTTP bodies with **Jackson 3**. The `contract` DTOs
+  meet both, so they use only the annotations the two share (`com.fasterxml.jackson.annotation`), plus `@PlainBigDecimal`,
+  which bundles a serializer for each. `ContractMapper` (the api module's test-jar) runs the contract tests through both.
   Sealed types need `@JsonTypeInfo` with **explicit `@JsonSubTypes` names**, so the stored type ids don't depend on class names.
   Subtypes without fields are `data object`: deserialization returns a new instance that is `==` to the object but not `===`, so compare with `==`, `is` or `when`.
 

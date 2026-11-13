@@ -51,8 +51,9 @@ wrong or incomplete, and each finding became a decision row:
   rules for durable types.
 - The ctx-based codegen API is deprecated in SDK 2.9 but still there. Keeping it is a recorded decision.
 
-Other tasks found more of the same kind. Spring Boot 4 would need Jackson 3, which is outside the approved stack, so the
-build stays on Boot 3.5. Container `pause` doesn't work under the dev container's nested podman, so outages are
+Other tasks found more of the same kind. Spring Boot 4 would need Jackson 3, which was outside the approved stack, so the
+build stayed on Boot 3.5 until a later change, made by hand, moved it to Boot 4.1: Spring MVC on Jackson 3, the Restate
+serde still on Jackson 2. Container `pause` doesn't work under the dev container's nested podman, so outages are
 simulated with `SIGSTOP`.
 
 ## 3. The task runner: one fresh session per task

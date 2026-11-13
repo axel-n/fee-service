@@ -17,20 +17,22 @@
 
     <dependencies>
         <!-- The DTOs are Kotlin data classes without a no-arg constructor: a consumer's mapper needs the Kotlin module.
-             It brings jackson-databind, jackson-annotations, kotlin-reflect and the Kotlin stdlib, here and to the
-             service -->
+             The contract is read and written by both Jackson generations, so it carries both: Jackson 3 for HTTP (Spring
+             MVC on Boot 4, and consumers on it), Jackson 2 for the Restate journal (and consumers still on it). Each
+             brings its jackson-databind, the jackson-annotations they share, kotlin-reflect and the Kotlin stdlib, here
+             and to the service -->
+        <dependency>
+            <groupId>tools.jackson.module</groupId>
+            <artifactId>jackson-module-kotlin</artifactId>
+        </dependency>
         <dependency>
             <groupId>com.fasterxml.jackson.module</groupId>
             <artifactId>jackson-module-kotlin</artifactId>
         </dependency>
 
-        <!-- The two mappers the contract meets (ContractMapper): Spring's for HTTP, Restate's for the journal -->
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-json</artifactId>
-            <scope>test</scope>
-        </dependency>
-        <!-- Brings Restate's common (Slice) too -->
+        <!-- The Jackson 2 mapper the contract meets in the journal (ContractMapper.RESTATE). Brings Restate's common
+             (Slice) too -->
+
         <dependency>
             <groupId>dev.restate</groupId>
             <artifactId>sdk-serde-jackson</artifactId>

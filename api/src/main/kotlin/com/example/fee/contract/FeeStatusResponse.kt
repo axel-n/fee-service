@@ -2,7 +2,6 @@ package com.example.fee.contract
 
 import com.fasterxml.jackson.annotation.JsonInclude
 import com.fasterxml.jackson.annotation.JsonProperty
-import com.fasterxml.jackson.databind.annotation.JsonSerialize
 import java.math.BigDecimal
 
 /**
@@ -15,11 +14,11 @@ import java.math.BigDecimal
 data class FeeStatusResponse(
     @JsonProperty("transaction_id") val transactionId: String,
     @JsonProperty("status") val status: Status,
-    @JsonProperty("amount") @JsonSerialize(using = PlainBigDecimalSerializer::class) val amount: BigDecimal? = null,
+    @JsonProperty("amount") @PlainBigDecimal val amount: BigDecimal? = null,
     @JsonProperty("asset") val asset: String? = null,
     @JsonProperty("type") val type: String? = null,
-    @JsonProperty("fee") @JsonSerialize(using = PlainBigDecimalSerializer::class) val fee: BigDecimal? = null,
-    @JsonProperty("rate") @JsonSerialize(using = PlainBigDecimalSerializer::class) val rate: BigDecimal? = null,
+    @JsonProperty("fee") @PlainBigDecimal val fee: BigDecimal? = null,
+    @JsonProperty("rate") @PlainBigDecimal val rate: BigDecimal? = null,
     @JsonProperty("description") val description: String? = null,
 ) {
     enum class Status { IN_PROGRESS, COMPLETED }

@@ -18,7 +18,7 @@ import org.mockito.Mockito.doThrow
 import org.mockito.Mockito.verifyNoInteractions
 import org.mockito.Mockito.`when`
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest
+import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest
 import org.springframework.http.HttpHeaders
 import org.springframework.http.MediaType
 import org.springframework.test.context.bean.override.mockito.MockitoBean
@@ -71,7 +71,8 @@ class ApiExceptionHandlerTest(
         result
             .andExpect(status().isBadRequest)
             .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
-            .andExpect(jsonPath("$.type").value("about:blank"))
+            // left out: RFC 7807 reads a missing type as about:blank, and Spring writes it only when it is something else
+            .andExpect(jsonPath("$.type").doesNotExist())
             .andExpect(jsonPath("$.title").value("Bad Request"))
             .andExpect(jsonPath("$.status").value(400))
             .andExpect(jsonPath("$.detail").value(message))
@@ -111,9 +112,9 @@ class ApiExceptionHandlerTest(
 
         // then
         result
-            .andExpect(status().isUnprocessableEntity)
+            .andExpect(status().isUnprocessableContent)
             .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
-            .andExpect(jsonPath("$.title").value("Unprocessable Entity"))
+            .andExpect(jsonPath("$.title").value("Unprocessable Content"))
             .andExpect(jsonPath("$.status").value(422))
             .andExpect(jsonPath("$.code").value("UNSUPPORTED_REQUEST"))
             .andExpect(jsonPath("$.field").value("state"))

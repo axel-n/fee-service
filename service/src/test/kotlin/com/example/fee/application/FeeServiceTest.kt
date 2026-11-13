@@ -160,7 +160,7 @@ class FeeServiceTest {
             .isInstanceOfSatisfying(ValidationException::class.java) {
                 assertThat(listOf(it.field, it.value, it.message)).containsExactly(error.field, error.value, error.message)
                 assertThat(it.kind).isEqualTo(ValidationException.Kind.UNSUPPORTED)
-                assertThat(it.status).isEqualTo(HttpStatus.UNPROCESSABLE_ENTITY.value())
+                assertThat(it.status).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT.value())
             }
     }
 

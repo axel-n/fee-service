@@ -6,9 +6,6 @@ import com.example.fee.contract.error.DuplicateTransactionException
 import com.example.fee.contract.error.FeeException
 import com.example.fee.contract.error.ValidationException
 import com.example.fee.validation.ValueDisplay
-import com.fasterxml.jackson.core.JsonProcessingException
-import com.fasterxml.jackson.databind.JsonMappingException
-import com.fasterxml.jackson.databind.exc.InvalidFormatException
 import org.springframework.http.HttpHeaders
 import org.springframework.http.HttpStatusCode
 import org.springframework.http.ProblemDetail
@@ -18,6 +15,9 @@ import org.springframework.web.bind.annotation.ExceptionHandler
 import org.springframework.web.bind.annotation.RestControllerAdvice
 import org.springframework.web.context.request.WebRequest
 import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExceptionHandler
+import tools.jackson.core.JacksonException
+import tools.jackson.databind.DatabindException
+import tools.jackson.databind.exc.InvalidFormatException
 
 /**
  * Turns every failure of the API into an RFC 7807 `ProblemDetail`: a [FeeException] answers with its own
@@ -76,12 +76,12 @@ class ApiExceptionHandler : ResponseEntityExceptionHandler() {
         cause: Throwable?,
     ): ProblemDetail {
         val field =
-            (cause as? JsonMappingException)?.path?.takeIf { it.isNotEmpty() }?.joinToString(".") {
-                it.fieldName ?: "[${it.index}]"
+            (cause as? DatabindException)?.path?.takeIf { it.isNotEmpty() }?.joinToString(".") {
+                it.propertyName ?: "[${it.index}]"
             }
         if (field == null) {
             val message =
-                if (cause is JsonProcessingException) {
+                if (cause is JacksonException) {
                     "The request body is not valid JSON"
                 } else {
                     "The request body is missing or can't be read"

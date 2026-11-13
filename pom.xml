@@ -3,12 +3,12 @@
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
 
-    <!-- Boot 3.5, not 4.x: Boot 4 moves Spring MVC to Jackson 3 and starter-web to starter-webmvc, while the Restate SDK
-         uses Jackson 2 -->
+    <!-- Boot 4: Spring MVC reads and writes HTTP bodies with Jackson 3, while the Restate SDK's serde is still on
+         Jackson 2. Both are on the classpath, and the api contract is written for both (PlainBigDecimal) -->
     <parent>
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-starter-parent</artifactId>
-        <version>3.5.16</version>
+        <version>4.1.2</version>
         <relativePath/>
     </parent>
 
@@ -30,19 +30,17 @@
     <properties>
         <java.version>25</java.version>
         <restate.version>2.11.0</restate.version>
-        <cucumber.version>7.34.9</cucumber.version>
-        <!-- Overrides of Boot's managed versions, aligned with what Restate SDK 2.11.0 is built against.
-             Kotlin: the compiler must read the SDK's Kotlin 2.4 metadata, and Boot 3.5 would pin 1.9.
-             Coroutines, kotlinx-serialization and Byte Buddy (the SDK's handler proxies): Boot 3.5 would pin older
-             versions than the Kotlin SDK needs at runtime -->
+        <!-- Built against JUnit 6 and Spring 7, as Boot 4 manages them -->
+        <cucumber.version>8.0.4</cucumber.version>
+        <!-- Overrides of Boot's managed versions where Boot 4.1 pins an older one than Restate SDK 2.11.0 is built against.
+             Kotlin: the compiler must read the SDK's Kotlin 2.4 metadata, and Boot would pin 2.3.
+             Coroutines: the Kotlin SDK needs 1.11 at runtime, and Boot would pin 1.10.
+             Jackson 2 (the SDK's serde; Jackson 3, Spring's, stays as Boot manages it): the SDK needs 2.22, and Boot
+             would pin 2.21. Boot imports the Jackson 2 BOM first, so jackson-annotations, which Jackson 3 shares, is
+             this version too -->
         <kotlin.version>2.4.21</kotlin.version>
         <kotlin-coroutines.version>1.11.0</kotlin-coroutines.version>
-        <kotlin-serialization.version>1.11.0</kotlin-serialization.version>
-        <byte-buddy.version>1.18.3</byte-buddy.version>
-        <jackson-bom.version>2.22.4</jackson-bom.version>
-        <opentelemetry.version>1.58.0</opentelemetry.version>
-        <!-- Cucumber 7.34 is built against JUnit 5.14 (Cucumber 8 needs JUnit 6 and Spring 7) -->
-        <junit-jupiter.version>5.14.4</junit-jupiter.version>
+        <jackson-2-bom.version>2.22.4</jackson-2-bom.version>
         <!-- Bundles ktlint 1.8.0 -->
         <ktlint-maven-plugin.version>3.7.1</ktlint-maven-plugin.version>
         <!-- mvn spring-boot:run from the root runs only the app: service sets it back to false -->
@@ -97,7 +95,7 @@
     <!-- Both modules have unit tests. The Kotlin stdlib needs no declaration: it comes with jackson-module-kotlin
          (api) and through api (service) -->
     <dependencies>
-        <!-- JUnit 5, Mockito, AssertJ, MockRestServiceServer -->
+        <!-- JUnit 6, Mockito, AssertJ, Spring's test support -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-test</artifactId>

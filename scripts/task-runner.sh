@@ -77,12 +77,12 @@ PRUNE=(./.git ./target ./api/target ./service/target ./.task-runs ./.idea ./out 
 PROTECTED=(./tasks.md ./AGENTS.md ./requirements.md ./scripts/ ./.claude/skills/ ./.claude/settings.json ./dev-setup/)
 # A task may change these, but then an interactive run halts so a person reviews it (AGENTS.md: decisions change knowingly).
 REVIEW=(./docs/)
-# The stack AGENTS.md fixes (Spring Boot web, Kotlin, Jackson, the Restate SDK, JUnit 5, Mockito, Testcontainers, Cucumber):
-# its modules are approved. Anything else needs the user's approval (hard rule 1). check.sh rejects the ones ruled out.
-STACK_DEPS='^(com\.example:fee-service-api|org\.springframework\.boot:spring-boot-(starter|starter-web|starter-json|starter-test|testcontainers)|org\.jetbrains\.kotlin:.+|com\.fasterxml\.jackson(\.[a-z.]+)?:.+|dev\.restate:.+|org\.junit(\.[a-z.]+)?:.+|org\.mockito:.+|org\.testcontainers:.+|io\.cucumber:.+)$'
+# The stack AGENTS.md fixes (Spring Boot webmvc, Kotlin, Jackson 3 and 2, the Restate SDK, JUnit 6, Mockito, Testcontainers,
+# Cucumber): its modules are approved. Anything else needs the user's approval (hard rule 1). check.sh rejects the ones ruled out.
+STACK_DEPS='^(com\.example:fee-service-api|org\.springframework\.boot:spring-boot-(starter|starter-webmvc|starter-webmvc-test|starter-jackson|starter-test|testcontainers)|org\.jetbrains\.kotlin:.+|tools\.jackson(\.[a-z.]+)?:.+|com\.fasterxml\.jackson(\.[a-z.]+)?:.+|dev\.restate:.+|org\.junit(\.[a-z.]+)?:.+|org\.mockito:.+|org\.testcontainers:.+|io\.cucumber:.+)$'
 # The same list for the sessions' prompt (keep both in sync)
-STACK_DEPS_TEXT='com.example:fee-service-api (the api module of this project); org.springframework.boot:spring-boot-starter, -starter-web, -starter-json, -starter-test, -testcontainers;
-org.jetbrains.kotlin:*; com.fasterxml.jackson*:*; dev.restate:*; org.junit*:*; org.mockito:*; org.testcontainers:*; io.cucumber:*'
+STACK_DEPS_TEXT='com.example:fee-service-api (the api module of this project); org.springframework.boot:spring-boot-starter, -starter-webmvc, -starter-webmvc-test, -starter-jackson, -starter-test, -testcontainers;
+org.jetbrains.kotlin:*; tools.jackson*:*; com.fasterxml.jackson*:*; dev.restate:*; org.junit*:*; org.mockito:*; org.testcontainers:*; io.cucumber:*'
 # Defense in depth for the sessions; the runner checks the result itself anyway.
 DENY='Bash(git *),Bash(podman *),Bash(docker *),Bash(claude *),Bash(scripts/task-runner.sh *),Bash(scripts/autopilot.sh *),'\
 'Edit(tasks.md),Write(tasks.md),Edit(AGENTS.md),Write(AGENTS.md),Edit(requirements.md),Write(requirements.md),'\

@@ -5,7 +5,7 @@ import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 
 class FeeProblemTest {
-    private fun read(json: String): FeeProblem = ContractMapper.SPRING.read(json, FeeProblem::class.java)
+    private fun read(json: String): FeeProblem = ContractMapper.HTTP.read(json, FeeProblem::class.java)
 
     @Test
     fun `reads a validation problem with snake_case names and a null value`() {
@@ -161,7 +161,7 @@ class FeeProblemTest {
         val problem = FeeProblem(status = 409, code = "DUPLICATE_TRANSACTION", transactionId = "txn_001")
 
         // when
-        val json = ContractMapper.SPRING.write(problem, FeeProblem::class.java)
+        val json = ContractMapper.HTTP.write(problem, FeeProblem::class.java)
 
         // then
         assertThat(ContractMapper.fieldNames(json)).containsExactlyInAnyOrder("status", "code", "transaction_id")

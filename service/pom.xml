@@ -24,9 +24,10 @@
             <groupId>com.example</groupId>
             <artifactId>fee-service-api</artifactId>
         </dependency>
+        <!-- Spring MVC on Tomcat, with Jackson 3 for the HTTP bodies -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-web</artifactId>
+            <artifactId>spring-boot-starter-webmvc</artifactId>
         </dependency>
         <!-- Spring MVC runs a suspend controller method through Reactor: without it, the method isn't invoked. It brings
              kotlinx-coroutines-core, for the suspend Restate handlers, FeeService and controller -->
@@ -53,10 +54,16 @@
             <type>test-jar</type>
             <scope>test</scope>
         </dependency>
-        <!-- Brings testcontainers itself -->
+        <!-- @WebMvcTest and MockMvc; Boot 4 keeps them out of spring-boot-starter-test -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-webmvc-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!-- The one Restate container of the ITs (RestateTestEnvironment), managed by hand: no JUnit extension -->
         <dependency>
             <groupId>org.testcontainers</groupId>
-            <artifactId>junit-jupiter</artifactId>
+            <artifactId>testcontainers</artifactId>
             <scope>test</scope>
         </dependency>
         <dependency>

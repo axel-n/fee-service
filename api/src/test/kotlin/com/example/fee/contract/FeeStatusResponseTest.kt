@@ -7,7 +7,7 @@ import java.math.BigDecimal
 
 class FeeStatusResponseTest {
     // HTTP only, so Spring's mapper is the one that matters
-    private val mapper = ContractMapper.SPRING
+    private val mapper = ContractMapper.HTTP
 
     private val response =
         FeeResponse(

@@ -20,14 +20,17 @@ setup step outside the app.
 - Kotlin, JDK 25 (or 21 if the toolchain requires it), **Maven 3.9+**, the system `mvn` (no wrapper; the dev image in `dev-setup/` pins the version)
 - Two Maven modules under the root `pom.xml`: **`api/`** (`fee-service-api`, the HTTP contract other services depend on)
   and **`service/`** (`fee-service`, the app). Run `mvn` from the root
-- Spring Boot (`spring-boot-starter-web` only; `kotlinx-coroutines-reactor` so Spring MVC can run the `suspend` controller)
+- Spring Boot 4.1 (`spring-boot-starter-webmvc` only; `kotlinx-coroutines-reactor` so Spring MVC can run the `suspend` controller)
+- **Two Jackson generations**: Spring MVC reads and writes HTTP bodies with Jackson 3 (`tools.jackson`), the Restate serde
+  uses Jackson 2 (`com.fasterxml.jackson`). The api contract is read and written by both, and the annotations package
+  `com.fasterxml.jackson.annotation` is shared by both
 - **Kotlin coroutines** (`kotlinx-coroutines-core`): the Restate handlers, `FeeService` and the controller are `suspend` functions.
   Never block a thread to wait (`runBlocking`, `Future.get`) in production code
 - Restate **Kotlin SDK 2.11.0** (`dev.restate:sdk-kotlin-http`): its reflection-based API, no code generation, with Jackson
   (`sdk-serde-jackson`, through `KotlinJacksonSerdeFactory`) as the serde instead of kotlinx-serialization. The Restate server
-  runs **externally** in Docker. The root `pom.xml` aligns Kotlin, coroutines, kotlinx-serialization and Byte Buddy with the
-  versions the SDK is built against; bump them together with `restate.version`
-- Tests: JUnit 5, Mockito, Testcontainers, Cucumber
+  runs **externally** in Docker. The root `pom.xml` overrides Boot's Kotlin, coroutines and Jackson 2 versions where Boot
+  pins older ones than the SDK is built against; check them whenever `restate.version` or the Boot version changes
+- Tests: JUnit 6, Mockito, Testcontainers 2, Cucumber 8
 - Formatting: ktlint through `ktlint-maven-plugin` (root `pom.xml`), with its default `ktlint_official` style and no
   `.editorconfig`. It checks main and test sources of both modules in the `validate` phase, so a format problem fails every
   build, `mvn test` included
@@ -118,7 +121,9 @@ Follow the call graph in `docs/design.md`:
   (`fee.rule`, `fee.formula`, `validation.rule`). A file holds one main type plus the small types and helpers that exist only to
   serve it (its result and field types, its default implementation, internal helpers). Don't create a file for a lone data class,
   enum or helper function that belongs to another type. A test file mirrors its production file, one test class per production class.
-- JSON uses snake_case through `@JsonProperty` on DTOs; `BigDecimal` is serialized as a plain number.
+- JSON uses snake_case through `@JsonProperty` on DTOs; a `BigDecimal` property carries `@PlainBigDecimal` (a plain number).
+  Durable and contract types use only `com.fasterxml.jackson.annotation`, which both Jackson generations read. A databind
+  annotation (`@JsonSerialize`, …) is read by one generation only, so it goes into a bundle for both, as `@PlainBigDecimal` does.
 - Errors are subclasses of the sealed `FeeException` (api module, each with a `FeeErrorCode`) and are mapped to `ProblemDetail`
   in `ApiExceptionHandler`. A new property of an error goes into `FeeProblem` too, so clients can read it.
 - Small classes with one responsibility. Comment only *why*, not *what*. Add KDoc to public extension points (`FeeRule`, `TransactionValidator`).

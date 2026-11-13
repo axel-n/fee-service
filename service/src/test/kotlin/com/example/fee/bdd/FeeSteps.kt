@@ -53,7 +53,12 @@ class FeeSteps(
 
     @Given("a transaction request:")
     fun aTransactionRequest(fields: DataTable) {
-        val given = fields.asMap().mapValues { (field, value) -> requestValue(field, value) }
+        // Cucumber types every cell as nullable; an empty field name is a mistake in the feature
+        val given =
+            fields.asMap().entries.associate { (field, value) ->
+                val name = checkNotNull(field) { "A request field in the table has no name" }
+                name to requestValue(name, value)
+            }
         request = given
         givenTransactionId = given["transaction_id"] as? String
     }

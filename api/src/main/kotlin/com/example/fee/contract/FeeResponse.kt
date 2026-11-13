@@ -1,7 +1,6 @@
 package com.example.fee.contract
 
 import com.fasterxml.jackson.annotation.JsonProperty
-import com.fasterxml.jackson.databind.annotation.JsonSerialize
 import java.math.BigDecimal
 
 /**
@@ -15,10 +14,10 @@ import java.math.BigDecimal
  */
 data class FeeResponse(
     @JsonProperty("transaction_id") val transactionId: String,
-    @JsonProperty("amount") @JsonSerialize(using = PlainBigDecimalSerializer::class) val amount: BigDecimal,
+    @JsonProperty("amount") @PlainBigDecimal val amount: BigDecimal,
     @JsonProperty("asset") val asset: String,
     @JsonProperty("type") val type: String,
-    @JsonProperty("fee") @JsonSerialize(using = PlainBigDecimalSerializer::class) val fee: BigDecimal,
-    @JsonProperty("rate") @JsonSerialize(using = PlainBigDecimalSerializer::class) val rate: BigDecimal,
+    @JsonProperty("fee") @PlainBigDecimal val fee: BigDecimal,
+    @JsonProperty("rate") @PlainBigDecimal val rate: BigDecimal,
     @JsonProperty("description") val description: String,
 )

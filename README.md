@@ -359,4 +359,5 @@ order or the JSON of `FeeRequest`/`FeeResponse` is a breaking change for in-flig
   with `force`.
 - **Cancelled, killed or paused workflows** leave the record `IN_PROGRESS`, so once Restate drops the run the id gets 409
   until an operator acts.
-- Spring Boot 4 with Jackson 3 (the Restate SDK's serde is still on Jackson 2).
+- **One Jackson generation:** Spring MVC is on Jackson 3, the Restate SDK's serde still on Jackson 2. Once the SDK has a
+  Jackson 3 serde, move to it and drop the Jackson 2 serializer of `@PlainBigDecimal` and the Jackson 2 dependencies.

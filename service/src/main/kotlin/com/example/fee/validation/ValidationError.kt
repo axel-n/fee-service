@@ -1,6 +1,6 @@
 package com.example.fee.validation
 
-import com.example.fee.contract.PlainBigDecimalSerializer
+import com.example.fee.contract.PlainBigDecimal
 import com.fasterxml.jackson.annotation.JsonProperty
 import java.math.BigDecimal
 
@@ -55,7 +55,7 @@ object ValueDisplay {
 
     /** The amount as JSON carries it: plain (`1000`, `-1.50`), scientific only beyond the serializer's bound. */
     fun value(amount: BigDecimal): String =
-        if (amount.scale() in -PlainBigDecimalSerializer.MAX_PLAIN_SCALE..PlainBigDecimalSerializer.MAX_PLAIN_SCALE) {
+        if (amount.scale() in -PlainBigDecimal.MAX_PLAIN_SCALE..PlainBigDecimal.MAX_PLAIN_SCALE) {
             amount.toPlainString()
         } else {
             amount.toString()

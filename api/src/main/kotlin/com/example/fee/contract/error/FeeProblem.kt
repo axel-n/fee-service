@@ -7,7 +7,8 @@ import com.fasterxml.jackson.annotation.JsonProperty
 /**
  * The body of every error response of the fee service: an RFC 7807 problem (`application/problem+json`).
  *
- * [type], [title], [status], [detail] and [instance] are always there. The service's own failures add [code] (a
+ * [title], [status], [detail] and [instance] are always there. [type] is left out, which RFC 7807 reads as
+ * `about:blank`: the problem is just its HTTP status. The service's own failures add [code] (a
  * [FeeErrorCode] name) and the properties of their [FeeException]: a rejected request [field], [value] and [message];
  * a failure about one transaction [transactionId]. Spring MVC's own errors (415, 405, an unknown path, a body that
  * isn't JSON) have no [code].
