@@ -15,6 +15,26 @@ setup step outside the app.
 - If a change conflicts with the design or these rules, stop and ask; don't silently deviate. When the design changes,
   update `docs/design.md` in the same change.
 
+## Priorities and approach
+
+When goals pull against each other, the earlier one wins:
+
+1. **Money is right:** a transaction is charged at most once, a charge is never lost, amounts are exact (`BigDecimal`).
+2. **Processing survives failure:** crashes, restarts and Restate outages resume from the journal, so workflow code is deterministic.
+3. **Only what `requirements.md` asks:** no extra behaviour, settings or safeguards without asking.
+4. **Simple and readable** over clever or general.
+5. **Extensible and testable:** a new rule is one new class, and every class is tested without Restate.
+
+Approach:
+
+- **KISS:** the simplest design that meets the requirements. Fewer layers, classes and settings are better.
+- **YAGNI:** nothing for a future nobody asked for. Ideas go to the README's Future work, not into the code.
+- **DRY:** each fact lives in one place: a default only in `application.yml`, a rule only in its class, the design only in
+  `docs/design.md` (the README summarises and links to it).
+- **SOLID:** one responsibility per class; extension by adding a class, not by editing a central `when`; building blocks
+  interchangeable behind their interface (`FeeRule`, `TransactionValidator`); small interfaces at the Restate boundary
+  (`FeeWorkflowClients`, `FeeWorkflowContext`, `FeeRecordState`), injected through the constructor.
+
 ## Stack (fixed: don't change without asking)
 
 - Kotlin, JDK 25 (or 21 if the toolchain requires it), **Maven 3.9+**, the system `mvn` (no wrapper; the dev image in `dev-setup/` pins the version)
@@ -176,11 +196,15 @@ explicitly that the ITs didn't run.
 
 1. Implement the change with tests, keeping it small and focused.
 2. Run `scripts/check.sh` and report the results honestly, including failures.
-3. Update `docs/design.md` (and the README) when the design or the behaviour changes.
+3. Update `docs/design.md` (and the README) when the design or the behaviour changes, following Documentation below.
 4. Commits (only when asked): imperative subject ≤ 72 chars, one change per commit where practical.
 
-## How it was built
+## Documentation
 
-The service was built task by task with `scripts/task-runner.sh` and `scripts/autopilot.sh`, one fresh Claude Code
-session per task, gated by `scripts/check.sh` (see `docs/ai-usage.md`). The task checklist and the decision log that
-drove it were removed once every task was done; the runner needs a new `tasks.md` to run again.
+`AGENTS.md`, `docs/` and the README describe **only the current state**: what the service is and does, its priorities,
+its approach (KISS, YAGNI, DRY, SOLID) and why the design is the way it is.
+
+- No history: no task ids or task lists, no decision logs, no "was X, later changed to Y", no superseded versions or
+  designs. Git keeps the history.
+- When something changes, rewrite the text it affects so it reads as the current state; don't append a note.
+- Remove whatever no longer exists (a class, a file, a setting, a script) from every doc in the same change.

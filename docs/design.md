@@ -21,17 +21,20 @@ Principles:
 Reference example (Mobile Top Up, 0.15%):
 
 ```
-Request                                     Response
+Request                                     Response (200)
 {                                           {
   "transaction_id": "txn_001",                "transaction_id": "txn_001",
+                                              "status": "COMPLETED",
   "amount": 1000,                             "amount": 1000,
   "asset": "USD",                             "asset": "USD",
   "asset_type": "FIAT",                       "type": "Mobile Top Up",
-  "type": "Mobile Top Up",                    "fee": 1.5,
+  "type": "Mobile Top Up",                    "fee": 1.50,
   "state": "SETTLED - PENDING FEE",           "rate": 0.0015,
   "created_at": "2023-08-30 15:42:17.610059"  "description": "Standard fee rate of 0.15%"
 }                                           }
 ```
+
+`fee` is returned at the asset's scale (`1.50` equals the challenge's `1.5`).
 
 ---
 
@@ -46,10 +49,10 @@ A EUR Bank Transfer reads `Fee rate of 0.5% (min 1.00 EUR)`.
 
 | Type | Rule bean | Building block | `rate` | `description` | 1000 USD → fee |
 |------|-----------|----------------|--------|---------------|----------------|
-| `Mobile Top Up` | `MobileTopUpFeeRule` | `PercentageFee(0.0015)` | `0.0015` | `Standard fee rate of 0.15%` | **1.5** |
-| `Bank Transfer` | `BankTransferFeeRule` | `PercentageWithMinimumFee(0.005, min 1.00)` | `0.005` | `Fee rate of 0.5% (min 1.00 {asset})` | 5.0 (100 → 1.0, 10000 → 50.0) |
-| `Merchant Payment` | `MerchantPaymentFeeRule` | `PercentagePlusFixedFee(0.01, fixed 0.30)` | `0.01` | `Fee rate of 1% plus 0.30 {asset} fixed` | 10.3 |
-| `Cash Withdrawal` | `CashWithdrawalFeeRule` | `FlatFee(2.00)` | `0` | `Flat fee of 2.00 {asset}` | 2.0 |
+| `Mobile Top Up` | `MobileTopUpFeeRule` | `PercentageFee(0.0015)` | `0.0015` | `Standard fee rate of 0.15%` | **1.50** |
+| `Bank Transfer` | `BankTransferFeeRule` | `PercentageWithMinimumFee(0.005, min 1.00)` | `0.005` | `Fee rate of 0.5% (min 1.00 {asset})` | 5.00 (100 → 1.00, 10000 → 50.00) |
+| `Merchant Payment` | `MerchantPaymentFeeRule` | `PercentagePlusFixedFee(0.01, fixed 0.30)` | `0.01` | `Fee rate of 1% plus 0.30 {asset} fixed` | 10.30 |
+| `Cash Withdrawal` | `CashWithdrawalFeeRule` | `FlatFee(2.00)` | `0` | `Flat fee of 2.00 {asset}` | 2.00 |
 
 The same defaults in `application.yml`:
 
@@ -346,7 +349,6 @@ Money values are quoted so they reach `BigDecimal` as strings. A missing or inva
 | App crashes at any step boundary | Restate retries; journaled steps are replayed, not re-executed → **1 fee record**, `COMPLETED` |
 | Endpoint stops while a journaled step is running (e.g. CALCULATE) | The step was not journaled, so it runs again after the restart; only its journaled result is recorded → **1 fee record** |
 | Endpoint keeps failing (70 attempts, about an hour at the default retry policy) | Restate **pauses** the invocation; the record stays `IN_PROGRESS` until an operator resumes or kills it |
-
 | Restate unreachable | `FeeService` → 503 |
 | Restate doesn't know our endpoint | Requests get 503 until it is registered (README, "Run"); registering it once is enough, restarts keep it |
 | App restarted with changed fee numbers | Workflows past CALCULATE keep the journaled fee; completed records keep their response; new workflows use the new numbers |

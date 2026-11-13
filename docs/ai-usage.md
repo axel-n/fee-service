@@ -1,119 +1,73 @@
-# fee-service — How AI was used
+# fee-service — How AI is used
 
-`requirements.md` lists "to see how you use AI" as one purpose of the challenge. This page says how AI was used, what
-kept it honest, and what a person still decides. Design: [`design.md`](design.md). Agent rules: [`../AGENTS.md`](../AGENTS.md).
+`requirements.md` asks "to see how you use AI". This page says how AI works on this project, what keeps its code honest,
+and what a person decides. Design: [`design.md`](design.md). Agent rules: [`../AGENTS.md`](../AGENTS.md).
 
-## In one paragraph
+## In short
 
-A person and an AI assistant (Claude, through Claude Code) worked out the design together first. That conversation
-produced written artifacts rather than code: the design, a decision log with the open questions, an ordered task list
-and the rules for agents. The code was then written by AI coding sessions, **one fresh session per task**, driven by
-`scripts/task-runner.sh`. Each result had to pass `scripts/check.sh` (rule checks plus the full build with every unit,
-integration and BDD test) before the runner accepted it. Anything the AI decided alone went into the decision log,
-marked for review. Once every task was done, the task list and the decision log were removed: the design and the code
-are what remain.
+A person and an AI assistant (Claude, through Claude Code) agree on the design in writing, and AI sessions write the code
+and its tests against it. A change counts as done only when `scripts/check.sh` passes: the rule checks, then the full build
+with every unit, integration and BDD test actually run. A person owns the stack, the dependencies, the scope and the commits.
 
-## 1. The design discussion → the plan files
+## The context every session reads
 
-The design came first, in a conversation and not in code. The questions that shaped the service were settled there:
-
-- where the business logic lives (all of it inside `FeeWorkflow`, `FeeService` is a thin gateway)
-- how duplicates are handled: the workflow key `{transaction_id}:{payloadHash}`, so a rejected payload doesn't use up the
-  id, plus a claim on a virtual object per `transaction_id` (later simplified to the `transaction_id` alone as the key,
-  since `requirements.md` asks for no rule about changed payloads)
-- self-registration that never fails startup, crash simulation through a `StepHook`, and tests on random ports only
-- fee numbers in configuration and read inside `ctx.run`, so a restart with new values can't change a replay
-
-The result is four files. Every AI session reads them, and they are the only context it gets:
+A coding session starts with no memory. Whatever isn't written down gets made up again, and differently each time. So
+the plan lives in three files, and every session reads them before it changes anything:
 
 | File | Role for the AI |
 |------|-----------------|
-| [`AGENTS.md`](../AGENTS.md) | The rules: fixed stack, hard rules (no new dependencies, no storage outside Restate, money is `BigDecimal`, …), architecture and call graph rules, Restate determinism rules, test rules, and "stop and ask instead of guessing" |
-| [`docs/design.md`](design.md) | What to build: classes, wiring, call graph, extension points, recovery guarantees |
-| `docs/decisions.md` (removed when done) | Why: one row per decision, plus the open questions. A session that had to decide something added a row |
-| `tasks.md` (removed when done) | The order: small tasks, each buildable and testable from the tasks above it, each shipping its own tests |
+| [`AGENTS.md`](../AGENTS.md) | The rules: priorities and approach (KISS, YAGNI, DRY, SOLID), the fixed stack, the hard rules (no new dependencies, no storage outside Restate, money is `BigDecimal`, …), the architecture and call graph rules, Restate determinism, tests, and "stop and ask instead of guessing" |
+| [`docs/design.md`](design.md) | What is built: fee table, how Restate is used, classes, wiring, call graph, extension points, configuration, recovery guarantees |
+| [`requirements.md`](../requirements.md) | The scope: nothing beyond it without asking |
 
-Why write all this down? A coding session starts with no memory. Whatever isn't in these files gets made up again, and
-differently each time. Writing the plan down also gave the person something to review before any code existed.
+These files describe **only the current state**. History (old plans, task lists, superseded decisions) is left out: a
+session reads every line as an instruction, and an outdated line is a wrong one. A change to the design updates
+`docs/design.md` in the same change.
 
-## 2. Verify assumptions first: the spike
+## How a change is made
 
-Task 0.2 was a **spike** against a real Restate server: AI-written throwaway code that checked the design's assumptions
-about Restate SDK 2.9.3 and server 1.8.1 before production code depended on them. Several assumptions turned out
-wrong or incomplete, and each finding became a decision row:
+1. A person describes the change.
+2. The session reads `AGENTS.md` and `docs/design.md`. It stops and asks when the change conflicts with them, needs a new
+   dependency, or goes beyond `requirements.md`.
+3. It makes the change with its tests, keeping it small, and updates `docs/design.md` and the README when the design or
+   the behaviour changes.
+4. It runs `scripts/check.sh` and reports the result as it is, failures included. Without a container engine it runs
+   `scripts/check.sh --unit` and says that the integration tests didn't run.
+5. The person reviews the change and commits it. Agents commit only when asked.
 
-- A duplicate submit is accepted silently, and **its input is ignored**. That is why the payload hash has to be part of the key.
-- Re-registering a known URI without `force` **ignores changed services**. "Services changed" therefore needs a dry-run comparison.
-- The endpoint server from the SDK's convenience method can't be stopped, so the lifecycle owns its own Vert.x instance.
-- A plain exception between steps makes Restate replay the journal. That is what crash injection relies on. After
-  70 failed attempts Restate *pauses* the invocation instead of failing it.
-- Restate serializes with its own Jackson mapper, not Spring's, and rejects unknown properties. That decides the
-  rules for durable types.
-- The ctx-based codegen API is deprecated in SDK 2.9 but still there. Keeping it is a recorded decision.
+## What keeps AI-written code honest
 
-Other tasks found more of the same kind. Spring Boot 4 would need Jackson 3, which was outside the approved stack, so the
-build stayed on Boot 3.5 until a later change, made by hand, moved it to Boot 4.1: Spring MVC on Jackson 3, the Restate
-serde still on Jackson 2. Container `pause` doesn't work under the dev container's nested podman, so outages are
-simulated with `SIGSTOP`.
-
-## 3. The task runner: one fresh session per task
-
-`scripts/task-runner.sh` works through `tasks.md` from top to bottom. For each task it:
-
-1. **Snapshots** the working tree.
-2. Starts a **fresh, non-interactive Claude Code session** with no earlier conversation, no auto-memory and no MCP servers. The prompt is
-   the task's section of `tasks.md`, the procedure in `.claude/skills/implement-task/SKILL.md` and the context every
-   task needs (design, decisions, the file list, the approved dependencies, the environment). Each session starts
-   clean, so it can't carry over a misunderstanding from an earlier one, and it can't rely on something that isn't
-   written down.
-3. **Gates** the result. `scripts/check.sh` must pass: the rule checks, then `mvn clean verify` with every test actually run and
-   none skipped. The runner's guards must hold too:
-   - the protected files are untouched (`tasks.md`, `AGENTS.md`, `requirements.md`, `scripts/`, `.claude/skills/`, `dev-setup/`)
-   - no dependency outside the approved stack was added
-   - there are **no fewer tests than before**
-4. Sends a failure back to the same session to fix. A result that still fails is **rolled back**, and the run stops.
-5. Ticks the checkbox and writes `.task-runs/<id>/latest/report.md` and `.task-runs/<id>/commit-msg.txt`. It stops for a
-   person to review after any task that changed `docs/` or created `pom.xml`.
-
-A session that needs a human decision reports `blocked`. The runner rolls back, shows the question and stops. The
-person answers with `--note "…"` or a new decision row, then reruns. `scripts/autopilot.sh` runs the same loop unattended
-(`--autonomous`). There, the session takes the option it would recommend, stays within the hard rules, and records the
-choice as a decision row ending in **"(autonomous decision, review)"**.
-
-`.task-runs/` is git-ignored, so the per-task reports and the run summary (`.task-runs/summary.md`) stay on the
-machine that ran them. The repository keeps what matters from them: the code and the tests.
-
-## 4. What keeps AI-written code honest
-
-These guards are written for the ways an AI agent tends to go wrong:
+These guards target the ways an AI agent tends to go wrong:
 
 | Risk | Guard |
 |------|-------|
-| Dropping or weakening a test to get green | The runner rejects fewer tests than before; `check.sh` fails on skipped tests or on tests that didn't run; AGENTS.md forbids weakening assertions |
+| "Done" without proof | `scripts/check.sh` must pass, and its last line states what ran: `check: OK unit=<n> it=<n>` |
+| Dropping a test to get green | `check.sh` fails on a disabled or skipped test, and on a module whose tests didn't run |
 | A production class without a test | `TestCoverageAuditTest` fails for any file in `api/src/main/kotlin` or `service/src/main/kotlin` without its own test or a justified entry |
-| Quietly adding a library | Hard rule 1, enforced by the runner's dependency guard |
-| Changing the rules or the plan to suit the code | Protected files; a change to the design must update `docs/` in the same change, and the runner stops for review |
+| Quietly adding a library | Hard rule 1; `check.sh` fails on the dependencies `AGENTS.md` rules out |
+| Eroding the architecture | `check.sh` rules: pure packages import no Restate, the api module imports no Spring and nothing of the service, nothing outside `api` imports `api`, constructor injection only, `Clock` injected, no `!!` or `lateinit` |
+| Money as floating point | `check.sh` rules: no `Double`/`Float` in code that handles money, `BigDecimal` only from a `String` |
 | Plausible but untested claims about recovery | Crash at every step boundary, endpoint restart, Restate outage, each counting the **CALCULATE executions** (README, "Tests") |
+| Mocking the library instead of testing it | Integration and BDD tests run against a real Restate (Testcontainers) |
+| Non-deterministic workflow code | `AGENTS.md`'s Restate rules (clock and fee numbers only inside a journaled step), checked by `DeterminismIT` and the crash tests |
 | Tests that depend on the machine | Only random ports; every `restate.*` setting from `@DynamicPropertySource` |
-| Non-deterministic workflow code | AGENTS.md's Restate rules (clock and configuration only inside `ctx.run`), checked by `DeterminismIT` and the crash tests |
+| Docs drifting from the code | The design is updated in the same change, and the docs hold only the current state |
 
-## 5. What a person decides and reviews
+## What a person decides
 
-- **Stack, dependencies, scope:** fixed in `AGENTS.md`. Only a person approves a new dependency or a stack change.
-- **The environment:** `dev-setup/` and the Restate version it runs belong to the person; agents don't install software or change containers.
-- **Autonomous decisions:** every choice made without a person was marked "(autonomous decision, review)" in the
-  decision log (44 rows by the end), with its reason, so it could be accepted or changed.
-- **Open questions:** the ones that still matter are in the README's Assumptions and Future work.
-- **Commits:** agents never commit. The runner suggests a subject per task, and the person commits.
+- **Stack, dependencies, scope:** fixed in `AGENTS.md` and `requirements.md`. Only a person approves a new dependency, a
+  stack change or behaviour the requirements don't ask for.
+- **The design:** a change that conflicts with `docs/design.md` or `AGENTS.md` stops the session with a question.
+- **The environment:** `dev-setup/` and the Restate version it runs belong to the person. Agents don't install software
+  or change containers.
+- **Open questions:** the README's Assumptions and Future work.
+- **Commits:** agents commit only when asked.
 
-## 6. Lessons
+## Practices
 
-- **Plan in writing, then code.** The person's effort goes into the design discussion, the rules and the reviews. The
-  fresh sessions do the implementation, and they are only as good as the plan.
-- **Small, ordered tasks.** Every task leaves the build green, so a bad result can be rolled back without losing
-  earlier work.
-- **Trust the gate, not the session's report.** A session's "done" counts only after `scripts/check.sh` and the
-  guards pass.
-- **Spike before you trust the AI's model of a library.** The spike corrected several assumptions about Restate (section 2) before
-  production code depended on them.
-- **Make the AI's decisions visible.** A decision recorded in one place is cheap to review. A decision buried in code isn't.
+- **Plan in writing, then code.** The person's effort goes into the design, the rules and the reviews. A session is only
+  as good as what it reads.
+- **Small changes, green every time.** Every change leaves `check.sh` passing, so a bad one is easy to spot and undo.
+- **Trust the gate, not the session's report.** "Done" counts only after `scripts/check.sh` passes.
+- **Test against the real thing.** What the design assumes about Restate is proven by tests against a real Restate server.
+- **Docs hold the current state.** One fact in one place, rewritten when it changes, never appended to.

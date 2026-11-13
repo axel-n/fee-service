@@ -10,7 +10,7 @@ POST /transaction/fee          → 200 with the fee (or 202 while it is still ru
 - [Requirements](requirements.md): the challenge
 - [Design](docs/design.md): goal, fee table, how Restate is used, class design, wiring, call graph, guarantees
 - [Dev environment](dev-setup/README.md): the dev Restate and the dev container (`podman compose`)
-- [How AI was used](docs/ai-usage.md): the task runner and its gate, what a person reviews
+- [How AI is used](docs/ai-usage.md): what every session reads, the gate, what a person decides
 
 ## What it does
 
@@ -239,7 +239,6 @@ curl -s -X POST localhost:8081/transaction/fee -H 'Content-Type: application/jso
 | `"state": "PENDING"` | 422 | `"code":"UNSUPPORTED_REQUEST","detail":"Unsupported state 'PENDING'. Supported: 'SETTLED - PENDING FEE'","field":"state","value":"PENDING"` |
 | `"amount": -5` | 400 | `"code":"INVALID_REQUEST","detail":"Invalid amount '-5'. Allowed: a number greater than 0","field":"amount","value":"-5"` |
 | An id whose earlier run was killed after its claim, once Restate dropped that run | 409 | `"code":"DUPLICATE_TRANSACTION","detail":"Transaction 'txn_001' is claimed by an earlier run that has not finished","transaction_id":"txn_001"` |
-
 | Restate unreachable | 503 | `"code":"WORKFLOW_UNAVAILABLE"`; resending later is safe |
 
 Spring MVC's own errors (a body that isn't JSON, 415, 405, an unknown path) are problems too, without a `code`.
