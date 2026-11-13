@@ -170,8 +170,13 @@ Follow the call graph in `docs/design.md`:
   (`FaultInjectingStepHook`), endpoint restart (`RestateEndpointLifecycle.stop/start`), Restate outage (container frozen with
   SIGSTOP). All of them run in `RestateTestEnvironment` (one shared Testcontainers Restate, where the shared app registers
   its endpoint itself at startup).
+- `AppContainerIT` runs the packaged jar in a container next to a Restate of its own, on a private Testcontainers network
+  (aliases `restate` and `fee-service`, no host alias): registration at start, removal on a graceful stop (SIGTERM), and a
+  run submitted while the app is killed (SIGKILL) finishing once it is back. Never register a second app with the shared
+  Restate: the newest deployment takes all new work.
 - **Tests never use fixed ports.** Restate container ports come from `getMappedPort`, the API runs on `RANDOM_PORT`, and the endpoint
-  port is a free port picked per run. Every `restate.*` setting is set by `@DynamicPropertySource`. A Restate or app already running
+  port is a free port picked per run. Only ports inside a private Testcontainers network (`AppContainerIT`'s app) are fixed,
+  and the test reaches them through `getMappedPort` too. Every `restate.*` setting is set by `@DynamicPropertySource`. A Restate or app already running
   on the machine must not affect the tests.
 - Never use `Thread.sleep` to wait for workflows. Use latches, attach/await on the workflow, or bounded polling of `status()`.
 

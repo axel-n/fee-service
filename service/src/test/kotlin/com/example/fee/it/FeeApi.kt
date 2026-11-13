@@ -10,11 +10,13 @@ import java.net.http.HttpResponse
 import java.time.Duration
 
 /**
- * The app's HTTP API as a client sees it, on the random port of the app under test (`@LocalServerPort`). Bodies are
- * read with plain Jackson, decimals as `BigDecimal`, so money assertions keep the exact value.
+ * The app's HTTP API as a client sees it, on the random port of the app under test (`@LocalServerPort`, or the mapped
+ * port of an app container on its [host]). Bodies are read with plain Jackson, decimals as `BigDecimal`, so money
+ * assertions keep the exact value.
  */
 class FeeApi(
     port: Int,
+    host: String = "localhost",
     private val timeout: Duration = Duration.ofSeconds(60),
 ) {
     /** A response: its status code and its body as JSON. */
@@ -23,7 +25,7 @@ class FeeApi(
         val body: JsonNode,
     )
 
-    private val root = "http://localhost:$port"
+    private val root = "http://$host:$port"
     private val http = HttpClient.newBuilder().connectTimeout(timeout).build()
     private val mapper = ObjectMapper().enable(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS)
 

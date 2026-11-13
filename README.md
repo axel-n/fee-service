@@ -24,7 +24,8 @@ POST /transaction/fee          → 200 with the fee (or 202 while it is still ru
 3. **calculates** the fee with the rule of the transaction's type,
 4. **charges and records** the fee: it is stored permanently in Restate state as the transaction's charged fee.
 
-The caller waits for the result (up to `restate.attach-timeout`) and gets the fee. The workflow is keyed by the
+The caller waits for the result (up to `restate.attach-timeout`) and gets the fee, or 202 `IN_PROGRESS` when Restate
+then reports the run as not finished (its 470). The workflow is keyed by the
 `transaction_id`, so sending the same id again returns the first run's response without a second charge, whatever the
 payload; a rejected id stays rejected until Restate drops the finished run (1 day by default).
 Nothing is stored outside Restate.
@@ -51,7 +52,7 @@ POST /transaction/fee
 Spring app: TransactionFeeController → FeeService           (thin gateway, no business logic)
    │  1. transaction_id present and well-formed?  (it is the workflow key; otherwise 400)
    │  2. submit FeeWorkflow/txn_001/run, then attach  (the id sent again gets PREVIOUSLY_ACCEPTED
-   │     and the first run's result; no result within attach-timeout → 202)
+   │     and the first run's result; no result within attach-timeout and Restate answers 470 → 202)
    ▼
 Restate server (external Docker) ── journals every step ───────────────────────────┐
    │ invokes the app's endpoint (port 9080)                                         │
@@ -169,7 +170,7 @@ app starts from (or `--spring.config.additional-location=file:/etc/fee-service/`
 | `restate.admin-url` | `RESTATE_ADMIN_URL` | `http://localhost:9070` | Restate's admin API, where the app registers its endpoint |
 | `restate.endpoint-port` | `RESTATE_ENDPOINT_PORT` | `9080` | port the Restate endpoint listens on, where Restate calls the workflow |
 | `restate.advertised-host` | `RESTATE_ADVERTISED_HOST` | `localhost` | host Restate reaches the endpoint at (`host.docker.internal` in the `local` profile) |
-| `restate.attach-timeout` | `RESTATE_ATTACH_TIMEOUT` | `10s` | how long `POST` waits for the result before answering 202 |
+| `restate.attach-timeout` | `RESTATE_ATTACH_TIMEOUT` | `10s` | how long `POST` waits for the result; then it answers 202 only if Restate reports the run as not finished (470) |
 | `fee.<type>.rate`, `.min`, `.fixed` | (use a file) | see [Fee table](#fee-table) | fee numbers per transaction type |
 
 Fees are easiest to change in a file next to the app. It needs only the keys that change:
@@ -236,7 +237,9 @@ curl -s -X POST localhost:8081/transaction/fee -H 'Content-Type: application/jso
 
 Spring MVC's own errors (a body that isn't JSON, 415, 405, an unknown path) are problems too, without a `code`.
 
-A run that takes longer than `restate.attach-timeout` answers **202** with `{"transaction_id":"…","status":"IN_PROGRESS"}`;
+A run that takes longer than `restate.attach-timeout` answers **202** with `{"transaction_id":"…","status":"IN_PROGRESS"}`,
+but only when Restate itself reports it as not finished (470 on the run's output; a run that finished meanwhile answers
+its result). That includes a run Restate is retrying because it can't reach a working endpoint;
 send the transaction again to get the fee once it is charged.
 
 A rejection is the `transaction_id`'s answer while Restate keeps the finished run (1 day by default): the corrected request
@@ -284,7 +287,9 @@ scripts/check.sh      # the project's gate: rule checks + mvn clean verify, and 
   a real Restate: fee calculation per type and asset, validation, transaction state (a rejected id stays rejected), idempotency
   and workflow recovery.
 - **Integration tests** (`*IT`) share one Testcontainers Restate and use only random ports, so a Restate or an app already
-  running on the machine can't interfere.
+  running on the machine can't interfere. `AppContainerIT` is the exception: it runs the packaged jar in a container
+  next to a Restate of its own, on a private network, so it needs `service/target/fee-service-*.jar` (`mvn verify` builds
+  it; in an IDE, run `mvn -pl service -am package -DskipTests` first).
 
 What the recovery tests prove (each counts the **CALCULATE executions**, not just the response):
 
@@ -294,7 +299,8 @@ What the recovery tests prove (each counts the **CALCULATE executions**, not jus
 | `EndpointRestartIT`, `workflow_recovery.feature` | Stopping and restarting the endpoint in the middle of CALCULATE keeps its deployment and completes the workflow with one fee record |
 | `EndpointRegistrationIT` | The app registers itself at its advertised URL at startup, and a stop with nothing unfinished removes the registration |
 | `RestateOutageIT` | A workflow frozen mid-CALCULATE completes with one fee record once Restate thaws |
-| `InFlightStatusIT` | A run that outlasts the attach timeout answers 202 `IN_PROGRESS`; the same payload sent again gets the fee |
+| `InFlightStatusIT` | A run that outlasts the attach timeout, and that Restate reports as not finished (470), answers 202 `IN_PROGRESS`; the same payload sent again gets the fee |
+| `AppContainerIT` | The packaged app in a container registers with Restate under its network alias and charges a fee (an unknown type gets 422 at once); a graceful stop removes the deployment; a run submitted while the app is killed waits (Restate answers 470) and is charged once when the app is back at the same URL, as the same deployment |
 | `DeterminismIT` | A validation result is journaled: moving the clock between a crash and the retry doesn't change it |
 | `DuplicatesIT`, `idempotency.feature` | One `transaction_id`, sequentially or 10 callers at once, with the same or different payloads, is charged once and every caller gets the first run's response; an id held by an unfinished run gets 409 |
 | `RejectedIT`, `transaction_state.feature` | A rejected id is neither charged nor recorded, and the corrected request with the same id gets the same rejection |

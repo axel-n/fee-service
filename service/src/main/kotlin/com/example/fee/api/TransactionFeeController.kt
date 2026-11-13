@@ -19,8 +19,8 @@ class TransactionFeeController(
     private val feeService: FeeService,
 ) {
     /**
-     * 200 with the `COMPLETED` status and the fee once charged. A run still going after `restate.attach-timeout` is a
-     * [com.example.fee.application.FeeInProgressException], which `ApiExceptionHandler` answers with 202 and the
+     * 200 with the `COMPLETED` status and the fee once charged. A run Restate reports as not finished (470) after
+     * `restate.attach-timeout` is a [com.example.fee.application.FeeInProgressException], which `ApiExceptionHandler` answers with 202 and the
      * `IN_PROGRESS` status; resending the same payload is safe and returns the fee once it is charged.
      *
      * A suspend function, so Spring MVC serves it asynchronously: no servlet thread waits while the workflow runs.

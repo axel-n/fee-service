@@ -24,8 +24,9 @@ import kotlin.time.toKotlinDuration
  *
  * It always submits, then attaches: a `transaction_id` sent again gets `PREVIOUSLY_ACCEPTED`, its payload is ignored,
  * and the attach returns the first run's result, so a transaction is processed once. The attach waits at most
- * `restate.attach-timeout`, suspended rather than holding a thread; a run still going by then is a
- * [FeeInProgressException]. A Restate call that failed is a [WorkflowUnavailableException], because resending is safe.
+ * `restate.attach-timeout`, suspended rather than holding a thread. Then it asks Restate for the run's output, and only
+ * Restate's answer 470 (not ready) makes it a [FeeInProgressException]; a run that finished meanwhile answers its
+ * outcome. A Restate call that failed is a [WorkflowUnavailableException], because resending is safe.
  */
 @Service
 class FeeService(
@@ -39,9 +40,12 @@ class FeeService(
 
         val attachTimeout = restateProperties.attachTimeout
         val run = restateCall(transactionId) { feeWorkflowClients.submit(transactionId, request) }
-        val outcome = restateCall(transactionId) { withTimeoutOrNull(attachTimeout.toKotlinDuration()) { run.attach() } }
+        val outcome =
+            restateCall(transactionId) {
+                withTimeoutOrNull(attachTimeout.toKotlinDuration()) { run.attach() } ?: run.output()
+            }
         if (outcome == null) {
-            log.info("Workflow {} still running after {}; answering 202", transactionId, attachTimeout)
+            log.info("Restate reports workflow {} not finished (470) after {}; answering 202", transactionId, attachTimeout)
             throw FeeInProgressException(transactionId)
         }
         return toResponse(outcome)
@@ -92,7 +96,7 @@ class FeeService(
 }
 
 /**
- * Thrown by [FeeService.submit] when the workflow is still running after `restate.attach-timeout`. It isn't a failure, so
+ * Thrown by [FeeService.submit] when Restate answers 470 (not ready) for the run after `restate.attach-timeout`. It isn't a failure, so
  * it isn't a [FeeException]: `ApiExceptionHandler` answers 202 with the `IN_PROGRESS` status as body. Resubmitting the
  * transaction attaches to the same run, so it charges once. HTTP only, never stored.
  */

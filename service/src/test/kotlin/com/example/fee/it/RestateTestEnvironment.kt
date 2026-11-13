@@ -22,9 +22,11 @@ import java.time.Duration
  *   at a time.
  */
 object RestateTestEnvironment {
-    private const val IMAGE = "docker.io/restatedev/restate:1.8.1"
-    private const val INGRESS_PORT = 8080
-    private const val ADMIN_PORT = 9070
+    /** Restate's ingress port inside its container. */
+    const val INGRESS_PORT = 8080
+
+    /** Restate's admin API port inside its container. */
+    const val ADMIN_PORT = 9070
 
     // How the container reaches the machine the tests run on, and so the app's endpoint (exposeHostPorts below)
     private const val ADVERTISED_HOST = "host.testcontainers.internal"
@@ -33,18 +35,11 @@ object RestateTestEnvironment {
     val endpointPort: Int = ServerSocket(0).use { it.localPort }
 
     private val container: GenericContainer<*> =
-        GenericContainer(DockerImageName.parse(IMAGE))
-            .withExposedPorts(INGRESS_PORT, ADMIN_PORT)
-            .waitingFor(
-                WaitAllStrategy()
-                    .withStrategy(Wait.forHttp("/health").forPort(ADMIN_PORT).forStatusCode(200))
-                    .withStrategy(Wait.forHttp("/restate/health").forPort(INGRESS_PORT).forStatusCode(200))
-                    .withStartupTimeout(Duration.ofMinutes(2)),
-            ).also {
-                // before the start, so the container gets the host.testcontainers.internal entry
-                Testcontainers.exposeHostPorts(endpointPort)
-                it.start()
-            }
+        restateContainer().also {
+            // before the start, so the container gets the host.testcontainers.internal entry
+            Testcontainers.exposeHostPorts(endpointPort)
+            it.start()
+        }
 
     val ingressUrl: String = "http://${container.host}:${container.getMappedPort(INGRESS_PORT)}"
 
@@ -91,3 +86,20 @@ object RestateTestEnvironment {
             .exec()
     }
 }
+
+private const val RESTATE_IMAGE = "docker.io/restatedev/restate:1.8.1"
+
+/**
+ * A new, not yet started Restate container of the pinned version, ready once its admin API and ingress answer; both are
+ * mapped to free host ports. [RestateTestEnvironment] starts the shared one with it, `AppContainerIT` its own. Top-level,
+ * so creating one doesn't start the shared Restate.
+ */
+fun restateContainer(): GenericContainer<*> =
+    GenericContainer(DockerImageName.parse(RESTATE_IMAGE))
+        .withExposedPorts(RestateTestEnvironment.INGRESS_PORT, RestateTestEnvironment.ADMIN_PORT)
+        .waitingFor(
+            WaitAllStrategy()
+                .withStrategy(Wait.forHttp("/health").forPort(RestateTestEnvironment.ADMIN_PORT).forStatusCode(200))
+                .withStrategy(Wait.forHttp("/restate/health").forPort(RestateTestEnvironment.INGRESS_PORT).forStatusCode(200))
+                .withStartupTimeout(Duration.ofMinutes(2)),
+        )

@@ -75,7 +75,8 @@ POST /transaction/fee
 Spring app: TransactionFeeController → FeeService           (thin gateway, no business logic)
    │  1. transaction_id present and well-formed?  (it is the workflow key; otherwise 400)
    │  2. submit FeeWorkflow/txn_001/run, then attach  (the id sent again gets PREVIOUSLY_ACCEPTED
-   │     and the first run's result, no result within attach-timeout → 202)
+   │     and the first run's result; no result within attach-timeout → ask Restate for the output once:
+   │     470 (not ready) → 202, the output → its result)
    ▼
 Restate server (external Docker) ── journals every step ───────────────────────────┐
    │ invokes the app's endpoint (port 9080)                                         │
@@ -160,7 +161,8 @@ com.example.fee
 ├── application/                        thin gateway to Restate
 │   └── FeeService.kt                   FeeService: transaction_id pre-check → submit/attach FeeWorkflow/{transaction_id} (bounded by attachTimeout) → FeeOutcome →
 │                                       FeeStatusResponse COMPLETED (200) or FeeException (a ValidationError becomes a ValidationException here);
-│                                       FeeInProgressException(transactionId): no result within attachTimeout → 202 (not a FeeException)
+│                                       FeeInProgressException(transactionId): no result within attachTimeout and Restate answers 470
+│                                       (not ready) for the run's output → 202 (not a FeeException)
 │
 ├── validation/                         executed inside the workflow
 │   ├── TransactionValidator.kt         interface validate(request): ValidationError? + ValidationOrder: `const val`s spaced by 100
@@ -223,7 +225,8 @@ com.example.fee
 │   │                                   so the lifecycle is tested with fakes; + Deployment(id, services); + AdminApiRestateDeployments,
 │   │                                   the @Component over Restate's admin API (JDK HTTP client; the count is a sys_invocation query)
 │   ├── RestateConfig.kt                @Configuration: ingress Client bean (with KotlinJacksonSerdeFactory) and the FeeWorkflowClients bean
-│   │                                   + FeeWorkflowClients: suspend submit(transactionId, request) → FeeWorkflowRun (suspend attach()),
+│   │                                   + FeeWorkflowClients: suspend submit(transactionId, request) → FeeWorkflowRun (suspend attach(),
+│   │                                   suspend output(): the outcome, or null when Restate answers 470),
 │   │                                   an interface so FeeService is tested with fakes; its implementation sends through
 │   │                                   client.toWorkflow<FeeWorkflow>(id).request { run(request) }
 │   └── serde/
@@ -264,7 +267,8 @@ TransactionFeeController (suspend) ──▶ FeeService (only)
 FeeService (suspend; the attach waits at most restate.attach-timeout)
   ├─▶ TransactionIdValidator.validate(request)   key pre-check only (400 if bad): the transaction_id is the workflow key
   ├─▶ FeeWorkflowClients.submit(transaction_id, request) → FeeWorkflowRun.attach()  (also when PREVIOUSLY_ACCEPTED)
-  └─▶ FeeOutcome → FeeStatusResponse | throw FeeException   (still running → throw FeeInProgressException)
+  │     attach-timeout reached → FeeWorkflowRun.output(); Restate's 470 → throw FeeInProgressException
+  └─▶ FeeOutcome → FeeStatusResponse | throw FeeException
 
   ─ ─ ─ ─ Restate server (external) invokes the app's endpoint (port 9080) ─ ─ ─ ─
 
@@ -329,7 +333,7 @@ because a restart is enough.
 | `restate.admin-url` | `RESTATE_ADMIN_URL` | Restate's admin API, where the endpoint is registered at startup and removed at shutdown |
 | `restate.endpoint-port` | `RESTATE_ENDPOINT_PORT` | port the Restate endpoint listens on (0: the OS picks one); the registered URL takes the port it really got |
 | `restate.advertised-host` | `RESTATE_ADVERTISED_HOST` | host Restate reaches the endpoint at: `localhost` by default, `host.docker.internal` in the local profile, `dev` in the dev container |
-| `restate.attach-timeout` | `RESTATE_ATTACH_TIMEOUT` | how long `POST` waits for the result before answering 202 |
+| `restate.attach-timeout` | `RESTATE_ATTACH_TIMEOUT` | how long `POST` waits for the result; then it answers 202 only if Restate reports the run as not finished (470) |
 | `fee.<type>.rate`, `.min`, `.fixed` | (use a file) | fee numbers per transaction type, see the [fee table](#fee-table) |
 | `spring.mvc.async.request-timeout` | (fixed at `0`) | off: the controller is a `suspend` function served asynchronously, and `FeeService` bounds the wait for the result by `restate.attach-timeout`. Tomcat's own 30 s would cut a longer attach timeout short |
 

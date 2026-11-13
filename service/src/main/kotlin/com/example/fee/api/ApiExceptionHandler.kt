@@ -31,7 +31,7 @@ import tools.jackson.databind.exc.InvalidFormatException
  */
 @RestControllerAdvice
 class ApiExceptionHandler : ResponseEntityExceptionHandler() {
-    /** A run still going after `restate.attach-timeout`: 202 and the `IN_PROGRESS` status. */
+    /** A run Restate reports as not finished (470) after `restate.attach-timeout`: 202 and the `IN_PROGRESS` status. */
     @ExceptionHandler(FeeInProgressException::class)
     fun handleInProgress(exception: FeeInProgressException): ResponseEntity<FeeStatusResponse> =
         ResponseEntity.accepted().body(FeeStatusResponse.inProgress(exception.transactionId))

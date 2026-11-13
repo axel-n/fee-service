@@ -8,6 +8,7 @@ import dev.restate.client.RequestOptions
 import dev.restate.client.Response
 import dev.restate.client.ResponseHead
 import dev.restate.client.SendResponse
+import dev.restate.common.Output
 import dev.restate.common.Request
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
@@ -35,15 +36,22 @@ class RestateConfigTest {
             attachTimeout = Duration.ofSeconds(10),
         )
 
-    /** An ingress [Client] that acknowledges every send with [status], for a run that ends with [outcome]. */
+    /**
+     * An ingress [Client] that acknowledges every send with [status], for a run that ends with [outcome]. Asked for the
+     * run's output, it answers [output]: 470 when that isn't ready, as Restate does, else 200.
+     */
     @Suppress("UNCHECKED_CAST")
     private fun ingressAnswering(
         status: SendResponse.SendStatus,
         outcome: FeeOutcome,
+        output: Output<FeeOutcome> = Output.ready(outcome),
     ): Client {
         val run = mock(Client.InvocationHandle::class.java) as Client.InvocationHandle<FeeOutcome>
         `when`(run.attachAsync(any(RequestOptions::class.java)))
             .thenReturn(CompletableFuture.completedFuture(Response(200, mock(ResponseHead.Headers::class.java), outcome)))
+        val outputStatus = if (output.isReady) 200 else 470
+        `when`(run.getOutputAsync(any(RequestOptions::class.java)))
+            .thenReturn(CompletableFuture.completedFuture(Response(outputStatus, mock(ResponseHead.Headers::class.java), output)))
         val sent = SendResponse(200, mock(ResponseHead.Headers::class.java), status, run)
         val client = mock(Client::class.java)
         `when`(client.sendAsync(any(Request::class.java) as Request<Any?, FeeOutcome>?, isNull()))
@@ -113,5 +121,33 @@ class RestateConfigTest {
 
             // then
             assertThat(outcome).isEqualTo(FeeOutcome.Conflict("txn_001"))
+        }
+
+    @Test
+    fun `a run Restate answers 470 for, not ready, has no output yet`() =
+        runBlocking<Unit> {
+            // given
+            val client = ingressAnswering(SendResponse.SendStatus.ACCEPTED, FeeOutcome.Conflict("txn_001"), Output.notReady())
+            val run = config.feeWorkflowClients(client).submit("txn_001", request)
+
+            // when
+            val output = run.output()
+
+            // then
+            assertThat(output).isNull()
+        }
+
+    @Test
+    fun `the output of a finished run is its outcome`() =
+        runBlocking<Unit> {
+            // given
+            val client = ingressAnswering(SendResponse.SendStatus.PREVIOUSLY_ACCEPTED, FeeOutcome.Conflict("txn_001"))
+            val run = config.feeWorkflowClients(client).submit("txn_001", request)
+
+            // when
+            val output = run.output()
+
+            // then
+            assertThat(output).isEqualTo(FeeOutcome.Conflict("txn_001"))
         }
 }

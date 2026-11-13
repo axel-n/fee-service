@@ -61,7 +61,8 @@ curl -i ' -X POST localhost:8082/transaction/fee -H 'Content-Type: application/j
 
 ## 4. Unknown transaction type: rejected, nothing charged
 
-Tested by: `RejectedIT`, "type not supported"; `validation.feature`, "Only the types that have a fee rule"
+Tested by: `RejectedIT`, "type not supported"; `validation.feature`, "Only the types that have a fee rule";
+`AppContainerIT`, with the app in a container
 
 ```bash
 curl -i -X POST localhost:8082/transaction/fee -H 'Content-Type: application/json' -d '{

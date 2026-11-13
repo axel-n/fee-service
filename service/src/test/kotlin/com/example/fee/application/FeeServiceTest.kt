@@ -237,16 +237,56 @@ class FeeServiceTest {
     }
 
     @Test
-    fun `no result within the attach timeout is an in progress exception with the transaction id`() {
-        // given: the workflow was accepted but never finishes
-        val clients = FakeClients(attach = { awaitCancellation() })
+    fun `a run Restate reports as not ready after the attach timeout is an in progress exception with the transaction id`() {
+        // given: the workflow was accepted but never finishes, and Restate answers its output with 470
+        val clients = FakeClients(attach = { awaitCancellation() }, output = { null })
 
         // when / then
         assertThatThrownBy(submitting(service(clients, attachTimeout = Duration.ofMillis(50)), request))
             .isInstanceOfSatisfying(FeeInProgressException::class.java) {
                 assertThat(it.transactionId).isEqualTo("txn_001")
             }
+        assertThat(clients.outputs).isEqualTo(1)
     }
+
+    @Test
+    fun `a run that finished just after the attach timeout answers its outcome, not 202`() =
+        runBlocking<Unit> {
+            // given: the attach outlasts the timeout, but Restate already has the output when asked
+            val clients = FakeClients(attach = { awaitCancellation() }, output = { FeeOutcome.Charged(response) })
+
+            // when
+            val submission = service(clients, attachTimeout = Duration.ofMillis(50)).submit(request)
+
+            // then
+            assertThat(submission).isEqualTo(FeeStatusResponse.completed(response))
+        }
+
+    @Test
+    fun `an output request that fails after the attach timeout is a 503, not 202`() {
+        // given
+        val down = ingressDown()
+        val clients = FakeClients(attach = { awaitCancellation() }, output = { throw down })
+
+        // when / then
+        assertThatThrownBy(submitting(service(clients, attachTimeout = Duration.ofMillis(50)), request))
+            .isInstanceOfSatisfying(WorkflowUnavailableException::class.java) {
+                assertThat(it.cause).isSameAs(down)
+            }
+    }
+
+    @Test
+    fun `a run that finishes within the attach timeout never asks Restate for its output`() =
+        runBlocking<Unit> {
+            // given
+            val clients = FakeClients(attach = { FeeOutcome.Charged(response) })
+
+            // when
+            service(clients).submit(request)
+
+            // then
+            assertThat(clients.outputs).isZero()
+        }
 
     @Test
     fun `a request cancelled while it waits stays a cancellation and is not reported as a 503`() =
@@ -266,14 +306,18 @@ class FeeServiceTest {
 
     /**
      * The ingress in memory: [submit] runs on every submission, which the fake records, and [attach] answers the run's
-     * outcome, or suspends until cancelled, as a run that never finishes does.
+     * outcome, or suspends until cancelled, as a run that never finishes does. [output] answers Restate's one-off
+     * output request: `null` is Restate's 470 (not ready).
      */
     private class FakeClients(
         private val submit: suspend () -> Unit = {},
         private val attach: suspend () -> FeeOutcome,
+        private val output: suspend () -> FeeOutcome? = { null },
     ) : FeeWorkflowClients {
         val submitted = mutableListOf<Pair<String, FeeRequest>>()
         var attaches = 0
+            private set
+        var outputs = 0
             private set
 
         /** Completed once an attach started waiting. */
@@ -285,10 +329,17 @@ class FeeServiceTest {
         ): FeeWorkflowRun {
             submitted += transactionId to request
             submit()
-            return FeeWorkflowRun {
-                attaches++
-                attaching.complete(Unit)
-                attach()
+            return object : FeeWorkflowRun {
+                override suspend fun attach(): FeeOutcome {
+                    attaches++
+                    attaching.complete(Unit)
+                    return this@FakeClients.attach()
+                }
+
+                override suspend fun output(): FeeOutcome? {
+                    outputs++
+                    return this@FakeClients.output()
+                }
             }
         }
     }

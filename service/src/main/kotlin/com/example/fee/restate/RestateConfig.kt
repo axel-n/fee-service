@@ -6,7 +6,9 @@ import com.example.fee.restate.serde.KotlinJacksonSerdeFactory
 import com.example.fee.workflow.FeeOutcome
 import com.example.fee.workflow.FeeWorkflow
 import dev.restate.client.Client
+import dev.restate.client.SendResponse
 import dev.restate.client.kotlin.attachSuspend
+import dev.restate.client.kotlin.getOutputSuspend
 import dev.restate.client.kotlin.toWorkflow
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
@@ -41,9 +43,15 @@ interface FeeWorkflowClients {
 }
 
 /** A submitted run of `FeeWorkflow`. */
-fun interface FeeWorkflowRun {
+interface FeeWorkflowRun {
     /** Waits for the run's outcome. Every caller attached to the same run gets the same outcome. */
     suspend fun attach(): FeeOutcome
+
+    /**
+     * Asks Restate once, without waiting, for the run's outcome: `null` exactly when Restate answers 470 (not ready),
+     * that is, when Restate itself says the run hasn't finished.
+     */
+    suspend fun output(): FeeOutcome?
 }
 
 /** [FeeWorkflowClients] over the ingress [client], through the Kotlin SDK's typed requests. */
@@ -55,8 +63,21 @@ private class IngressFeeWorkflowClients(
         request: FeeRequest,
     ): FeeWorkflowRun {
         val sent = client.toWorkflow<FeeWorkflow>(transactionId).request { run(request) }.send()
-        return FeeWorkflowRun {
-            checkNotNull(sent.attachSuspend().response()) { "Workflow $transactionId returned no outcome" }
-        }
+        return IngressFeeWorkflowRun(transactionId, sent)
     }
+}
+
+/** The run Restate acknowledged with [sent]. The SDK reads Restate's 470 as `Output.notReady()`, every other error throws. */
+private class IngressFeeWorkflowRun(
+    private val transactionId: String,
+    private val sent: SendResponse<FeeOutcome>,
+) : FeeWorkflowRun {
+    override suspend fun attach(): FeeOutcome = outcome(sent.attachSuspend().response())
+
+    override suspend fun output(): FeeOutcome? {
+        val output = sent.getOutputSuspend().response()
+        return if (output.isReady) outcome(output.value) else null
+    }
+
+    private fun outcome(outcome: FeeOutcome?): FeeOutcome = checkNotNull(outcome) { "Workflow $transactionId returned no outcome" }
 }
