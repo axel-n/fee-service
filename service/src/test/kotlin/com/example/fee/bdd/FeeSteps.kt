@@ -2,8 +2,10 @@ package com.example.fee.bdd
 
 import com.example.fee.domain.CreatedAtFormat
 import com.example.fee.it.CountingFeeCalculator
+import com.example.fee.it.FaultInjectingFeeRecordRepository
 import com.example.fee.it.FeeApi
 import com.example.fee.it.StoredFeeRecords
+import com.example.fee.it.StoredWorkflows
 import com.example.fee.it.TestClock
 import com.example.fee.record.FeeRecordStatus
 import io.cucumber.datatable.DataTable
@@ -35,6 +37,7 @@ import java.util.concurrent.TimeUnit
  */
 class FeeSteps(
     private val calculator: CountingFeeCalculator,
+    private val records: FaultInjectingFeeRecordRepository,
     private val clock: TestClock,
     @LocalServerPort apiPort: Int,
 ) {
@@ -105,7 +108,7 @@ class FeeSteps(
 
     /**
      * Pins the app's clock to [now], a UTC time in the `created_at` format, so a message that names "now" is exact. It
-     * is the clock VALIDATE reads inside the workflow; [resetClock] unpins it after the scenario.
+     * is the clock the gateway and the workflow's VALIDATE read; [resetClock] unpins it after the scenario.
      */
     @Given("it is {string} UTC")
     fun itIs(now: String) {
@@ -219,6 +222,18 @@ class FeeSteps(
     fun noFeeIsRecorded() {
         response()
         assertThat(StoredFeeRecords.of(submittedTransactionId())).isNull()
+    }
+
+    /**
+     * Checked past the app, once the response is in: Restate never started a workflow for the transaction, and the app
+     * never asked Postgres about it. The app answered on its own.
+     */
+    @Then("the transaction never reached Restate or Postgres")
+    fun theTransactionNeverReachedRestateOrPostgres() {
+        response()
+        val transactionId = submittedTransactionId()
+        assertThat(StoredWorkflows.step(transactionId)).describedAs("workflow step of %s", transactionId).isNull()
+        assertThat(records.callCount(transactionId)).describedAs("Postgres calls about %s", transactionId).isZero()
     }
 
     /** Read from Postgres itself, past the app's API: one record, with the fee and the amount of the charged response. */

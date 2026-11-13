@@ -16,18 +16,21 @@ POST /transaction/fee          → 200 with the fee (or 504 when it is not charg
 
 ## What it does
 
-`POST /transaction/fee` receives a transaction and hands it to the `FeeWorkflow` in Restate. The workflow:
+`POST /transaction/fee` receives a transaction and **validates** it (required fields, formats, only
+`SETTLED - PENDING FEE`, only `USD`/`EUR` `FIAT`, a known type, an amount up to 3,000,000,000). An invalid one is
+answered with 400 or 422 at once, without a call to Postgres or Restate. A valid one goes to the `FeeWorkflow` in
+Restate. The workflow:
 
-1. **validates** the request (required fields, formats, only `SETTLED - PENDING FEE`, only `USD`/`EUR` `FIAT`, a known type,
-   an amount up to 3,000,000,000),
+1. **validates** it again, so it never trusts its input (a run can also be started past the app),
 2. **claims** the `transaction_id`, so one transaction is charged at most once, whatever the payloads and callers,
 3. **calculates** the fee with the rule of the transaction's type,
 4. **charges and records** the fee: it is stored permanently in PostgreSQL as the transaction's charged fee.
 
 The caller waits for the result (up to `restate.attach-timeout`, 30 s by default) and gets the fee, or a 504 problem when Restate
 then reports the run as not finished (its 470). The workflow is keyed by the
-`transaction_id`, so sending the same id again returns the first run's response without a second charge, whatever the
-payload; a rejected id stays rejected until Restate drops the finished run (1 day by default).
+`transaction_id`, so sending the same id again with a valid payload returns the first run's response without a second
+charge, whatever that payload is. A rejection starts no workflow, so the same id with a corrected payload is processed
+normally.
 A charged id sent again is answered from a local cache (Caffeine) or from Postgres, without a call to Restate. The fee
 records live in Postgres, the workflow's journal in Restate, and nothing anywhere else.
 
@@ -49,8 +52,8 @@ records live in Postgres, the workflow's journal in Restate, and nothing anywher
 ```
 POST /transaction/fee
    ▼
-Spring app: TransactionFeeController → FeeService           (thin gateway, no business logic)
-   │  1. transaction_id present and well-formed?  (it is the workflow key; otherwise 400)
+Spring app: TransactionFeeController → FeeService           (thin gateway, no business logic of its own)
+   │  1. valid? RequestValidator, every check  (400/422 otherwise, with no Postgres or Restate call)
    │  2. already charged? the Caffeine cache, then Postgres → 200 with the stored response, no Restate call
    │  3. submit FeeWorkflow/txn_001/run, then attach  (the id sent again gets PREVIOUSLY_ACCEPTED
    │     and the first run's result; no result within attach-timeout and Restate answers 470 → 504)
@@ -111,13 +114,14 @@ config/            RestateProperties, FeeCacheProperties, FeeProperties,    ever
                    RestateConfig, ChargedFeesCacheConfig, ClockConfig       class: the bean definitions, and one properties file
                                                                             per top-level section of application.yml
 api/               TransactionFeeController, ApiExceptionHandler            HTTP only, errors as RFC 7807 ProblemDetail
-application/       FeeService, ChargedFees                                  thin gateway: transaction_id → charged? (cache,
-                                                                            Postgres) → submit/attach → HTTP result
+application/       FeeService, ChargedFees                                  thin gateway: valid? → charged? (cache, Postgres)
+                                                                            → submit/attach → HTTP result
 workflow/          FeeWorkflow, its durable types, StepHook                 the Restate workflow: every business step
 record/            FeeRecordRepository, FeeRecord, ClaimDecider             the fee records in Postgres: one per transaction_id
 restate/           RestateEndpointLifecycle, RestateDeployments,            Restate plumbing: the endpoint and its registration,
                    FeeWorkflowClients                                       the ingress client
-validation/        TransactionValidator, RequestValidator, ValidationError  run inside the workflow (VALIDATE)
+validation/        TransactionValidator, RequestValidator, ValidationError  run by FeeService first, then inside the
+                                                                            workflow (VALIDATE)
 validation/rule/   one TransactionValidator bean per check, by @Order
 fee/               FeeRule, FeeCalculator                                   run inside the workflow (CALCULATE)
 fee/formula/       PercentageFee, FlatFee, …                                the building blocks
@@ -125,9 +129,10 @@ fee/rule/          one FeeRule bean per transaction type
 domain/            Transaction and its enums, TransactionMapper             pure Kotlin
 ```
 
-The controller calls only `FeeService`, `FeeService` holds no business logic, and every business step runs inside
-`FeeWorkflow`. Spring builds every object, including the Restate handler, so constructor injection, `@Order` and the
-injected rule and validator lists work behind the workflow too.
+The controller calls only `FeeService`, `FeeService` holds no business logic of its own (it runs the validators, so an
+invalid request reaches neither Postgres nor Restate), and every business step runs inside `FeeWorkflow`. Spring
+builds every object, including the Restate handler, so constructor injection, `@Order` and the injected rule and
+validator lists work behind the workflow too.
 
 The full class design, the wiring, the call graph and the idempotency and recovery guarantees are in
 [`docs/design.md`](docs/design.md).
@@ -238,8 +243,9 @@ curl -s -X POST localhost:8081/transaction/fee -H 'Content-Type: application/jso
 {"transaction_id":"txn_001","amount":1000,"asset":"USD","type":"Mobile Top Up","fee":1.5,"rate":0.0015,"description":"Standard fee rate of 0.15%"}
 ```
 
-Sending the **same `transaction_id` again** returns the same body, whatever the payload, and the fee is not charged again.
-Once charged, it is answered from the cache or Postgres without a call to Restate.
+Sending the **same `transaction_id` again** with a valid payload returns the same body, whatever that payload, and the
+fee is not charged again. Once charged, it is answered from the cache or Postgres without a call to Restate. An
+invalid payload is rejected (400 or 422), even for a charged id, and the charge stands.
 
 **Another type and asset**, with Bank Transfer's minimum applied:
 
@@ -269,8 +275,9 @@ The 504 comes only when Restate itself reports the run as not finished (470 on t
 Restate is retrying because it can't reach a working endpoint; a run that finished meanwhile answers its result. The run
 goes on, so send the same transaction again to get the fee once it is charged; it is charged once.
 
-A rejection is the `transaction_id`'s answer while Restate keeps the finished run (1 day by default): the corrected request
-sent with the same id gets the same rejection until then (e.g. `PENDING`, then `SETTLED - PENDING FEE`).
+A rejection (400 or 422) comes from the app itself, before any call to Postgres or Restate. It starts no workflow and
+records nothing, so the corrected request sent with the same id is charged normally (e.g. `PENDING`, then
+`SETTLED - PENDING FEE`). A charged id sent with an invalid payload is rejected too, and its charge stands.
 
 ### Calling it from another service
 
@@ -312,8 +319,8 @@ scripts/check.sh      # the project's gate: rule checks + mvn clean verify, and 
   charged fees, the gateway's HTTP mapping, the packaged configuration. Postgres is faked in memory
   (`InMemoryFeeRecordRepository`). `TestCoverageAuditTest` fails when a production file has no test.
 - **BDD features** ([`service/src/test/resources/features/`](service/src/test/resources/features)) describe the behaviour end to end against
-  a real Restate and Postgres: fee calculation per type and asset, validation, transaction state (a rejected id stays
-  rejected), idempotency and workflow recovery.
+  a real Restate and Postgres: fee calculation per type and asset, validation (a rejection reaches neither Restate nor
+  Postgres), transaction state, idempotency and workflow recovery.
 - **Integration tests** (`*IT`) share one Testcontainers Restate and one Postgres and use only random ports, so a Restate,
   Postgres or app already running on the machine can't interfere. They read the fee records in Postgres itself, past the
   app. `AppContainerIT` is the exception: it runs the packaged jar in a container next to a Restate and a Postgres of its
@@ -330,13 +337,13 @@ What the recovery tests prove (each counts the **CALCULATE executions**, not jus
 | `EndpointRestartIT`, `workflow_recovery.feature` | Stopping and restarting the endpoint in the middle of CALCULATE keeps its deployment and completes the workflow with one fee record |
 | `EndpointRegistrationIT` | The app registers itself at its advertised URL at startup, and a stop with nothing unfinished removes the registration |
 | `RestateOutageIT` | A workflow frozen mid-CALCULATE completes with one fee record once Restate thaws |
-| `PostgresOutageIT` | With Postgres down while the app runs: a new transaction is accepted by Restate and waits at CLAIM, then is charged once when Postgres is back; an outage between CLAIM and RECORD reports nothing charged until the record is written, then charges once (CALCULATE ran once); a charged id is still answered from the cache, then from Restate; a rejection is still answered and never stored. With Postgres frozen (connections open, nothing answers), the lookup gives up after `fee-cache.lookup-timeout` and Restate answers a charged id or a rejection within seconds |
+| `PostgresOutageIT` | With Postgres down while the app runs: a new transaction is accepted by Restate and waits at CLAIM, then is charged once when Postgres is back; an outage between CLAIM and RECORD reports nothing charged until the record is written, then charges once (CALCULATE ran once); a charged id is still answered from the cache, then from Restate; a rejection is answered by the app without a Postgres call and never stored. With Postgres frozen (connections open, nothing answers), the lookup gives up after `fee-cache.lookup-timeout` and Restate answers a charged id within seconds; a rejection needs no lookup at all |
 | `AttachTimeoutIT` | A run that outlasts the attach timeout, and that Restate reports as not finished (470), answers 504 `WORKFLOW_TIMEOUT`; the same payload sent again gets the fee, calculated once |
 | `AppContainerIT` | The packaged app in a container registers with Restate under its network alias and charges a fee (an unknown type gets 422 at once); a graceful stop removes the deployment; a run submitted while the app is killed waits (Restate answers 470) and is charged once when the app is back at the same URL, as the same deployment |
-| `DeterminismIT` | A validation result is journaled: moving the clock between a crash and the retry doesn't change it |
-| `DuplicatesIT`, `idempotency.feature` | One `transaction_id`, sequentially or 10 callers at once, with the same or different payloads, is charged once, every caller gets the first run's response, and Postgres holds exactly that one record; valid and invalid payloads at once all get the accepted payload's answer; an id held by an unfinished run gets 409 |
-| `RejectedIT`, `transaction_state.feature` | A rejected id is neither charged nor recorded, and the corrected request with the same id gets the same rejection |
-| `RetentionExpiredIT` | After Restate dropped a finished run, a charged id is answered from the cache, or from Postgres when it isn't cached, without a new run or a second charge; a run sent past the app is stopped at CLAIM by the record; a rejected id is charged normally |
+| `DeterminismIT` | A validation result is journaled: moving the clock between a crash and the retry doesn't change it (a run with a `created_at` in the future is sent past the app, which would reject it first) |
+| `DuplicatesIT`, `idempotency.feature` | One `transaction_id`, sequentially or 10 callers at once, with the same or different payloads, is charged once, every caller gets the first run's response, and Postgres holds exactly that one record; of valid and invalid payloads at once, each invalid one is rejected and the valid ones are charged once; an id held by an unfinished run gets 409 |
+| `RejectedIT`, `transaction_state.feature` | A rejection through the API starts no workflow and asks Postgres nothing, and the corrected request with the same id is charged; the same invalid payloads sent past the app are rejected by the workflow's own VALIDATE, before CLAIM |
+| `RetentionExpiredIT` | After Restate dropped a finished run, a charged id is answered from the cache, or from Postgres when it isn't cached, without a new run or a second charge; a run sent past the app is stopped at CLAIM by the record; an id rejected by a run sent past the app is charged normally |
 
 ## Fee table
 
@@ -378,8 +385,9 @@ order or the JSON of `FeeRequest`/`FeeResponse` is a breaking change for in-flig
   (`MaxAmountValidator.MAX_AMOUNT`), the same number for USD and EUR.
 - `fee` is answered without trailing zeros (`1.5`, as in the challenge's sample; `5`, `10.3`), and stored at the asset's
   2 decimals (`1.50`), the same value; `amount` is echoed as sent.
-- One `transaction_id` is processed once: sending it again, with any payload, returns the first run's response (the fee or
-  the rejection) without charging again. A rejected id can be charged once Restate drops its run (1 day by default).
+- A request is validated before any call to Postgres or Restate: an invalid one gets 400 or 422, starts no workflow and
+  uses no `transaction_id` up. One `transaction_id` is processed once: sending it again with a valid payload, any valid
+  payload, returns the first run's response without charging again.
 - Charging a fee means recording it in Postgres as the transaction's charged fee; there is no external wallet.
 - Bank Transfer has a minimum and no maximum.
 

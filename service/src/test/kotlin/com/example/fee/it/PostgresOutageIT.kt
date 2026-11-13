@@ -21,7 +21,7 @@ import java.util.concurrent.TimeUnit
  * Postgres goes away while the app runs, and comes back ([PostgresTestEnvironment.goDown]: open connections are cut, new
  * ones refused). Restate still accepts work. A run that needs the database waits in Restate's retries, so a fee is charged
  * exactly once, and only after its record is written; what needs no database (a charge Restate or the cache still knows,
- * a rejection) is answered during the outage.
+ * a rejection, which the gateway answers before any call to Postgres or Restate) is answered during the outage.
  *
  * Postgres also hangs ([PostgresTestEnvironment.freeze]: connections open, nothing answers, as in a network partition).
  * `FeeService`'s lookup then gives up after `fee-cache.lookup-timeout` and leaves the answer to Restate, so a request
@@ -31,6 +31,7 @@ class PostgresOutageIT
     @Autowired
     constructor(
         private val calculator: CountingFeeCalculator,
+        private val records: FaultInjectingFeeRecordRepository,
         private val chargedFeesCache: Cache<String, FeeResponse>,
         @LocalServerPort apiPort: Int,
     ) : RestateIntegrationTest() {
@@ -149,8 +150,10 @@ class PostgresOutageIT
             // when
             val response = api.submit(bodyOf(request))
 
-            // then: VALIDATE comes before CLAIM, so the rejection needs no database
+            // then: the gateway validates before any call to Postgres or Restate, so the rejection needs neither
             assertThat(response.status).describedAs("POST status, body %s", response.body).isEqualTo(422)
+            assertThat(records.callCount(transactionIdOf(request))).describedAs("Postgres calls").isZero()
+            assertThat(StoredWorkflows.step(request)).describedAs("workflow step").isNull()
             assertThat(calculator.count(transactionIdOf(request))).isZero()
             PostgresTestEnvironment.goUp()
             assertThat(StoredFeeRecords.count(transactionIdOf(request))).isZero()
@@ -179,7 +182,7 @@ class PostgresOutageIT
         }
 
         @Test
-        fun `while Postgres hangs, a rejected transaction is still answered once the lookup gives up`() {
+        fun `while Postgres hangs, a rejected transaction is answered without a lookup`() {
             // given
             val request = validRequest(newTransactionId()).copy(state = "PENDING")
             PostgresTestEnvironment.freeze()
@@ -190,9 +193,11 @@ class PostgresOutageIT
             val response = api.submit(bodyOf(request))
             val took = Duration.ofNanos(System.nanoTime() - started)
 
-            // then: Restate validated it; the database was never needed
+            // then: the gateway rejected it before any lookup, so the hanging database never held it up
             assertThat(response.status).describedAs("POST status, body %s", response.body).isEqualTo(422)
             assertThat(took).describedAs("answered in").isLessThan(HANG_BOUND)
+            assertThat(records.callCount(transactionIdOf(request))).describedAs("Postgres calls").isZero()
+            assertThat(StoredWorkflows.step(request)).describedAs("workflow step").isNull()
             assertThat(calculator.count(transactionIdOf(request))).isZero()
         }
 

@@ -5,11 +5,12 @@ Instructions for AI coding agents (and humans) working on **fee-service**.
 ## Project
 
 A Kotlin + Spring Boot service for a backend technology challenge (requirements: `requirements.md`).
-`POST /transaction/fee` hands the request to a Restate workflow. The workflow validates, calculates, charges and records
-the fee as journaled steps, so processing survives crashes and restarts without charging twice. The result, the fee
-record, is persisted in PostgreSQL; an already charged `transaction_id` is answered from a local cache or Postgres without
-Restate. The app sends work through Restate's ingress, and registers its own endpoint with Restate's admin API at
-startup, at whatever host and port it runs on.
+`POST /transaction/fee` validates the request, so an invalid one costs no Postgres or Restate call, and hands a valid one
+to a Restate workflow. The workflow validates again, then calculates, charges and records the fee as journaled steps, so
+processing survives crashes and restarts without charging twice. The result, the fee record, is persisted in PostgreSQL;
+an already charged `transaction_id` is answered from a local cache or Postgres without Restate. The app sends work
+through Restate's ingress, and registers its own endpoint with Restate's admin API at startup, at whatever host and port
+it runs on.
 
 - **The design is the source of truth:** `docs/design.md` (goal, fee table, how Restate is used, class design, wiring,
   call graph, extension points, recovery guarantees). Read it before starting any work.
@@ -87,12 +88,15 @@ Approach:
 Follow the call graph in `docs/design.md`:
 
 - `TransactionFeeController` calls **only** `FeeService`. It handles HTTP concerns only.
-- `FeeService` is a **thin gateway with no business logic**. It runs the `transaction_id` pre-check (the id is the workflow key),
-  answers an already charged id from `ChargedFees` (the Caffeine cache, then Postgres within `fee-cache.lookup-timeout`)
-  without Restate, otherwise submits or attaches to the `FeeWorkflow` of that id, and maps `FeeOutcome` to HTTP. Only a
-  charge is cached: never a rejection, a conflict or a timeout.
+- `FeeService` is a **thin gateway with no business logic of its own**. It validates the request first with
+  `RequestValidator` (the same validators as VALIDATE; the logic stays in them), so an invalid request is answered with
+  400/422 before any call to Postgres or Restate. Then it answers an already charged id from `ChargedFees` (the Caffeine
+  cache, then Postgres within `fee-cache.lookup-timeout`) without Restate, otherwise submits or attaches to the
+  `FeeWorkflow` of that id, and maps `FeeOutcome` to HTTP. Only a charge is cached: never a rejection, a conflict or a
+  timeout.
 - **All business logic runs inside `FeeWorkflow`** as journaled steps: VALIDATE → MAP → CLAIM → CALCULATE → RECORD (RECORD
-  is the charge: the fee is stored in Postgres as the transaction's charged fee).
+  is the charge: the fee is stored in Postgres as the transaction's charged fee). VALIDATE stays although the gateway
+  validated: the workflow never trusts its input, because a run can be started past the app, through Restate's ingress.
   Every step is wrapped with `StepHook.before/after`.
 - `contract`, `domain`, `fee`, `validation` and `ClaimDecider` are **pure Kotlin** (no Restate or Postgres imports) and
   unit-tested without either.
@@ -146,7 +150,8 @@ Follow the call graph in `docs/design.md`:
 
 - **New validation:** a `@Component @Order(ValidationOrder.X)` class in `validation.rule` implementing `TransactionValidator` that
   returns `ValidationError?` (never throws). Add its constant to `ValidationOrder`, leaving gaps of 100. Structural checks (400) come
-  before business checks (422). Messages must be readable and include the rejected value and the allowed values.
+  before business checks (422). Messages must be readable and include the rejected value and the allowed values. It runs
+  in `FeeService` and in VALIDATE without further wiring, so it must stay pure (an injected `Clock` at most, no I/O).
 - **New transaction type:** an enum value in `TransactionType` + one `@Component` `FeeRule` in `fee.rule` (compose the building
   blocks in `fee.formula`) + its `@ConfigurationProperties` class in `config/FeeProperties.kt` + a `fee.<type>` section in
   `application.yml` + a unit test + a row in the BDD outline. `FeeCalculator`'s startup check fails if a rule is missing.

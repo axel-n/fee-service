@@ -1,11 +1,12 @@
 Feature: Request validation
-  Every request is validated inside the workflow before anything is claimed or charged, and the first problem decides
-  the response. A malformed request (a missing field, a transaction_id that can't be a key, an amount of 0 or less, a
+  Every request is validated by the app before it reaches Restate or Postgres, and the first problem decides the
+  response. A malformed request (a missing field, a transaction_id that can't be a key, an amount of 0 or less, a
   created_at in the wrong format or in the future) is rejected with 400 before any unsupported value is looked at; a
   well-formed request asking for something unsupported (an asset other than USD and EUR, an asset type other than FIAT,
   an unknown transaction type, more decimals than the asset allows, an amount above 3000000000) is rejected with 422.
-  Each rejection names the field, echoes the value as sent and explains what is allowed. A rejection is neither charged
-  nor recorded.
+  Each rejection names the field, echoes the value as sent and explains what is allowed. A rejection starts no workflow
+  and asks Postgres nothing, so it is neither charged nor recorded. The workflow runs the same checks again before
+  anything is claimed or charged.
 
   Scenario Outline: A request without <field> is rejected with 400
     Given a "Mobile Top Up" transaction "<id>" of 1000 "USD" "FIAT" in state "SETTLED - PENDING FEE"
@@ -15,6 +16,7 @@ Feature: Request validation
     And the request is rejected on missing field "<field>" with message "Field '<field>' is required"
     And the fee was not charged
     And no fee is recorded
+    And the transaction never reached Restate or Postgres
 
     Examples: Every field of the contract is required
       | id      | field          |
@@ -34,6 +36,7 @@ Feature: Request validation
     And the request is rejected on field "<field>" with value "" and message "Field '<field>' is required but was blank: ''"
     And the fee was not charged
     And no fee is recorded
+    And the transaction never reached Restate or Postgres
 
     Examples: A blank text counts as missing
       | id      | field      |
@@ -51,6 +54,15 @@ Feature: Request validation
     And the request is rejected on field "type" with value "   " and message "Field 'type' is required but was blank: '   '"
     And the fee was not charged
     And no fee is recorded
+    And the transaction never reached Restate or Postgres
+
+  Scenario: A blank transaction_id is rejected with 400 as missing
+    Given a "Mobile Top Up" transaction "txn_417" of 1000 "USD" "FIAT" in state "SETTLED - PENDING FEE"
+    And the transaction's "transaction_id" is sent exactly as ""
+    When the transaction is submitted to "/transaction/fee"
+    Then the response status is 400
+    And the request is rejected on field "transaction_id" with value "" and message "Field 'transaction_id' is required but was blank: ''"
+    And the fee was not charged
 
   Scenario Outline: A transaction_id that can't be a key is rejected with 400: "<transaction_id>"
     Given a "Mobile Top Up" transaction "txn_421" of 1000 "USD" "FIAT" in state "SETTLED - PENDING FEE"
@@ -62,7 +74,6 @@ Feature: Request validation
 
     Examples: Only ASCII letters, digits, '_' and '-'
       | transaction_id |
-      |                |
       | txn 001        |
       | txn:001        |
       | txn/001        |
@@ -86,6 +97,7 @@ Feature: Request validation
     And the request is rejected on field "amount" with value "<amount>" and message "Invalid amount '<amount>'. Allowed: a number greater than 0"
     And the fee was not charged
     And no fee is recorded
+    And the transaction never reached Restate or Postgres
 
     Examples: The amount must be greater than 0
       | id      | amount |
@@ -103,6 +115,7 @@ Feature: Request validation
     And the request is rejected on field "created_at" with value "<created_at>" and message "Invalid created_at '<created_at>'. Allowed: 'yyyy-MM-dd HH:mm:ss' with 0 to 9 fraction digits, e.g. '2023-08-30 15:42:17.610059'"
     And the fee was not charged
     And no fee is recorded
+    And the transaction never reached Restate or Postgres
 
     Examples: Only 'yyyy-MM-dd HH:mm:ss' with 0 to 9 fraction digits, no zone, a real date
       | id      | created_at                     |
@@ -126,6 +139,7 @@ Feature: Request validation
     And the request is rejected on field "created_at" with value "<created_at>" and message "Invalid created_at '<created_at>': it is in the future. Allowed: up to now, 2030-01-01 12:00:00.000000 UTC"
     And the fee was not charged
     And no fee is recorded
+    And the transaction never reached Restate or Postgres
 
     Examples: created_at is UTC and may not be later than now
       | id      | created_at                 |
@@ -151,6 +165,7 @@ Feature: Request validation
     And the request is rejected on field "<field>" with value "<value>" and message "<message>"
     And the fee was not charged
     And no fee is recorded
+    And the transaction never reached Restate or Postgres
 
     Examples: Only USD and EUR, matched exactly; the asset is checked before its type
       | id      | type          | amount | asset | asset_type | field | value | message                                           |
@@ -204,6 +219,7 @@ Feature: Request validation
     And the request is rejected on field "amount" with value "3000000000.001" and message "Amount 3000000000.001 has 3 decimals. USD allows 2"
     And the fee was not charged
     And no fee is recorded
+    And the transaction never reached Restate or Postgres
 
   Scenario: A malformed request is rejected with 400 even when it is also unsupported
     Given a "Crypto Purchase" transaction "txn_481" of 1000 "GBP" "CRYPTO" in state "PENDING"
@@ -213,6 +229,7 @@ Feature: Request validation
     And the request is rejected on field "amount" with value "-5" and message "Invalid amount '-5'. Allowed: a number greater than 0"
     And the fee was not charged
     And no fee is recorded
+    And the transaction never reached Restate or Postgres
 
   Scenario: Of several unsupported values, the first in validation order is reported
     Given a "Crypto Purchase" transaction "txn_482" of 10.001 "GBP" "CRYPTO" in state "SETTLED - PENDING FEE"
@@ -221,3 +238,4 @@ Feature: Request validation
     And the request is rejected on field "asset" with value "GBP" and message "Unsupported asset 'GBP'. Supported: 'USD', 'EUR'"
     And the fee was not charged
     And no fee is recorded
+    And the transaction never reached Restate or Postgres

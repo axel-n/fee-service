@@ -27,7 +27,9 @@ sealed interface FeeOutcome {
     ) : FeeOutcome
 
     /**
-     * Validation rejected the request; the [error]'s kind decides 400 or 422. Nothing is recorded, but this is the
+     * VALIDATE rejected the request; the [error]'s kind decides 400 or 422. `FeeService` rejects an invalid request
+     * before it reaches Restate, so this comes from a run started past the app, or from a `created_at` that passed the
+     * gateway's clock but not the workflow's (another instance, behind). Nothing is recorded, but this is the
      * answer for the `transaction_id` until Restate drops the finished run.
      */
     data class Rejected(

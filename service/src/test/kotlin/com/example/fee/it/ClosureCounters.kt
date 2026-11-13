@@ -27,9 +27,10 @@ class CallCounter {
 }
 
 /**
- * A validator that always passes and counts how often it ran, per `transaction_id`. It runs last, inside the VALIDATE
- * a journaled step, so its count is the number of VALIDATE executions of requests that passed every real check. Recovery tests
- * count these instead of hook calls, because a replay runs the handler again but not a journaled closure.
+ * A validator that always passes and counts how often it ran, per `transaction_id`. It runs last, so its count is the
+ * number of validations that passed every real check: one by `FeeService` per request through the API, plus one per
+ * execution of the workflow's VALIDATE journaled step. Recovery tests count these instead of hook calls, because a
+ * replay runs the handler again but not a journaled closure.
  */
 @Order(Ordered.LOWEST_PRECEDENCE)
 class CountingValidator : TransactionValidator {
@@ -40,7 +41,7 @@ class CountingValidator : TransactionValidator {
         return null
     }
 
-    /** How many times VALIDATE ran its closure through every check for [transactionId]. */
+    /** How many validations of [transactionId] passed every real check: the gateway's and VALIDATE's closure runs. */
     fun count(transactionId: String): Int = counter.count(transactionId)
 }
 

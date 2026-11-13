@@ -19,7 +19,10 @@ object StoredWorkflows {
     fun keyOf(request: FeeRequest): String = checkNotNull(request.transactionId)
 
     /** The step the workflow of [request] is at, `DONE` once it returned, `null` if it never started. */
-    fun step(request: FeeRequest): WorkflowStep? = runBlocking { TestIngress.client.workflow<FeeWorkflow>(keyOf(request)).status() }
+    fun step(request: FeeRequest): WorkflowStep? = step(keyOf(request))
+
+    /** The step the workflow of [transactionId] is at, `DONE` once it returned, `null` if it never started. */
+    fun step(transactionId: String): WorkflowStep? = runBlocking { TestIngress.client.workflow<FeeWorkflow>(transactionId).status() }
 
     /** The outcome the workflow of [request] returned, or `null` while it has none yet. */
     fun outcome(request: FeeRequest): FeeOutcome? {

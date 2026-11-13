@@ -18,8 +18,8 @@ import java.util.UUID
 /**
  * A `transaction_id` after Restate forgot its run (workflow retention, 1 day on 1.8.1). A charged id is answered by
  * `FeeService` from its cache or from Postgres, so no new run starts. A run that starts anyway, sent past the app, is
- * stopped at CLAIM by the permanent record: `AlreadyCompleted` → the stored response, no second charge. A rejected id has
- * no record, so it is processed normally then.
+ * stopped at CLAIM by the permanent record: `AlreadyCompleted` → the stored response, no second charge. An id rejected by
+ * a run sent past the app has no record, so it is processed normally then.
  *
  * Waiting a day is not an option, so the tests purge the old run through the admin API, as retention would.
  */
@@ -98,13 +98,20 @@ class RetentionExpiredIT
         }
 
         @Test
-        fun `a rejected transaction_id is charged with a corrected payload once its run was purged`() {
-            // given: the id rejected through the API, then its run purged as retention would
+        fun `a transaction_id rejected by a run sent past the app is charged with a corrected payload once its run was purged`() {
+            // given: the id rejected by a run sent straight through the ingress (the API rejects before Restate)
             val valid = validRequest(newTransactionId())
             val rejected = valid.copy(state = "PENDING")
-            val rejection = api.submit(bodyOf(rejected))
-            assertThat(rejection.status).describedAs("first POST status, body %s", rejection.body).isEqualTo(422)
+            StoredWorkflows.submit(rejected)
+            awaitUntil("the run of ${StoredWorkflows.keyOf(rejected)} has finished") { StoredWorkflows.outcome(rejected) != null }
+            assertThat(StoredWorkflows.outcome(rejected)).isInstanceOf(FeeOutcome.Rejected::class.java)
+
+            // given: while Restate keeps that run, the corrected payload through the API attaches to it and gets its rejection
+            val attached = api.submit(bodyOf(valid))
+            assertThat(attached.status).describedAs("POST status, body %s", attached.body).isEqualTo(422)
             assertThat(StoredFeeRecords.of(transactionIdOf(valid))).isNull()
+
+            // given: then the run is purged, as retention would
             purgeRunOf(rejected)
 
             // when

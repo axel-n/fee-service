@@ -1,11 +1,13 @@
 package com.example.fee.it
 
 import com.example.fee.contract.FeeRequest
+import com.example.fee.record.FeeRecordStatus
 import com.example.fee.validation.ValidationError
 import com.example.fee.validation.ValidationError.Kind.INVALID
 import com.example.fee.validation.ValidationError.Kind.UNSUPPORTED
 import com.example.fee.workflow.FeeOutcome
 import com.example.fee.workflow.WorkflowStep
+import dev.restate.client.SendResponse
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
@@ -16,15 +18,16 @@ import java.math.BigDecimal
 import java.util.UUID
 
 /**
- * Rejections end to end: every kind of validator rejects through the workflow's VALIDATE step, which returns
- * `FeeOutcome.Rejected` before CLAIM, so nothing is calculated or recorded. The workflow key is the `transaction_id`, so
- * the rejection stays the id's answer while Restate keeps the run: the same id with a corrected payload gets it again
- * (`RetentionExpiredIT` covers the id once the run is gone).
+ * Rejections end to end. Through the API, `FeeService` validates the request before any call to Postgres or Restate:
+ * a rejected payload starts no workflow and asks Postgres nothing, so the same id with a corrected payload is charged
+ * right away. Sent past the app, straight through Restate's ingress, the same payload is rejected by the workflow's own
+ * VALIDATE step, which returns `FeeOutcome.Rejected` before CLAIM: the workflow never trusts its input.
  */
 class RejectedIT
     @Autowired
     constructor(
         private val calculator: CountingFeeCalculator,
+        private val records: FaultInjectingFeeRecordRepository,
         @LocalServerPort apiPort: Int,
     ) : RestateIntegrationTest() {
         private val api = FeeApi(apiPort)
@@ -44,13 +47,15 @@ class RejectedIT
             val broken: (FeeRequest) -> FeeRequest,
         ) {
             override fun toString() = name
+
+            fun assertMessage(actual: String) {
+                if (messageIsPrefix) assertThat(actual).startsWith(message) else assertThat(actual).isEqualTo(message)
+            }
         }
 
         @ParameterizedTest(name = "{0}")
         @MethodSource("cases")
-        fun `a rejected payload is neither recorded nor charged and the corrected payload with the same id gets the same rejection`(
-            case: Case,
-        ) {
+        fun `a rejected payload reaches neither Postgres nor Restate, and the corrected payload with the same id is charged`(case: Case) {
             // given
             val transactionId = newTransactionId()
             val valid = validRequest(transactionId)
@@ -69,13 +74,38 @@ class RejectedIT
                 assertThat(problem["value"].asText()).isEqualTo(case.value)
             }
             assertThat(problem["detail"].asText()).isEqualTo(problem["message"].asText())
-            if (case.messageIsPrefix) {
-                assertThat(problem["message"].asText()).startsWith(case.message)
-            } else {
-                assertThat(problem["message"].asText()).isEqualTo(case.message)
-            }
+            case.assertMessage(problem["message"].asText())
 
-            // then: the workflow itself rejected it, after VALIDATE, as a returned business result
+            // then: the gateway rejected it: no workflow started, Postgres never asked, nothing calculated or recorded
+            assertThat(StoredWorkflows.step(rejected)).describedAs("workflow step").isNull()
+            assertThat(records.callCount(transactionId)).describedAs("Postgres calls").isZero()
+            assertThat(calculator.count(transactionId)).isZero()
+            assertThat(StoredFeeRecords.of(transactionId)).isNull()
+
+            // when: the same id with the corrected payload
+            val corrected = api.submit(bodyOf(valid))
+
+            // then: the rejection didn't use the id up: it is charged, once
+            assertThat(corrected.status).describedAs("POST status, body %s", corrected.body).isEqualTo(200)
+            assertThat(corrected.body["fee"].decimalValue()).isEqualByComparingTo(BigDecimal("1.50"))
+            assertThat(StoredWorkflows.outcome(valid)).isInstanceOf(FeeOutcome.Charged::class.java)
+            assertThat(calculator.count(transactionId)).describedAs("CALCULATE executions").isEqualTo(1)
+            assertThat(StoredFeeRecords.of(transactionId)?.status).isEqualTo(FeeRecordStatus.COMPLETED)
+        }
+
+        @ParameterizedTest(name = "{0}")
+        @MethodSource("cases")
+        fun `a rejected payload sent past the app is rejected by the workflow itself, before CLAIM`(case: Case) {
+            // given
+            val transactionId = newTransactionId()
+            val rejected = case.broken(validRequest(transactionId))
+
+            // when: straight through Restate's ingress, as an operator or another service could
+            val sent = StoredWorkflows.submit(rejected)
+            awaitUntil("the run of $transactionId has finished") { StoredWorkflows.outcome(rejected) != null }
+
+            // then: VALIDATE returned the same rejection as a business result
+            assertThat(sent.sendStatus()).isEqualTo(SendResponse.SendStatus.ACCEPTED)
             assertThat(StoredWorkflows.step(rejected)).isEqualTo(WorkflowStep.DONE)
             val outcome = StoredWorkflows.outcome(rejected)
             assertThat(outcome).isInstanceOf(FeeOutcome.Rejected::class.java)
@@ -83,24 +113,12 @@ class RejectedIT
             assertThat(error.field).isEqualTo(case.field)
             assertThat(error.value).isEqualTo(case.value)
             assertThat(error.kind).isEqualTo(case.kind)
-            assertThat(error.message).isEqualTo(problem["message"].asText())
+            case.assertMessage(error.message)
 
-            // then: no record, no calculation
-            assertThat(StoredFeeRecords.of(transactionId)).isNull()
+            // then: it stopped before CLAIM: Postgres never asked, nothing calculated or recorded
+            assertThat(records.callCount(transactionId)).describedAs("Postgres calls").isZero()
             assertThat(calculator.count(transactionId)).isZero()
-
-            // when: the same id with the corrected payload
-            val resent = api.submit(bodyOf(valid))
-
-            // then: the id's one workflow answers with its rejection again
-            assertThat(resent.status).describedAs("POST status, body %s", resent.body).isEqualTo(case.status)
-            assertThat(resent.body).isEqualTo(rejection.body)
-            assertThat(StoredWorkflows.keyOf(valid)).isEqualTo(StoredWorkflows.keyOf(rejected))
-            assertThat(StoredWorkflows.outcome(valid)).isEqualTo(outcome)
-
-            // then: still no record, no calculation
             assertThat(StoredFeeRecords.of(transactionId)).isNull()
-            assertThat(calculator.count(transactionId)).isZero()
         }
 
         @Test
@@ -121,6 +139,7 @@ class RejectedIT
                     "each a letter (A-Z, a-z), a digit, '_' or '-'",
             )
             assertThat(StoredWorkflows.step(rejected)).isNull()
+            assertThat(records.callCount(transactionId)).describedAs("Postgres calls").isZero()
             assertThat(StoredFeeRecords.of(transactionId)).isNull()
             assertThat(calculator.count(transactionId)).isZero()
         }
@@ -151,7 +170,7 @@ class RejectedIT
                     createdAt = "2023-08-30 15:42:17.610059",
                 )
 
-            // One case per validator the workflow runs, in @Order order; TransactionIdValidator is the gateway's pre-check
+            // Cases across the validators, in @Order order; the transaction_id has its own test above
             @JvmStatic
             fun cases(): List<Case> =
                 listOf(

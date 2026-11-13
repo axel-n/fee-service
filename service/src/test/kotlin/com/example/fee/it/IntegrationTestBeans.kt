@@ -31,7 +31,7 @@ class IntegrationTestBeans {
     @Primary
     fun testClock(): TestClock = TestClock()
 
-    // @Primary over the app's PostgresFeeRecordRepository, which stays a bean and does every write; unarmed it adds nothing
+    // @Primary over the app's PostgresFeeRecordRepository, which stays a bean and does every call; unarmed it only counts
     @Bean
     @Primary
     fun faultInjectingFeeRecordRepository(postgres: PostgresFeeRecordRepository): FaultInjectingFeeRecordRepository =

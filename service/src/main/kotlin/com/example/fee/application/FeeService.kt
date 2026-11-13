@@ -9,8 +9,8 @@ import com.example.fee.contract.error.ValidationException
 import com.example.fee.contract.error.WorkflowTimeoutException
 import com.example.fee.contract.error.WorkflowUnavailableException
 import com.example.fee.restate.FeeWorkflowClients
+import com.example.fee.validation.RequestValidator
 import com.example.fee.validation.ValidationError
-import com.example.fee.validation.rule.TransactionIdValidator
 import com.example.fee.workflow.FeeOutcome
 import kotlinx.coroutines.withTimeoutOrNull
 import org.slf4j.LoggerFactory
@@ -19,28 +19,32 @@ import kotlin.coroutines.cancellation.CancellationException
 import kotlin.time.toKotlinDuration
 
 /**
- * The thin gateway between the API and `FeeWorkflow`: it checks the `transaction_id`, which is the workflow key,
- * answers an id that is already charged from [ChargedFees] (the local cache, then Postgres), submits the workflow of any
- * other id and attaches to it, and maps the [FeeOutcome] to the charged [FeeResponse] or a [FeeException]. Every
- * business decision is made inside the workflow.
+ * The thin gateway between the API and `FeeWorkflow`: it validates the request with [RequestValidator], answers an id
+ * that is already charged from [ChargedFees] (the local cache, then Postgres), submits the workflow of any other id and
+ * attaches to it, and maps the [FeeOutcome] to the charged [FeeResponse] or a [FeeException]. Every other business
+ * decision is made inside the workflow.
  *
- * A charged id is answered without Restate, whatever payload it carries now: its charged response. Otherwise it
- * submits, then attaches: a `transaction_id` sent again gets `PREVIOUSLY_ACCEPTED`, its payload is ignored, and the
- * attach returns the first run's result, so a transaction is processed once. The attach waits at most
+ * Validation comes first, so a request with a problem in any field is answered (400 or 422) without a call to Postgres
+ * or Restate, and starts no workflow. The workflow runs the same checks again in its VALIDATE step, so a run started past
+ * the app is validated too.
+ *
+ * A charged id sent with a valid payload is answered without Restate, whatever that payload is: its charged response.
+ * Otherwise it submits, then attaches: a `transaction_id` sent again gets `PREVIOUSLY_ACCEPTED`, its payload is ignored,
+ * and the attach returns the first run's result, so a transaction is processed once. The attach waits at most
  * `restate.attach-timeout`, suspended rather than holding a thread. Then it asks Restate for the run's output, and only
  * Restate's answer 470 (not ready) makes it a [WorkflowTimeoutException]; a run that finished meanwhile answers its
  * outcome. A Restate call that failed is a [WorkflowUnavailableException], because resending is safe.
  */
 @Service
 class FeeService(
-    private val transactionIdValidator: TransactionIdValidator,
+    private val requestValidator: RequestValidator,
     private val chargedFees: ChargedFees,
     private val feeWorkflowClients: FeeWorkflowClients,
     private val restateProperties: RestateProperties,
 ) {
     suspend fun submit(request: FeeRequest): FeeResponse {
-        transactionIdValidator.validate(request)?.let { throw rejected(it) }
-        val transactionId = checkNotNull(request.transactionId) { "transaction_id passed the pre-check but is null" }
+        requestValidator.validate(request)?.let { throw rejected(it) }
+        val transactionId = checkNotNull(request.transactionId) { "transaction_id passed validation but is null" }
 
         chargedFees.find(transactionId)?.let { return withoutTrailingZeros(it) }
 
@@ -72,7 +76,9 @@ class FeeService(
             throw unavailable(transactionId, e)
         }
 
-    // Only a charge is remembered: a rejection or a conflict stays Restate's answer.
+    // Only a charge is remembered: a rejection or a conflict stays Restate's answer. The workflow still rejects when
+    // the run this call attached to was started past the app with another payload, or when its created_at check meets
+    // a clock behind this instance's.
     private fun toResponse(outcome: FeeOutcome): FeeResponse =
         when (outcome) {
             is FeeOutcome.Charged -> outcome.response.also(chargedFees::remember).let(::withoutTrailingZeros)

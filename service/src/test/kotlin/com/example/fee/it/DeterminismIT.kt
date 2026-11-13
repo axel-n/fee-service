@@ -25,6 +25,9 @@ import java.util.UUID
  * The clock is moved by the crash itself ([FaultInjectingStepHook.crashOnce]'s `onCrash`), so it has certainly moved
  * before the retry. A second transaction with the same `created_at`, checked at the moved clock, shows that a re-run
  * would have decided differently. It needs its own `transaction_id`: the same id would attach to the first run.
+ *
+ * A `created_at` in the future never reaches the workflow through the API, because the gateway validates first, so the
+ * rejection test sends its run past the app, straight through Restate's ingress.
  */
 class DeterminismIT
     @Autowired
@@ -54,8 +57,9 @@ class DeterminismIT
                 clock.pin(validatedAt.plus(Duration.ofHours(2)))
             }
 
-            // when
-            val response = api.submit(bodyOf(request))
+            // when: past the app, which would reject it before Restate: only the workflow's own VALIDATE judges it
+            StoredWorkflows.submit(request)
+            awaitUntil("the run of $transactionId has finished") { StoredWorkflows.outcome(request) != null }
 
             // then: the crash happened and the handler ran again, with the clock already past created_at
             assertThat(hook.crashCount(transactionId)).describedAs("injected crashes").isEqualTo(1)
@@ -68,9 +72,6 @@ class DeterminismIT
             val expectedMessage =
                 "Invalid created_at '$createdAt': it is in the future. Allowed: up to now, " +
                     "${NOW_FORMAT.format(validatedAt.atOffset(ZoneOffset.UTC))} UTC"
-            assertThat(response.status).describedAs("POST status, body %s", response.body).isEqualTo(400)
-            assertThat(response.body["field"].asText()).isEqualTo("created_at")
-            assertThat(response.body["message"].asText()).isEqualTo(expectedMessage)
             val outcome = StoredWorkflows.outcome(request)
             assertThat(outcome).isEqualTo(
                 FeeOutcome.Rejected(
@@ -81,7 +82,7 @@ class DeterminismIT
 
             // then: nothing calculated or recorded
             assertThat(StoredFeeRecords.of(transactionId)).isNull()
-            assertThat(validator.count(transactionId)).describedAs("VALIDATE executions that passed").isZero()
+            assertThat(validator.count(transactionId)).describedAs("validations that passed").isZero()
             assertThat(calculator.count(transactionId)).isZero()
 
             // when: another transaction with the same created_at, validated at the advanced clock
@@ -121,7 +122,9 @@ class DeterminismIT
             // then: the journaled pass held: VALIDATE ran once, and the payload was calculated once and recorded
             assertThat(response.status).describedAs("POST status, body %s", response.body).isEqualTo(200)
             assertThat(response.body["fee"].decimalValue()).isEqualByComparingTo(BigDecimal("1.50"))
-            assertThat(validator.count(transactionId)).describedAs("VALIDATE executions").isEqualTo(1)
+            assertThat(validator.count(transactionId))
+                .describedAs("validations that passed: 1 at the gateway + 1 VALIDATE execution, none by the replay")
+                .isEqualTo(2)
             assertThat(calculator.count(transactionId)).describedAs("CALCULATE executions").isEqualTo(1)
             assertThat(StoredFeeRecords.of(transactionId)?.status).isEqualTo(FeeRecordStatus.COMPLETED)
 

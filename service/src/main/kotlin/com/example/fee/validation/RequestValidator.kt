@@ -8,7 +8,8 @@ import org.springframework.stereotype.Component
  * Runs every [TransactionValidator] in `@Order` order and stops at the first error.
  *
  * Spring injects the list already sorted, but the list is sorted again here, so a hand-built list (unit tests, a
- * future caller) runs in the same order. Called inside the workflow's VALIDATE journaled step.
+ * future caller) runs in the same order. Called by `FeeService` before any call to Postgres or Restate, and again
+ * inside the workflow's VALIDATE journaled step.
  */
 @Component
 class RequestValidator(

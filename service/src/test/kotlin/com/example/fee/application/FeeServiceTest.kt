@@ -13,7 +13,7 @@ import com.example.fee.record.InMemoryFeeRecordRepository
 import com.example.fee.restate.FeeWorkflowClients
 import com.example.fee.restate.FeeWorkflowRun
 import com.example.fee.validation.ValidationError
-import com.example.fee.validation.rule.TransactionIdValidator
+import com.example.fee.validation.allChecksRequestValidator
 import com.example.fee.workflow.FeeOutcome
 import com.github.benmanes.caffeine.cache.Cache
 import com.github.benmanes.caffeine.cache.Caffeine
@@ -32,7 +32,10 @@ import org.junit.jupiter.params.provider.CsvSource
 import org.springframework.http.HttpStatus
 import java.math.BigDecimal
 import java.net.ConnectException
+import java.time.Clock
 import java.time.Duration
+import java.time.Instant
+import java.time.ZoneOffset
 import kotlin.coroutines.cancellation.CancellationException
 
 class FeeServiceTest {
@@ -66,9 +69,12 @@ class FeeServiceTest {
 
     private val cache: Cache<String, FeeResponse> = Caffeine.newBuilder().build()
 
+    // Every production check, against a clock after the request's created_at
+    private val requestValidator = allChecksRequestValidator(Clock.fixed(Instant.parse("2023-08-30T16:00:00Z"), ZoneOffset.UTC))
+
     private fun service(clients: FeeWorkflowClients, attachTimeout: Duration = Duration.ofSeconds(5)) =
         FeeService(
-            TransactionIdValidator(),
+            requestValidator,
             ChargedFees(cache, records, cacheProperties()),
             clients,
             restateProperties(attachTimeout),
@@ -135,21 +141,79 @@ class FeeServiceTest {
 
     @Test
     fun `a changed payload with the same transaction id that isn't charged goes to the same workflow`() {
-        // given: the first run rejected it, so nothing is charged
-        val error = ValidationError("state", "PENDING", "Unsupported state 'PENDING'", ValidationError.Kind.UNSUPPORTED)
-        val clients = FakeClients(attach = { FeeOutcome.Rejected(error) })
+        // given: the first run ended without a charge
+        val clients = FakeClients(attach = { FeeOutcome.Conflict("txn_001") })
         val service = service(clients)
 
         // when
-        runCatching { runBlocking { service.submit(request.copy(state = "PENDING")) } }
         runCatching { runBlocking { service.submit(request) } }
+        runCatching { runBlocking { service.submit(request.copy(amount = BigDecimal("2000"))) } }
 
         // then
         assertThat(clients.submitted.map { it.first }).containsExactly("txn_001", "txn_001")
     }
 
     @Test
-    fun `a charged transaction id is answered from the cache without asking Postgres or Restate, whatever its payload`() =
+    fun `a malformed request is a 400 naming the field before Postgres or Restate is asked`() {
+        // given
+        val clients = FakeClients(attach = { error("Restate must not be called") })
+
+        // when / then
+        assertThatThrownBy(submitting(service(clients), request.copy(amount = BigDecimal("-5"))))
+            .isInstanceOfSatisfying(ValidationException::class.java) {
+                assertThat(listOf(it.field, it.value)).containsExactly("amount", "-5")
+                assertThat(it.message).isEqualTo("Invalid amount '-5'. Allowed: a number greater than 0")
+                assertThat(it.kind).isEqualTo(ValidationException.Kind.INVALID)
+                assertThat(it.status).isEqualTo(HttpStatus.BAD_REQUEST.value())
+            }
+        assertThat(records.calls).isEmpty()
+        assertThat(clients.submitted).isEmpty()
+    }
+
+    @ParameterizedTest(name = "{0} = {1}")
+    @CsvSource("asset, BTC", "asset_type, CRYPTO", "type, Refund", "state, PENDING")
+    fun `an unsupported request is a 422 naming the field before Postgres or Restate is asked`(field: String, value: String) {
+        // given
+        val clients = FakeClients(attach = { error("Restate must not be called") })
+        val unsupported =
+            when (field) {
+                "asset" -> request.copy(asset = value)
+                "asset_type" -> request.copy(assetType = value)
+                "type" -> request.copy(type = value)
+                else -> request.copy(state = value)
+            }
+
+        // when / then
+        assertThatThrownBy(submitting(service(clients), unsupported))
+            .isInstanceOfSatisfying(ValidationException::class.java) {
+                assertThat(listOf(it.field, it.value)).containsExactly(field, value)
+                assertThat(it.message).startsWith("Unsupported $field '$value'. Supported: ")
+                assertThat(it.kind).isEqualTo(ValidationException.Kind.UNSUPPORTED)
+                assertThat(it.status).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT.value())
+            }
+        assertThat(records.calls).isEmpty()
+        assertThat(clients.submitted).isEmpty()
+    }
+
+    @Test
+    fun `a charged transaction id sent with an invalid payload is rejected, not answered with its charge`() {
+        // given
+        cache.put("txn_001", response)
+        val clients = FakeClients(attach = { error("Restate must not be called") })
+
+        // when / then
+        assertThatThrownBy(submitting(service(clients), request.copy(state = "PENDING")))
+            .isInstanceOfSatisfying(ValidationException::class.java) {
+                assertThat(it.field).isEqualTo("state")
+                assertThat(it.status).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT.value())
+            }
+        assertThat(records.calls).isEmpty()
+        assertThat(clients.submitted).isEmpty()
+        assertThat(cache.getIfPresent("txn_001")).isEqualTo(response)
+    }
+
+    @Test
+    fun `a charged transaction id is answered from the cache without asking Postgres or Restate, whatever its valid payload`() =
         runBlocking<Unit> {
             // given
             cache.put("txn_001", response)
@@ -257,7 +321,7 @@ class FeeServiceTest {
                 InMemoryFeeRecordRepository(failing = mapOf("findCharged" to IllegalStateException("database unreachable")))
             val clients = FakeClients(attach = { FeeOutcome.Charged(response) })
             val service =
-                FeeService(TransactionIdValidator(), ChargedFees(cache, failingRecords, cacheProperties()), clients, restateProperties())
+                FeeService(requestValidator, ChargedFees(cache, failingRecords, cacheProperties()), clients, restateProperties())
 
             // when
             val submission = service.submit(request)
@@ -275,7 +339,7 @@ class FeeServiceTest {
             val hangingRecords = InMemoryFeeRecordRepository(hanging = setOf("findCharged"))
             val clients = FakeClients(attach = { FeeOutcome.Charged(response) })
             val chargedFees = ChargedFees(cache, hangingRecords, cacheProperties(lookupTimeout = Duration.ofMillis(50)))
-            val service = FeeService(TransactionIdValidator(), chargedFees, clients, restateProperties())
+            val service = FeeService(requestValidator, chargedFees, clients, restateProperties())
 
             // when
             val submission = service.submit(request)
@@ -300,8 +364,8 @@ class FeeServiceTest {
         }
 
     @Test
-    fun `a malformed request rejected by the workflow is a 400 validation exception`() {
-        // given
+    fun `a malformed rejection returned by the workflow is a 400 validation exception`() {
+        // given: the request passes here, but the run it attached to rejected (one started past the app, say)
         val error = ValidationError("amount", "-5", "Amount -5 must be greater than 0", ValidationError.Kind.INVALID)
         val clients = FakeClients(attach = { FeeOutcome.Rejected(error) })
 
@@ -315,8 +379,8 @@ class FeeServiceTest {
     }
 
     @Test
-    fun `an unsupported request rejected by the workflow is a 422 validation exception`() {
-        // given
+    fun `an unsupported rejection returned by the workflow is a 422 validation exception`() {
+        // given: the request passes here, but the run it attached to rejected (one started past the app, say)
         val error =
             ValidationError(
                 "state",
@@ -349,7 +413,7 @@ class FeeServiceTest {
     }
 
     @Test
-    fun `a missing transaction id is a 400 before Restate is called`() {
+    fun `a missing transaction id is a 400 before Postgres or Restate is asked`() {
         // given
         val clients = FakeClients(attach = { FeeOutcome.Charged(response) })
 
@@ -359,11 +423,12 @@ class FeeServiceTest {
                 assertThat(it.field).isEqualTo("transaction_id")
                 assertThat(it.status).isEqualTo(HttpStatus.BAD_REQUEST.value())
             }
+        assertThat(records.calls).isEmpty()
         assertThat(clients.submitted).isEmpty()
     }
 
     @Test
-    fun `a transaction id that can't be a workflow key is a 400 naming the value before Restate is called`() {
+    fun `a transaction id that can't be a workflow key is a 400 naming the value before Postgres or Restate is asked`() {
         // given
         val clients = FakeClients(attach = { FeeOutcome.Charged(response) })
 
@@ -374,6 +439,7 @@ class FeeServiceTest {
                 assertThat(it.value).isEqualTo("txn:001")
                 assertThat(it.status).isEqualTo(HttpStatus.BAD_REQUEST.value())
             }
+        assertThat(records.calls).isEmpty()
         assertThat(clients.submitted).isEmpty()
     }
 

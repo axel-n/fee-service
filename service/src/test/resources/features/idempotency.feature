@@ -1,10 +1,10 @@
 Feature: Idempotency
   A transaction is keyed by its transaction_id: Restate runs one workflow per transaction_id, and every submission of
   that id, one call after the other or by several callers at once, attaches to that run. The first payload Restate
-  receives is the one processed and charged, once, and every caller gets that run's response, whatever payload it sent.
-  Once charged, the id is answered from the app's cache or Postgres without Restate, with the same response, and
-  Postgres holds one fee record per id. (A rejection is the id's answer while Restate keeps the run: see
-  transaction_state.feature.)
+  receives is the one processed and charged, once, and every caller gets that run's response, whatever valid payload it
+  sent. Once charged, the id is answered from the app's cache or Postgres without Restate, with the same response, and
+  Postgres holds one fee record per id. An invalid payload is rejected by the app before it reaches Restate or
+  Postgres, even for a charged id, and leaves the charge as it was.
 
   Scenario: The same payload sent twice gets the same response and is charged once
     Given a "Mobile Top Up" transaction "txn_401" of 1000 "USD" "FIAT" in state "SETTLED - PENDING FEE"
@@ -35,8 +35,18 @@ Feature: Idempotency
       | txn_412 | amount     | 2000                       |
       | txn_413 | asset      | EUR                        |
       | txn_414 | type       | Cash Withdrawal            |
-      | txn_415 | state      | PENDING                    |
       | txn_416 | created_at | 2023-08-30 15:42:17.610060 |
+
+  Scenario: A charged transaction sent again with an invalid payload is rejected, and its charge stands
+    Given a "Mobile Top Up" transaction "txn_417" of 1000 "USD" "FIAT" in state "SETTLED - PENDING FEE"
+    When the transaction is submitted to "/transaction/fee"
+    Then the response status is 200
+    When the transaction's "state" is changed to "PENDING"
+    And the same transaction is submitted to "/transaction/fee" again
+    Then the response status is 422
+    And the request is rejected on field "state" with value "PENDING" and message "Unsupported state 'PENDING'. Supported: 'SETTLED - PENDING FEE'"
+    And the fee was charged exactly once
+    And the fee is recorded as completed
 
   Scenario: The same payload sent by 5 callers at once is charged once, and every caller gets the response
     Given a "Bank Transfer" transaction "txn_421" of 1000 "EUR" "FIAT" in state "SETTLED - PENDING FEE"

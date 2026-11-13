@@ -17,7 +17,8 @@ import java.util.concurrent.TimeUnit
 
 /**
  * Duplicates end to end. The workflow key is the `transaction_id`, so Restate runs one workflow per id and every caller
- * of that id attaches to that run, whatever payload it sends: the first run's result is the answer. Idempotency is
+ * of that id attaches to that run, whatever valid payload it sends: the first run's result is the answer. An invalid
+ * payload is rejected by the gateway before it reaches Restate, so it never joins the run. Idempotency is
  * asserted by the number of CALCULATE executions, not just by the response. Once charged, the id is answered from the
  * app's cache or Postgres, and Postgres holds exactly one record for it, the accepted payload's charge.
  */
@@ -118,7 +119,7 @@ class DuplicatesIT
         }
 
         @Test
-        fun `valid and invalid payloads for one transaction_id sent concurrently all get the accepted payload's answer`() {
+        fun `valid and invalid payloads of one id sent at once, each invalid one is rejected, the valid ones charged once`() {
             // given: the same id, every other payload in an unsupported state
             val transactionId = newTransactionId()
             val requests =
@@ -130,22 +131,22 @@ class DuplicatesIT
             // when
             val responses = submitConcurrently(requests)
 
-            // then: one answer for everyone, whichever payload reached Restate first
-            assertThat(responses.map { it.status to it.body }.distinct()).describedAs("distinct answers").hasSize(1)
-            val answer = responses.first()
-            if (answer.status == 200) {
-                // a valid payload was accepted: charged once, and exactly its charge is stored
-                val winner = requests.single { checkNotNull(it.amount).compareTo(answer.body["amount"].decimalValue()) == 0 }
-                assertThat(winner.state).isEqualTo("SETTLED - PENDING FEE")
-                assertChargedOnce(winner)
-                assertThat(StoredFeeRecords.count(transactionId)).describedAs("fee records of the id").isEqualTo(1)
-            } else {
-                // an invalid payload was accepted: rejected for everyone, and Postgres was never touched
-                assertThat(answer.status).describedAs("POST status, body %s", answer.body).isEqualTo(422)
-                assertThat(answer.body["field"].asText()).isEqualTo("state")
-                assertThat(calculator.count(transactionId)).describedAs("CALCULATE executions").isZero()
-                assertThat(StoredFeeRecords.count(transactionId)).describedAs("fee records of the id").isZero()
+            // then: the gateway rejected every invalid payload on its own, before Restate
+            val (valid, invalid) = requests.indices.partition { requests[it].state == "SETTLED - PENDING FEE" }
+            invalid.map { responses[it] }.forEach {
+                assertThat(it.status).describedAs("POST status, body %s", it.body).isEqualTo(422)
+                assertThat(it.body["field"].asText()).isEqualTo("state")
             }
+
+            // then: every valid caller got the one charge, of the valid payload that reached Restate first
+            val charged = valid.map { responses[it] }
+            assertThat(charged.map { it.status to it.body }.distinct()).describedAs("distinct answers to valid payloads").hasSize(1)
+            val answer = charged.first()
+            assertThat(answer.status).describedAs("POST status, body %s", answer.body).isEqualTo(200)
+            val winner = requests.single { checkNotNull(it.amount).compareTo(answer.body["amount"].decimalValue()) == 0 }
+            assertThat(winner.state).isEqualTo("SETTLED - PENDING FEE")
+            assertChargedOnce(winner)
+            assertThat(StoredFeeRecords.count(transactionId)).describedAs("fee records of the id").isEqualTo(1)
         }
 
         @Test

@@ -21,6 +21,10 @@ Your workflow should persist the result of the fee calculations and charges. If 
 > **Clarification (from the company):** the results of the fee calculations and charges are persisted in a database of
 > the service's own, in addition to Restate.
 
+> **Clarification (from the company):** where requests are validated is the candidate's decision. The company suggests
+> validating them in the app before any request to the database or Restate, so a request with a problem in any field
+> (a wrong type, an unsupported currency, …) costs no database or Restate call.
+
 ## 3. Test Case & API Specification
 
 Your test case should create a transaction and submit it to the fees endpoint:

@@ -73,7 +73,7 @@ class TransactionIdValidatorTest {
     }
 
     @Test
-    fun `rejects a missing id on its own, for the key pre-check`() {
+    fun `passes a missing id, which the required fields check reports`() {
         // given
         val request = validRequest.copy(transactionId = null)
 
@@ -81,9 +81,7 @@ class TransactionIdValidatorTest {
         val error = validator.validate(request)
 
         // then
-        assertThat(error).isEqualTo(
-            ValidationError("transaction_id", null, "Field 'transaction_id' is required", ValidationError.Kind.INVALID),
-        )
+        assertThat(error).isNull()
     }
 
     @Test

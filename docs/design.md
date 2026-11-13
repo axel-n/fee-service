@@ -4,16 +4,19 @@ What the service does and how it is built. Agent and contributor rules: [`../AGE
 
 ## Goal
 
-A Spring Boot service written in **Kotlin**. It exposes `POST /transaction/fee` and hands the request to a **Restate
-workflow**. The workflow **validates** and **calculates** the fee, then **charges** it by **recording** it for the
-transaction. Every step is journaled by Restate, so the processing **survives crashes and restarts**: it resumes where it
-stopped and never charges twice.
+A Spring Boot service written in **Kotlin**. It exposes `POST /transaction/fee`, **validates** the request, and hands a
+valid one to a **Restate workflow**. The workflow validates it again, **calculates** the fee, then **charges** it by
+**recording** it for the transaction. Every step is journaled by Restate, so the processing **survives crashes and
+restarts**: it resumes where it stopped and never charges twice. An invalid request is answered by the app alone,
+without a call to Postgres or Restate (requirements: the company's clarification on validation).
 The result, the fee record, is persisted in the service's own database, **PostgreSQL** (requirements: "persist the result
 of the fee calculations and charges", clarified as a database in addition to Restate). An already charged
 `transaction_id` is answered from a local cache or from Postgres, **without a call to Restate**.
 
 Principles:
-- **All business logic runs inside the workflow.** The Spring API is a thin gateway.
+- **All business logic runs inside the workflow.** The Spring API is a thin gateway. It runs the workflow's own
+  validators first, so an invalid request never costs a Postgres or Restate call. The workflow validates again, because
+  it never trusts its input: a run can be started past the app, straight through Restate's ingress.
 - **One system of record per fact.** Postgres holds the fee records; Restate holds the workflow's journal; the cache holds
   only copies of charges, which never change.
 - **Minimal layers, minimal dependencies.** Anything `requirements.md` does not require is left out.
@@ -77,8 +80,8 @@ fee:
 ```
 POST /transaction/fee
    ▼
-Spring app: TransactionFeeController → FeeService           (thin gateway, no business logic)
-   │  1. transaction_id present and well-formed?  (it is the workflow key; otherwise 400)
+Spring app: TransactionFeeController → FeeService           (thin gateway, no business logic of its own)
+   │  1. valid? RequestValidator, every check (400/422 otherwise, with no Postgres or Restate call)
    │  2. charged already? ChargedFees: Caffeine cache, then Postgres (COMPLETED only) → 200, no Restate call
    │  3. submit FeeWorkflow/txn_001/run, then attach  (the id sent again gets PREVIOUSLY_ACCEPTED
    │     and the first run's result; no result within attach-timeout → ask Restate for the output once:
@@ -112,9 +115,9 @@ description, `charged_at`) all set when the record is `COMPLETED` and all empty 
   no longer protects its id: once Restate has dropped the run too, the same `transaction_id` sent again is charged again.
   So delete only records older than any client could still resend.
 
-- **A transaction is opened only to write**, and only after the request passed validation (VALIDATE comes before CLAIM, so
-  a rejected request never touches Postgres). CLAIM first reads the id without a transaction; a row exists → it decides
-  from that row. No row → one transaction: `INSERT … ON CONFLICT (transaction_id) DO NOTHING`, then the read back. RECORD is
+- **A transaction is opened only to write**, and only after the request passed validation (the gateway validates before
+  its lookup, and VALIDATE comes before CLAIM, so a rejected request never touches Postgres). CLAIM first reads the id
+  without a transaction; a row exists → it decides from that row. No row → one transaction: `INSERT … ON CONFLICT (transaction_id) DO NOTHING`, then the read back. RECORD is
   one transaction with one `UPDATE … WHERE transaction_id = ? AND claim_token = ?`; any other row count than 1 throws, rolls
   back, and Restate retries. Reads (the gateway's lookup, CLAIM's first read) open none.
 - **READ COMMITTED is enough.** The primary key serializes concurrent inserts of one id: an insert that meets a row being
@@ -124,12 +127,12 @@ description, `charged_at`) all set when the record is `COMPLETED` and all empty 
   step's commit but before its journal entry. The token is journaled before CLAIM, so the CLAIM run again finds its own
   row (`New`, not someone else's claim), and RECORD writes the same values again (CALCULATE is journaled).
 
-**Concurrent submissions of one `transaction_id`** (same or different payloads). Every caller misses the cache and
-Postgres and submits. Restate accepts exactly one submission, the first to reach it; every other gets
-`PREVIOUSLY_ACCEPTED`, its payload ignored, and attaches to that one run, so every caller gets the same outcome. Postgres
-would hold even if two runs of one id met, which Restate doesn't allow: one claim wins, and only its token can record the
-charge. The cache and the lookup return only `COMPLETED` rows, so they never hand out a payload that wasn't the accepted
-one. Valid and invalid payloads at once: the accepted one decides for everyone; a rejection leaves Postgres untouched.
+**Concurrent submissions of one `transaction_id`** (same or different payloads). Each invalid payload is rejected by
+the gateway on its own and never reaches Restate. Every valid caller misses the cache and Postgres and submits. Restate
+accepts exactly one submission, the first to reach it; every other gets `PREVIOUSLY_ACCEPTED`, its payload ignored, and
+attaches to that one run, so every valid caller gets the same outcome. Postgres would hold even if two runs of one id
+met, which Restate doesn't allow: one claim wins, and only its token can record the charge. The cache and the lookup
+return only `COMPLETED` rows, so they never hand out a payload that wasn't the accepted one.
 
 **Crash recovery example.** The app dies right after CALCULATE. Restate retries the invocation, and the endpoint
 (restarted, or a new instance) receives the journal. VALIDATE, CLAIM and CALCULATE are **replayed from the journal and not
@@ -214,7 +217,7 @@ com.example.fee
 │       └── FeeProblem.kt               the problem+json body as a client reads it; toException() rebuilds the FeeException from the `code`
 │
 ├── application/                        thin gateway to Restate
-│   ├── FeeService.kt                   FeeService: transaction_id pre-check → ChargedFees.find (a charge → 200, no Restate call) →
+│   ├── FeeService.kt                   FeeService: RequestValidator (400/422, no Postgres or Restate call) → ChargedFees.find (a charge → 200, no Restate call) →
 │   │                                   submit/attach FeeWorkflow/{transaction_id} (bounded by attachTimeout) → FeeOutcome →
 │   │                                   FeeResponse (200, the fee without trailing zeros; remembered in ChargedFees) or FeeException (a
 │   │                                   ValidationError becomes a ValidationException here); no result within attachTimeout and Restate
@@ -223,7 +226,7 @@ com.example.fee
 │                                       is cached; a failed or slower read is null, Restate answers then); remember(response). Only
 │                                       charges, which never change
 │
-├── validation/                         executed inside the workflow
+├── validation/                         executed by FeeService before any Postgres or Restate call, and again inside the workflow (VALIDATE)
 │   ├── TransactionValidator.kt         interface validate(request): ValidationError? + ValidationOrder: `const val`s spaced by 100
 │   │                                   (`@Order` needs compile-time constants)
 │   ├── ValidationError.kt              data class(field, value, message, kind: INVALID | UNSUPPORTED) + its builders: UnsupportedValue
@@ -231,7 +234,7 @@ com.example.fee
 │   ├── RequestValidator.kt             sorts by @Order (so hand-built lists in unit tests are ordered too), fail-fast, returns ValidationError?
 │   └── rule/                           one TransactionValidator @Component per check
 │       ├── RequiredFieldsValidator.kt  @Order(100)  → 400
-│       ├── TransactionIdValidator.kt   @Order(200)  → 400   (also reused by FeeService for the key pre-check)
+│       ├── TransactionIdValidator.kt   @Order(200)  → 400   (the transaction_id is the workflow key)
 │       ├── AmountValidator.kt          @Order(300)  → 400
 │       ├── CreatedAtValidator.kt       @Order(400)  → 400   (Clock)
 │       ├── StateValidator.kt           @Order(500)  → 422
@@ -329,7 +332,7 @@ com.example.fee
 TransactionFeeController (suspend) ──▶ FeeService (only)
 
 FeeService (suspend; the attach waits at most restate.attach-timeout)
-  ├─▶ TransactionIdValidator.validate(request)   key pre-check only (400 if bad): the transaction_id is the workflow key
+  ├─▶ RequestValidator.validate(request)         every check, first (400/422 if bad; nothing below runs)
   ├─▶ ChargedFees.find(transaction_id)           cache, then FeeRecordRepository.findCharged; a charge → 200, nothing else
   ├─▶ FeeWorkflowClients.submit(transaction_id, request) → FeeWorkflowRun.attach()  (also when PREVIOUSLY_ACCEPTED)
   │     attach-timeout reached → FeeWorkflowRun.output(); Restate's 470 → throw WorkflowTimeoutException (504)
@@ -353,9 +356,10 @@ Errors:  ApiExceptionHandler ◀── Spring, for FeeException
 ```
 
 Rules:
-1. **The controller calls only `FeeService`. `FeeService` contains no business logic;** it routes, answers a stored
-   charge, and maps.
-2. **Every business step runs inside `FeeWorkflow`.** Non-deterministic work (clock, random, I/O, Postgres) goes inside a
+1. **The controller calls only `FeeService`. `FeeService` contains no business logic of its own;** it validates with
+   `RequestValidator` (the logic stays in the validators), routes, answers a stored charge, and maps.
+2. **Every business step runs inside `FeeWorkflow`,** validation included: the gateway's check only spares Postgres and
+   Restate an invalid request. Non-deterministic work (clock, random, I/O, Postgres) goes inside a
    journaled step (`FeeWorkflowContext.journaled`, Restate's `runBlock`). So does reading configuration that affects a
    decision (the fee numbers), so a restart with new values can't make a replay diverge. A journaled Postgres write is safe
    to run again (the claim token).
@@ -373,7 +377,7 @@ Rules:
 
 | To add… | Do this |
 |---------|---------|
-| a validation rule | a `@Component @Order(ValidationOrder.X)` `TransactionValidator` in `validation.rule` + a unit test (it runs in the workflow automatically) |
+| a validation rule | a `@Component @Order(ValidationOrder.X)` `TransactionValidator` in `validation.rule` + a unit test (it runs in `FeeService` and in the workflow automatically) |
 | a transaction type | an enum value + a `@Component` `FeeRule` in `fee.rule` + its `*FeeProperties` class in `config/FeeProperties.kt` + a `fee.<type>` section in `application.yml` + a unit test + a BDD outline row |
 | a fee formula | a new building block implementing `FeeRule` in `fee.formula` |
 | an asset | an enum value in `Asset` (with its decimals) |
@@ -445,17 +449,19 @@ Money values are quoted so they reach `BigDecimal` as strings. A missing or inva
 
 | Situation | What happens |
 |-----------|--------------|
-| A charged `transaction_id` sent again, any payload | `FeeService` answers the stored response from the cache, or from Postgres when it isn't cached (restart, expiry, another instance) → **no Restate call**, no charge |
-| Same id sent again before it is charged, same or changed payload (sequentially or concurrently) | Same workflow key → Restate runs it once, for the first payload it received; every other caller attaches → that run's response, **1 fee record** |
-| Valid and invalid payloads of one id at once | The payload Restate accepted first decides for everyone: a charge (**1 fee record**) or a rejection (no record) |
-| Same id, payload corrected after a **rejection** | Not cached, no record → same workflow → the same rejection while Restate keeps the finished run (workflow retention, 1 day by default); after that a new workflow processes it normally |
+| An invalid request, any `transaction_id` | `FeeService` rejects it first (400/422) → **no Postgres or Restate call**, no workflow, no record. A charged id sent with an invalid payload is rejected too; its charge stands |
+| A charged `transaction_id` sent again, any valid payload | `FeeService` answers the stored response from the cache, or from Postgres when it isn't cached (restart, expiry, another instance) → **no Restate call**, no charge |
+| Same id sent again before it is charged, same or changed valid payload (sequentially or concurrently) | Same workflow key → Restate runs it once, for the first payload it received; every other caller attaches → that run's response, **1 fee record** |
+| Valid and invalid payloads of one id at once | Each invalid one is rejected by the gateway; the valid ones go to the one run → its charge for all of them, **1 fee record** |
+| Same id, payload corrected after a **rejection** | The rejection started no workflow and wrote no record → the corrected payload is charged normally |
+| A run started past the app (straight through Restate's ingress) with an invalid payload, or a `created_at` the gateway passed but VALIDATE, on an instance whose clock is behind, finds in the future | The workflow's VALIDATE rejects it before CLAIM → no record. Restate keeps the finished run (workflow retention, 1 day by default), so a valid payload of the same id gets that rejection until then |
 | A run of a charged id that starts anyway (sent past the app, after retention) | CLAIM → `AlreadyCompleted(response)` → the stored response, whatever the payload, no charge |
 | Same id after a run that never finished (killed after CLAIM) was dropped | New workflow → CLAIM sees `IN_PROGRESS` with another token → `InProgress` → `Conflict` → 409 |
 | App crashes at any step boundary | Restate retries; journaled steps are replayed, not re-executed → **1 fee record**, `COMPLETED` |
 | App crashes after a CLAIM or RECORD commit, before its journal entry | The step runs again: CLAIM finds its own row by the journaled token (`New`), RECORD writes the same values → **1 fee record**, `COMPLETED` |
-| Postgres unreachable while a workflow runs | The journaled step throws; Restate retries it with backoff → charged once Postgres is back (504 meanwhile if it outlasts the attach timeout; resending is safe). `FeeService`'s lookup failing just leaves the answer to Restate; a charge still cached or still kept by Restate, and a rejection, are answered during the outage (`PostgresOutageIT`) |
+| Postgres unreachable while a workflow runs | The journaled step throws; Restate retries it with backoff → charged once Postgres is back (504 meanwhile if it outlasts the attach timeout; resending is safe). `FeeService`'s lookup failing just leaves the answer to Restate; a charge still cached or still kept by Restate is answered during the outage, and a rejection never needs Postgres (`PostgresOutageIT`) |
 | Postgres unreachable at startup, or its `fee_record` lacks a column | The app doesn't start (`schema.sql` fails), so it never registers with Restate (`DatabaseStartupIT`) |
-| Postgres hangs (connections open, nothing answers) | `FeeService`'s lookup gives up after `fee-cache.lookup-timeout` and asks Restate: a charge Restate still keeps, and a rejection, are answered (`PostgresOutageIT`). A run's CLAIM or RECORD waits; Restate's own timeouts abort and retry the attempt, so it is charged once when Postgres answers again |
+| Postgres hangs (connections open, nothing answers) | `FeeService`'s lookup gives up after `fee-cache.lookup-timeout` and asks Restate: a charge Restate still keeps is answered, and a rejection, answered before any lookup, doesn't wait at all (`PostgresOutageIT`). A run's CLAIM or RECORD waits; Restate's own timeouts abort and retry the attempt, so it is charged once when Postgres answers again |
 | Endpoint stops while a journaled step is running (e.g. CALCULATE) | The step was not journaled, so it runs again after the restart; only its journaled result is recorded → **1 fee record** |
 | Endpoint keeps failing (70 attempts, about an hour at the default retry policy) | Restate **pauses** the invocation; the record stays `IN_PROGRESS` until an operator resumes or kills it |
 | Restate unreachable | `FeeService` → 503 |

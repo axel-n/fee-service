@@ -10,10 +10,11 @@ import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * The fee records of the shared IT app (it replaces `PostgresFeeRecordRepository` as the injected repository, see
- * [IntegrationTestBeans]): every call goes to Postgres. A test arms it for one `transaction_id` with
- * [crashAfterCommitOnce]; the first time that write commits, it throws [SimulatedCrash] right after, before Restate can
- * journal the step's result. That is a crash between the commit and the journal entry: Restate runs the step again, and
- * the write must find what it committed the first time. Unarmed, it does nothing, so other ITs are unaffected.
+ * [IntegrationTestBeans]): every call goes to Postgres, and is counted per `transaction_id` ([callCount]). A test arms
+ * it for one `transaction_id` with [crashAfterCommitOnce]; the first time that write commits, it throws [SimulatedCrash]
+ * right after, before Restate can journal the step's result. That is a crash between the commit and the journal entry:
+ * Restate runs the step again, and the write must find what it committed the first time. Unarmed, it only counts, so
+ * other ITs are unaffected.
  */
 class FaultInjectingFeeRecordRepository(
     private val postgres: PostgresFeeRecordRepository,
@@ -23,6 +24,7 @@ class FaultInjectingFeeRecordRepository(
 
     private val armed = ConcurrentHashMap<String, Write>()
     private val crashes = ConcurrentHashMap<String, AtomicInteger>()
+    private val calls = CallCounter()
 
     /** Makes the next [write] of [transactionId] crash once, right after it committed. */
     fun crashAfterCommitOnce(transactionId: String, write: Write) {
@@ -32,15 +34,24 @@ class FaultInjectingFeeRecordRepository(
     /** How many crashes were injected after the writes of [transactionId]. */
     fun crashCount(transactionId: String): Int = crashes[transactionId]?.get() ?: 0
 
-    override suspend fun claim(transaction: Transaction, claimToken: String): FeeRecord =
-        postgres.claim(transaction, claimToken).also { crashIfArmed(transaction.transactionId, Write.CLAIM) }
+    /** How many times the app asked Postgres about [transactionId]: lookups, claims and completions, failed ones too. */
+    fun callCount(transactionId: String): Int = calls.count(transactionId)
+
+    override suspend fun claim(transaction: Transaction, claimToken: String): FeeRecord {
+        calls.increment(transaction.transactionId)
+        return postgres.claim(transaction, claimToken).also { crashIfArmed(transaction.transactionId, Write.CLAIM) }
+    }
 
     override suspend fun complete(transactionId: String, claimToken: String, response: FeeResponse) {
+        calls.increment(transactionId)
         postgres.complete(transactionId, claimToken, response)
         crashIfArmed(transactionId, Write.COMPLETE)
     }
 
-    override suspend fun findCharged(transactionId: String): FeeResponse? = postgres.findCharged(transactionId)
+    override suspend fun findCharged(transactionId: String): FeeResponse? {
+        calls.increment(transactionId)
+        return postgres.findCharged(transactionId)
+    }
 
     // remove(key, value) disarms atomically, so the crash happens exactly once
     private fun crashIfArmed(transactionId: String, write: Write) {

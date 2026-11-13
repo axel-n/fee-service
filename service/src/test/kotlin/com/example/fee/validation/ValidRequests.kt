@@ -10,7 +10,18 @@ import com.example.fee.fee.rule.BankTransferFeeRule
 import com.example.fee.fee.rule.CashWithdrawalFeeRule
 import com.example.fee.fee.rule.MerchantPaymentFeeRule
 import com.example.fee.fee.rule.MobileTopUpFeeRule
+import com.example.fee.validation.rule.AmountScaleValidator
+import com.example.fee.validation.rule.AmountValidator
+import com.example.fee.validation.rule.AssetTypeValidator
+import com.example.fee.validation.rule.AssetValidator
+import com.example.fee.validation.rule.CreatedAtValidator
+import com.example.fee.validation.rule.MaxAmountValidator
+import com.example.fee.validation.rule.RequiredFieldsValidator
+import com.example.fee.validation.rule.StateValidator
+import com.example.fee.validation.rule.TransactionIdValidator
+import com.example.fee.validation.rule.TransactionTypeValidator
 import java.math.BigDecimal
+import java.time.Clock
 
 /** The reference request of the challenge: passes every check. */
 internal val validRequest =
@@ -32,5 +43,22 @@ internal fun allRulesCalculator(): FeeCalculator =
             BankTransferFeeRule(BankTransferFeeProperties(BigDecimal("0.005"), BigDecimal("1.00"))),
             MerchantPaymentFeeRule(MerchantPaymentFeeProperties(BigDecimal("0.01"), BigDecimal("0.30"))),
             CashWithdrawalFeeRule(CashWithdrawalFeeProperties(BigDecimal("2.00"))),
+        ),
+    )
+
+/** A [RequestValidator] with the 10 production validators, as Spring builds it; `created_at` is checked against [clock]. */
+internal fun allChecksRequestValidator(clock: Clock): RequestValidator =
+    RequestValidator(
+        listOf(
+            RequiredFieldsValidator(),
+            TransactionIdValidator(),
+            AmountValidator(),
+            CreatedAtValidator(clock),
+            StateValidator(),
+            AssetValidator(),
+            AssetTypeValidator(),
+            TransactionTypeValidator(allRulesCalculator()),
+            AmountScaleValidator(),
+            MaxAmountValidator(),
         ),
     )

@@ -64,7 +64,9 @@ class CrashRecoveryIT
             assertThat(StoredWorkflows.outcome(request)).isInstanceOf(FeeOutcome.Charged::class.java)
 
             // then: every journaled closure ran exactly once, so nothing journaled before the crash ran again
-            assertThat(validator.count(transactionId)).describedAs("VALIDATE executions").isEqualTo(1)
+            assertThat(validator.count(transactionId))
+                .describedAs("validations that passed: 1 at the gateway + 1 VALIDATE execution, none by the replay")
+                .isEqualTo(2)
             assertThat(calculator.count(transactionId)).describedAs("CALCULATE executions").isEqualTo(1)
 
             // then: the record is completed with the charged response

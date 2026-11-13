@@ -3,15 +3,17 @@ package com.example.fee.validation
 import com.example.fee.contract.FeeRequest
 
 /**
- * One check of an incoming [FeeRequest]. Every bean of this type runs inside the workflow's VALIDATE step, in the
- * order of its `@Order` and fail-fast: the first error decides the response.
+ * One check of an incoming [FeeRequest]. Every bean of this type runs in the order of its `@Order` and fail-fast, so
+ * the first error decides the response. They run twice: in `FeeService`, before any call to Postgres or Restate, and
+ * again in the workflow's VALIDATE step, so the workflow never trusts its input.
  *
  * To add a check, add a `@Component @Order(ValidationOrder.X)` class implementing this interface, with a new constant
  * in [ValidationOrder]. Structural checks ([ValidationError.Kind.INVALID], 400) are ordered before business checks
  * ([ValidationError.Kind.UNSUPPORTED], 422). A validator may rely on the checks ordered before it (the fields are
  * present, the asset is known) and must not repeat them. A validator without `@Order` runs last.
  *
- * Implementations must be pure apart from an injected `Clock`: they run inside a journaled step, so the result is journaled.
+ * Implementations must be pure apart from an injected `Clock`: the gateway runs them before any I/O, and the workflow
+ * inside a journaled step, so the result is journaled.
  */
 interface TransactionValidator {
     /**

@@ -10,18 +10,13 @@ import org.springframework.stereotype.Component
 
 /**
  * `transaction_id` must be 1 to [MAX_LENGTH] ASCII letters, digits, `_` or `-` (400). It becomes the workflow key, which
- * Restate puts in URL paths, so `/`, `:` and whitespace are out.
- *
- * `FeeService` also runs it on its own as the key pre-check, before any other validator, so it handles a missing id
- * itself instead of relying on [RequiredFieldsValidator].
+ * Restate puts in URL paths, so `/`, `:` and whitespace are out. Relies on [RequiredFieldsValidator] for presence.
  */
 @Component
 @Order(ValidationOrder.TRANSACTION_ID)
 class TransactionIdValidator : TransactionValidator {
     override fun validate(request: FeeRequest): ValidationError? {
-        val raw =
-            request.transactionId
-                ?: return ValidationError(FIELD, null, "Field '$FIELD' is required", ValidationError.Kind.INVALID)
+        val raw = request.transactionId ?: return null
         if (PATTERN.matches(raw)) return null
         return ValidationError(
             FIELD,
