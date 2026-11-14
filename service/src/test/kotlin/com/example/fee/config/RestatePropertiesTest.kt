@@ -4,6 +4,7 @@ import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.CsvSource
 import org.junit.jupiter.params.provider.ValueSource
 import java.time.Duration
 
@@ -11,10 +12,9 @@ class RestatePropertiesTest {
     private fun properties(
         ingressUrl: String? = "http://localhost:8080",
         adminUrl: String? = "http://localhost:9070",
-        endpointPort: Int? = 9_080,
-        advertisedHost: String? = "localhost",
+        endpointUrl: String? = "http://localhost:9080",
         attachTimeout: Duration? = Duration.ofSeconds(10),
-    ) = RestateProperties(ingressUrl, adminUrl, endpointPort, advertisedHost, attachTimeout)
+    ) = RestateProperties(ingressUrl, adminUrl, endpointUrl, attachTimeout)
 
     @Test
     fun `keeps valid settings`() {
@@ -23,14 +23,14 @@ class RestatePropertiesTest {
             properties(
                 ingressUrl = "https://restate.example:8080",
                 adminUrl = "https://restate.example:9070",
-                advertisedHost = "host.docker.internal",
+                endpointUrl = "http://host.docker.internal:9080",
             )
 
         // then
         assertThat(properties.ingressUrl).isEqualTo("https://restate.example:8080")
         assertThat(properties.adminUrl).isEqualTo("https://restate.example:9070")
+        assertThat(properties.endpointUrl).isEqualTo("http://host.docker.internal:9080")
         assertThat(properties.endpointPort).isEqualTo(9_080)
-        assertThat(properties.advertisedHost).isEqualTo("host.docker.internal")
         assertThat(properties.attachTimeout).isEqualTo(Duration.ofSeconds(10))
     }
 
@@ -51,31 +51,45 @@ class RestatePropertiesTest {
             .hasMessage("restate.admin-url must be an absolute http or https URL, was '$url'")
     }
 
-    @ParameterizedTest(name = "accepts ''{0}''")
-    @ValueSource(strings = ["localhost", "dev", "host.docker.internal", "10.89.0.4", "[::1]"])
-    fun `accepts an advertised host that is a host name or an IP address`(host: String) {
+    @ParameterizedTest(name = "accepts ''{0}'', listening on {1}")
+    @CsvSource(
+        "http://localhost:9080, 9080",
+        "http://dev:9080, 9080",
+        "http://host.docker.internal:19080, 19080",
+        "http://10.89.0.4:1, 1",
+        "http://[::1]:65535, 65535",
+        "http://dev:9080/, 9080",
+    )
+    fun `accepts an endpoint url of a host and a port, and listens on its port`(url: String, port: Int) {
         // given / when
-        val properties = properties(advertisedHost = host)
+        val properties = properties(endpointUrl = url)
 
         // then
-        assertThat(properties.advertisedHost).isEqualTo(host)
+        assertThat(properties.endpointUrl).isEqualTo(url)
+        assertThat(properties.endpointPort).isEqualTo(port)
     }
 
     @Test
-    fun `rejects a missing advertised host with a readable message`() {
+    fun `rejects a missing endpoint url with a readable message`() {
         // given / when / then
-        assertThatThrownBy { properties(advertisedHost = null) }
+        assertThatThrownBy { properties(endpointUrl = null) }
             .isInstanceOf(IllegalArgumentException::class.java)
-            .hasMessage("restate.advertised-host is missing; set it in application.yml")
+            .hasMessage("restate.endpoint-url is missing; set it in application.yml")
     }
 
     @ParameterizedTest(name = "rejects ''{0}''")
-    @ValueSource(strings = ["", "http://dev", "dev:9080", "dev/path", "not a host"])
-    fun `rejects an advertised host that is not a host name or an IP address with a readable message`(host: String) {
+    @ValueSource(
+        strings = [
+            "", "not a url", "dev", "dev:9080", "https://dev:9080", "http://dev", "http://:9080", "http://dev:0",
+            "http://dev:65536", "http://dev:9080/path", "http://dev:9080?query", "http://dev:9080#fragment",
+            "http://user@dev:9080",
+        ],
+    )
+    fun `rejects an endpoint url that is not http of a host and a port with a readable message`(url: String) {
         // given / when / then
-        assertThatThrownBy { properties(advertisedHost = host) }
+        assertThatThrownBy { properties(endpointUrl = url) }
             .isInstanceOf(IllegalArgumentException::class.java)
-            .hasMessage("restate.advertised-host must be a host name or an IP address, was '$host'")
+            .hasMessage("restate.endpoint-url must be http://<host>:<port>, with a port between 1 and 65535, was '$url'")
     }
 
     @Test
@@ -93,32 +107,6 @@ class RestatePropertiesTest {
         assertThatThrownBy { properties(ingressUrl = url) }
             .isInstanceOf(IllegalArgumentException::class.java)
             .hasMessage("restate.ingress-url must be an absolute http or https URL, was '$url'")
-    }
-
-    @Test
-    fun `rejects a missing endpoint port with a readable message`() {
-        // given / when / then
-        assertThatThrownBy { properties(endpointPort = null) }
-            .isInstanceOf(IllegalArgumentException::class.java)
-            .hasMessage("restate.endpoint-port is missing; set it in application.yml")
-    }
-
-    @ParameterizedTest(name = "rejects port {0}")
-    @ValueSource(ints = [-1, 65_536])
-    fun `rejects an endpoint port out of range with a readable message`(port: Int) {
-        // given / when / then
-        assertThatThrownBy { properties(endpointPort = port) }
-            .isInstanceOf(IllegalArgumentException::class.java)
-            .hasMessage("restate.endpoint-port must be between 0 and 65535, was $port")
-    }
-
-    @Test
-    fun `accepts endpoint port 0 so the OS picks a free port`() {
-        // given / when
-        val properties = properties(endpointPort = 0)
-
-        // then
-        assertThat(properties.endpointPort).isZero()
     }
 
     @Test

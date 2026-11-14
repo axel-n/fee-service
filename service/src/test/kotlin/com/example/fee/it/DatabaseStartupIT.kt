@@ -17,7 +17,7 @@ import java.net.ServerSocket
 class DatabaseStartupIT {
     @Test
     fun `the app doesn't start when its database can't be reached, and its Restate endpoint never starts`() {
-        // given: a free port nothing listens on, for the database and for Restate
+        // given: a free port nothing listens on, for the database, for Restate and in the endpoint URL
         val unreachable = ServerSocket(0).use { it.localPort }
         val app = SpringApplicationBuilder(FeeServiceApplication::class.java)
 
@@ -31,7 +31,7 @@ class DatabaseStartupIT {
                         "--spring.r2dbc.url=r2dbc:postgresql://localhost:$unreachable/fee",
                         "--restate.ingress-url=http://localhost:$unreachable",
                         "--restate.admin-url=http://localhost:$unreachable",
-                        "--restate.endpoint-port=0",
+                        "--restate.endpoint-url=http://localhost:$unreachable",
                     ).close()
             }
 
@@ -65,7 +65,7 @@ class DatabaseStartupIT {
                         "--spring.r2dbc.password=${PostgresTestEnvironment.PASSWORD}",
                         "--restate.ingress-url=http://localhost:$unreachable",
                         "--restate.admin-url=http://localhost:$unreachable",
-                        "--restate.endpoint-port=0",
+                        "--restate.endpoint-url=http://localhost:$unreachable",
                     ).close()
             }
 

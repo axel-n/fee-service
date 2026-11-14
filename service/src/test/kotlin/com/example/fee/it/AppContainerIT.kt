@@ -67,7 +67,7 @@ class AppContainerIT {
         val response = api(app).submit(body(newTransactionId(), "Mobile Top Up"))
 
         // then
-        assertThat(admin.deployments().map { it.uri }).containsExactly("$ADVERTISED_URL/")
+        assertThat(admin.deployments().map { it.uri }).containsExactly("$ENDPOINT_URL/")
         assertThat(response.status).describedAs("POST status, body %s", response.body).isEqualTo(200)
         assertThat(
             response.body
@@ -137,7 +137,7 @@ class AppContainerIT {
         assertThat(chargedRecords(transactionId)).describedAs("charges").isEqualTo(1)
     }
 
-    /** Starts the packaged app on the network; it is ready once it registered its endpoint at [ADVERTISED_URL]. */
+    /** Starts the packaged app on the network; it is ready once it registered its endpoint at [ENDPOINT_URL]. */
     private fun startApp(): GenericContainer<*> = GenericContainer(DockerImageName.parse(JAVA_IMAGE))
         .withNetwork(network)
         .withNetworkAliases(APP_ALIAS)
@@ -148,8 +148,7 @@ class AppContainerIT {
                 "SERVER_PORT" to "$APP_PORT",
                 "RESTATE_INGRESS_URL" to "http://$RESTATE_ALIAS:${RestateTestEnvironment.INGRESS_PORT}",
                 "RESTATE_ADMIN_URL" to "http://$RESTATE_ALIAS:${RestateTestEnvironment.ADMIN_PORT}",
-                "RESTATE_ENDPOINT_PORT" to "$ENDPOINT_PORT",
-                "RESTATE_ADVERTISED_HOST" to APP_ALIAS,
+                "RESTATE_ENDPOINT_URL" to ENDPOINT_URL,
                 "DATABASE_URL" to
                     "r2dbc:postgresql://$POSTGRES_ALIAS:${PostgresTestEnvironment.PORT}/${PostgresTestEnvironment.DATABASE}",
                 "DATABASE_USERNAME" to PostgresTestEnvironment.USERNAME,
@@ -160,7 +159,7 @@ class AppContainerIT {
         .waitingFor(
             // (?s): a log line ends with its newline
             Wait
-                .forLogMessage("(?s).*Restate endpoint registered as ${Pattern.quote(ADVERTISED_URL)} .*", 1)
+                .forLogMessage("(?s).*Restate endpoint registered as ${Pattern.quote(ENDPOINT_URL)} .*", 1)
                 .withStartupTimeout(Duration.ofMinutes(2)),
         ).also {
             apps += it
@@ -239,8 +238,7 @@ class AppContainerIT {
         private const val POSTGRES_ALIAS = "postgres"
         private const val APP_ALIAS = "fee-service"
         private const val APP_PORT = 8_081
-        private const val ENDPOINT_PORT = 9_080
-        private const val ADVERTISED_URL = "http://$APP_ALIAS:$ENDPOINT_PORT"
+        private const val ENDPOINT_URL = "http://$APP_ALIAS:9080"
         private const val STOP_TIMEOUT_SECONDS = 30
 
         // Restate's query API takes no parameters: the run's target is appended, quoted

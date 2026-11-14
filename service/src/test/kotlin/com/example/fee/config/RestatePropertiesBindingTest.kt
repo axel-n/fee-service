@@ -44,8 +44,7 @@ class RestatePropertiesBindingTest {
         fun overrides(): List<Arguments> = listOf(
             override("RESTATE_INGRESS_URL", "http://restate:8080", { it.ingressUrl }, "http://restate:8080"),
             override("RESTATE_ADMIN_URL", "http://restate:9070", { it.adminUrl }, "http://restate:9070"),
-            override("RESTATE_ENDPOINT_PORT", "19080", { it.endpointPort }, 19080),
-            override("RESTATE_ADVERTISED_HOST", "dev", { it.advertisedHost }, "dev"),
+            override("RESTATE_ENDPOINT_URL", "http://dev:19080", { it.endpointUrl }, "http://dev:19080"),
             override("RESTATE_ATTACH_TIMEOUT", "45s", { it.attachTimeout }, Duration.ofSeconds(45)),
         )
     }
@@ -64,8 +63,8 @@ class RestatePropertiesBindingTest {
         // then
         assertThat(properties.ingressUrl).isEqualTo("http://localhost:8080")
         assertThat(properties.adminUrl).isEqualTo("http://localhost:9070")
+        assertThat(properties.endpointUrl).isEqualTo("http://localhost:9080")
         assertThat(properties.endpointPort).isEqualTo(9_080)
-        assertThat(properties.advertisedHost).isEqualTo("localhost")
         assertThat(properties.attachTimeout).isEqualTo(Duration.ofSeconds(30))
     }
 
@@ -98,8 +97,7 @@ class RestatePropertiesBindingTest {
         // then
         assertThat(properties.ingressUrl).isEqualTo("http://restate:8080")
         assertThat(properties.adminUrl).isEqualTo("http://localhost:9070")
-        assertThat(properties.endpointPort).isEqualTo(9_080)
-        assertThat(properties.advertisedHost).isEqualTo("localhost")
+        assertThat(properties.endpointUrl).isEqualTo("http://localhost:9080")
         assertThat(properties.attachTimeout).isEqualTo(Duration.ofSeconds(30))
     }
 
@@ -124,8 +122,7 @@ class RestatePropertiesBindingTest {
             restate:
               ingress-url: http://localhost:8080
               admin-url: http://localhost:9070
-              endpoint-port: 9080
-              advertised-host: localhost
+              endpoint-url: http://localhost:9080
             """.trimIndent()
         val environment = environment(resource = ByteArrayResource(yaml.toByteArray()))
 
@@ -137,14 +134,14 @@ class RestatePropertiesBindingTest {
     }
 
     @Test
-    fun `a variable that is not a number fails binding naming the key`() {
+    fun `a variable that is not a duration fails binding naming the key`() {
         // given
-        val environment = environment(mapOf("RESTATE_ENDPOINT_PORT" to "eighty"))
+        val environment = environment(mapOf("RESTATE_ATTACH_TIMEOUT" to "soon"))
 
         // when / then
         assertThatThrownBy { bind(environment) }
             .isInstanceOf(BindException::class.java)
-            .hasMessageContaining("restate.endpoint-port")
+            .hasMessageContaining("restate.attach-timeout")
     }
 
     @Test

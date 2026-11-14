@@ -60,8 +60,7 @@ class PackagedConfigurationTest {
     @CsvSource(
         "restate.ingress-url, http://localhost:8080",
         "restate.admin-url, http://localhost:9070",
-        "restate.endpoint-port, 9080",
-        "restate.advertised-host, localhost",
+        "restate.endpoint-url, http://localhost:9080",
         "restate.attach-timeout, 30s",
     )
     fun `restate setting has its packaged default when no variable is set`(key: String, expected: String) {
@@ -79,8 +78,7 @@ class PackagedConfigurationTest {
     @CsvSource(
         "restate.ingress-url, RESTATE_INGRESS_URL, http://restate:8080",
         "restate.admin-url, RESTATE_ADMIN_URL, http://restate:9070",
-        "restate.endpoint-port, RESTATE_ENDPOINT_PORT, 19080",
-        "restate.advertised-host, RESTATE_ADVERTISED_HOST, dev",
+        "restate.endpoint-url, RESTATE_ENDPOINT_URL, http://dev:19080",
         "restate.attach-timeout, RESTATE_ATTACH_TIMEOUT, 45s",
     )
     fun `restate setting is overridden by its readable environment variable`(key: String, variable: String, override: String) {
@@ -110,16 +108,14 @@ class PackagedConfigurationTest {
     }
 
     @Test
-    fun `restate defaults bind to their typed values`() {
+    fun `the restate attach timeout default binds to a duration`() {
         // given
         val binder = Binder.get(environment())
 
         // when
-        val endpointPort = binder.bind("restate.endpoint-port", Int::class.java).get()
         val attachTimeout = binder.bind("restate.attach-timeout", Duration::class.java).get()
 
         // then
-        assertThat(endpointPort).isEqualTo(9_080)
         assertThat(attachTimeout).isEqualTo(Duration.ofSeconds(30))
     }
 
@@ -183,8 +179,7 @@ class PackagedConfigurationTest {
         assertThat(restateKeys).containsExactlyInAnyOrder(
             "restate.ingress-url",
             "restate.admin-url",
-            "restate.endpoint-port",
-            "restate.advertised-host",
+            "restate.endpoint-url",
             "restate.attach-timeout",
         )
         assertThat(yaml.propertyNames.filter { it.startsWith("spring.http.client.") }).isEmpty()

@@ -12,8 +12,7 @@ import java.time.Duration
 class RestateProperties(
     ingressUrl: String?,
     adminUrl: String?,
-    endpointPort: Int?,
-    advertisedHost: String?,
+    endpointUrl: String?,
     attachTimeout: Duration?,
 ) {
     /** Restate ingress, used by `FeeService` through the Kotlin SDK's ingress client. */
@@ -22,16 +21,16 @@ class RestateProperties(
     /** Restate's admin API, where `RestateEndpointLifecycle` registers the endpoint at startup and removes it at shutdown. */
     val adminUrl: String = httpUrl("admin-url", adminUrl)
 
-    /** Port the endpoint listens on, where Restate calls the workflow; 0 lets the OS pick one (tests). */
-    val endpointPort: Int =
-        present("endpoint-port", endpointPort)
-            .also { require(it in 0..MAX_PORT) { "$PREFIX.endpoint-port must be between 0 and $MAX_PORT, was $it" } }
-
     /**
-     * The host Restate reaches the endpoint at. The app can't find it out by itself: Restate in a container reaches an app
-     * on the same machine as `host.docker.internal`, say. The endpoint is registered as `http://<this>:<the port it listens on>`.
+     * The URL Restate calls the workflow at, `http://<host>:<port>`: the endpoint is registered as it is and listens on
+     * its port. The app can't find the host out by itself: Restate in a container reaches an app on the same machine as
+     * `host.docker.internal`, say. The port is a fixed one, never the OS's pick: after a restart the endpoint must be back
+     * at the URL Restate knows, or the invocations pinned to its deployment never finish.
      */
-    val advertisedHost: String = host("advertised-host", advertisedHost)
+    val endpointUrl: String = hostPortUrl("endpoint-url", endpointUrl)
+
+    /** The port of [endpointUrl], which the endpoint listens on. */
+    val endpointPort: Int = URI(this.endpointUrl).port
 
     /**
      * How long `POST /transaction/fee` waits for the workflow's result. Then it asks Restate once more, and answers 504
@@ -50,21 +49,29 @@ class RestateProperties(
             require(it.isPositive) { "$PREFIX.$key must be positive, was $it" }
         }
 
-        private fun host(key: String, value: String?): String {
-            val host = present(key, value)
-            val uri = runCatching { URI("http://$host:1") }.getOrNull()
-            require(uri != null && uri.host == host && uri.port == 1) {
-                "$PREFIX.$key must be a host name or an IP address, was '$host'"
-            }
-            return host
-        }
-
         private fun httpUrl(key: String, value: String?): String {
             val url = present(key, value)
             val uri = runCatching { URI(url) }.getOrNull()
             require(uri != null && uri.scheme in setOf("http", "https") && !uri.host.isNullOrEmpty()) {
                 "$PREFIX.$key must be an absolute http or https URL, was '$url'"
             }
+            return url
+        }
+
+        // Plain http (the endpoint serves no TLS) at its root, and an explicit port to listen on.
+        private fun hostPortUrl(key: String, value: String?): String {
+            val url = present(key, value)
+            val uri = runCatching { URI(url) }.getOrNull()
+            require(
+                uri != null &&
+                    uri.scheme == "http" &&
+                    !uri.host.isNullOrEmpty() &&
+                    uri.port in 1..MAX_PORT &&
+                    uri.rawUserInfo == null &&
+                    uri.rawPath.orEmpty() in setOf("", "/") &&
+                    uri.rawQuery == null &&
+                    uri.rawFragment == null,
+            ) { "$PREFIX.$key must be http://<host>:<port>, with a port between 1 and $MAX_PORT, was '$url'" }
             return url
         }
     }

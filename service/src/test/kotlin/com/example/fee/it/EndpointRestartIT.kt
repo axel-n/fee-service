@@ -103,7 +103,7 @@ class EndpointRestartIT
 
         private fun registeredDeploymentId(): String? = RestateTestEnvironment.admin
             .deployments()
-            .singleOrNull { it.uri?.removeSuffix("/") == RestateTestEnvironment.advertisedUrl }
+            .singleOrNull { it.uri?.removeSuffix("/") == RestateTestEnvironment.endpointUrl }
             ?.id
 
         private fun bodyOf(request: FeeRequest): Map<String, Any?> = mapOf(

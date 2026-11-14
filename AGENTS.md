@@ -10,8 +10,8 @@ A Kotlin + Spring Boot service for a backend technology challenge (requirements:
 Restate workflow keyed by the `transaction_id`, which calculates and charges the fee as journaled steps, so processing
 survives crashes and restarts without charging twice. The charge is the insert of the transaction's fee record in
 PostgreSQL. Only the app reaches Restate: it sends work through
-Restate's ingress, and registers its own endpoint with Restate's admin API at startup, at whatever host and port it runs
-on. Clients never reach Restate directly.
+Restate's ingress, and registers its own endpoint with Restate's admin API at startup, as `restate.endpoint-url`: the URL
+Restate reaches it at, wherever it runs. Clients never reach Restate directly.
 
 - **The design:** the [README](README.md) (how a request is handled, the modules, fees, run, assumptions) and the rules
   below. Read both before starting any work.
@@ -119,8 +119,8 @@ Follow this call graph (the diagram in the README):
   (the ingress, for `FeeService`) and `FeeWorkflowContext` (inside `FeeWorkflow`). Only their `Restate*`/`Ingress*`
   implementations call the SDK. Restate's admin API is called
   only to register and remove the endpoint, through `RestateDeployments` (its `AdminApiRestateDeployments`), so `restate.*`
-  holds only the ingress URL, the admin URL, the endpoint port, the advertised host and the attach timeout. Don't add
-  Restate settings or admin calls without asking.
+  holds only the ingress URL, the admin URL, the endpoint URL (the URL Restate calls the app at, registered as it is; the
+  endpoint listens on its port) and the attach timeout. Don't add Restate settings or admin calls without asking.
 - Postgres is reached only through `FeeRecordRepository` (its `PostgresFeeRecordRepository`), which the tests fake: by
   `ChargedFees` to read a charge, and by `FeeWorkflow` inside its CHARGE step. **The one write is CHARGE's: one statement,
   atomic on its own (no explicit transaction), and its row count decides.** It is one `INSERT … ON CONFLICT DO NOTHING`
@@ -204,7 +204,7 @@ In [`docs/code-style.md`](docs/code-style.md).
   register a second app with the shared Restate: the newest deployment takes all new work. `DatabaseStartupIT` shows that
   an unreachable database fails startup before the endpoint starts.
 - **Tests never use fixed ports.** Restate and Postgres container ports come from `getMappedPort`, the API runs on `RANDOM_PORT`,
-  and the endpoint port is a free port picked per run. Only ports inside a private Testcontainers network (`AppContainerIT`'s
+  and the endpoint URL's port is a free port picked per run. Only ports inside a private Testcontainers network (`AppContainerIT`'s
   app) are fixed, and the test reaches them through `getMappedPort` too. Every `restate.*` and `spring.r2dbc.*` setting is set
   by `@DynamicPropertySource`. A Restate, Postgres or app already running on the machine must not affect the tests.
 - Never use `Thread.sleep` to wait for workflows. Use latches, attach/await on the workflow, or bounded polling of `status()`.

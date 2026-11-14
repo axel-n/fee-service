@@ -62,11 +62,11 @@ services:
     working_dir: /workspace/project
     environment:
       HOME: /home/${USER}
-      # The dev Restate above. The app registers its endpoint there as dev:9080, reached over this network, so 9080 isn't
-      # published. Tests ignore these and start their own Restate.
+      # The dev Restate above. The app registers its endpoint there as http://dev:9080, reached over this network, so 9080
+      # isn't published. Tests ignore these and start their own Restate.
       RESTATE_INGRESS_URL: http://restate:8080
       RESTATE_ADMIN_URL: http://restate:9070
-      RESTATE_ADVERTISED_HOST: dev
+      RESTATE_ENDPOINT_URL: http://dev:9080
       # The dev Postgres above, over this network. Tests ignore it and start their own
       DATABASE_URL: r2dbc:postgresql://postgres:5432/fee
     # The host's podman socket is deliberately not mounted: holding it means controlling the host's podman.

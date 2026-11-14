@@ -32,17 +32,16 @@ server:
   port: 8081
 
 # Explicit placeholders: Spring's automatic mapping would expect RESTATE_INGRESSURL (dashes dropped).
-# The app registers its endpoint with Restate at startup as http://<advertised-host>:<endpoint port>, and removes it at
-# shutdown unless unfinished invocations still need it.
+# The app registers its endpoint with Restate at startup as restate.endpoint-url, and removes it at shutdown unless
+# unfinished invocations still need it.
 restate:
   # Restate ingress, used by FeeService to submit and attach to workflows
   ingress-url: ${RESTATE_INGRESS_URL:http://localhost:8080}
   # Restate's admin API, where the endpoint is registered and removed
   admin-url: ${RESTATE_ADMIN_URL:http://localhost:9070}
-  # Port the Restate endpoint listens on; Restate calls the workflow here
-  endpoint-port: ${RESTATE_ENDPOINT_PORT:9080}
-  # Host Restate reaches the endpoint at: localhost only when Restate runs on this machine outside a container
-  advertised-host: ${RESTATE_ADVERTISED_HOST:localhost}
+  # http://<host>:<port> Restate calls the workflow at; the endpoint listens on its port. The host is localhost only when
+  # Restate runs on this machine outside a container
+  endpoint-url: ${RESTATE_ENDPOINT_URL:http://localhost:9080}
   # How long POST /transaction/fee waits for the workflow's result; then it answers 504 only if Restate reports the run
   # as not finished (470)
   attach-timeout: ${RESTATE_ATTACH_TIMEOUT:30s}

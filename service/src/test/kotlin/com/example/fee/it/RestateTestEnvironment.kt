@@ -29,7 +29,7 @@ object RestateTestEnvironment {
     const val ADMIN_PORT = 9_070
 
     // How the container reaches the machine the tests run on, and so the app's endpoint (exposeHostPorts below)
-    private const val ADVERTISED_HOST = "host.testcontainers.internal"
+    private const val ENDPOINT_HOST = "host.testcontainers.internal"
 
     /** The host port the app's Restate endpoint listens on, the same for the whole run. */
     val endpointPort: Int = ServerSocket(0).use { it.localPort }
@@ -45,8 +45,8 @@ object RestateTestEnvironment {
 
     val adminUrl: String = "http://${container.host}:${container.getMappedPort(ADMIN_PORT)}"
 
-    /** The URL the app registers its endpoint at, as Restate reaches it. */
-    val advertisedUrl: String = "http://$ADVERTISED_HOST:$endpointPort"
+    /** The URL the app registers its endpoint at, as Restate reaches it (`restate.endpoint-url`). */
+    val endpointUrl: String = "http://$ENDPOINT_HOST:$endpointPort"
 
     /** The tests' view of what the app did in Restate: deployments, introspection, purging. */
     val admin: RestateAdminApi = RestateAdminApi(adminUrl)
@@ -59,8 +59,7 @@ object RestateTestEnvironment {
     fun restateProperties(): Map<String, String> = mapOf(
         "restate.ingress-url" to ingressUrl,
         "restate.admin-url" to adminUrl,
-        "restate.endpoint-port" to endpointPort.toString(),
-        "restate.advertised-host" to ADVERTISED_HOST,
+        "restate.endpoint-url" to endpointUrl,
         "restate.attach-timeout" to "30s",
     )
 

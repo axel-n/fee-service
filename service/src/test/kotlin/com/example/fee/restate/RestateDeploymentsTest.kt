@@ -180,8 +180,7 @@ class RestateDeploymentsTest {
     private fun properties(adminUrl: String) = RestateProperties(
         ingressUrl = "http://localhost:8080",
         adminUrl = adminUrl,
-        endpointPort = 9_080,
-        advertisedHost = "dev",
+        endpointUrl = "http://dev:9080",
         attachTimeout = Duration.ofSeconds(10),
     )
 

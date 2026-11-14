@@ -7,7 +7,7 @@ import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
 
 /**
- * The app registers its endpoint with Restate at startup, at the advertised host and the port it listens on, and removes
+ * The app registers its endpoint with Restate at startup, at `restate.endpoint-url` (it listens on its port), and removes
  * it when it stops with nothing unfinished. Keeping it while a workflow is in flight is `EndpointRestartIT`'s.
  */
 class EndpointRegistrationIT
@@ -23,7 +23,7 @@ class EndpointRegistrationIT
         }
 
         @Test
-        fun `the started app is registered at its advertised URL with the workflow and the fee record`() {
+        fun `the started app is registered at its endpoint URL with the workflow and the fee record`() {
             // given: the shared app has started
 
             // when
@@ -53,7 +53,7 @@ class EndpointRegistrationIT
         }
 
         private fun registered(): RestateAdminApi.Deployment? =
-            admin.deployments().singleOrNull { it.uri?.removeSuffix("/") == RestateTestEnvironment.advertisedUrl }
+            admin.deployments().singleOrNull { it.uri?.removeSuffix("/") == RestateTestEnvironment.endpointUrl }
 
         private fun unfinishedInvocations(): Long = admin
             .query(UNFINISHED_INVOCATIONS)

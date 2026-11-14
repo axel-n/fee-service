@@ -84,8 +84,7 @@ class FeeServiceTest {
     private fun restateProperties(attachTimeout: Duration) = RestateProperties(
         ingressUrl = "http://localhost:8080",
         adminUrl = "http://localhost:9070",
-        endpointPort = 9_080,
-        advertisedHost = "localhost",
+        endpointUrl = "http://localhost:9080",
         attachTimeout = attachTimeout,
     )
 

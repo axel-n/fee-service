@@ -17,8 +17,7 @@ class RestateConfigTest {
             RestateProperties(
                 ingressUrl = "http://127.0.0.1:1",
                 adminUrl = "http://localhost:9070",
-                endpointPort = 9_080,
-                advertisedHost = "localhost",
+                endpointUrl = "http://localhost:9080",
                 attachTimeout = Duration.ofSeconds(10),
             )
 

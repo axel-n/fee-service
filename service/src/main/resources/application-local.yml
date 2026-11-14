@@ -5,4 +5,4 @@
 
 restate:
   # Restate's container reaches this machine as host.docker.internal; the app registers itself there at startup
-  advertised-host: ${RESTATE_ADVERTISED_HOST:host.docker.internal}
+  endpoint-url: ${RESTATE_ENDPOINT_URL:http://host.docker.internal:9080}

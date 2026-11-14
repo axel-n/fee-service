@@ -22,8 +22,20 @@ import java.time.Duration
  */
 class RestateEndpointLifecycleTest {
     private val port = freePort()
+    private val endpointUrl = "http://$ENDPOINT_HOST:$port"
     private val deployments = FakeDeployments()
-    private val lifecycle = lifecycle(port)
+    private val lifecycle =
+        RestateEndpointLifecycle(
+            feeWorkflow = mock(FeeWorkflow::class.java),
+            deployments = deployments,
+            properties =
+                RestateProperties(
+                    ingressUrl = "http://localhost:8080",
+                    adminUrl = "http://localhost:9070",
+                    endpointUrl = endpointUrl,
+                    attachTimeout = Duration.ofSeconds(10),
+                ),
+        )
 
     @AfterEach
     fun stopEndpoint() {
@@ -31,15 +43,15 @@ class RestateEndpointLifecycleTest {
     }
 
     @Test
-    fun `starts on the configured free port`() {
-        // given: the lifecycle on a free port
+    fun `starts listening on the port of the endpoint url`() {
+        // given: an endpoint url with a free port
 
         // when
         lifecycle.start()
 
         // then
-        assertThat(lifecycle.port()).isEqualTo(port)
         assertThat(canBind(port)).isFalse()
+        assertThat(discover(port).statusCode()).isEqualTo(200)
     }
 
     @Test
@@ -57,14 +69,14 @@ class RestateEndpointLifecycleTest {
     }
 
     @Test
-    fun `registers the endpoint as the advertised host and its port once it answers discovery`() {
+    fun `registers the endpoint as the endpoint url once it answers discovery`() {
         // given: never started
 
         // when
         lifecycle.start()
 
         // then
-        assertThat(deployments.registered).containsExactly("http://$ADVERTISED_HOST:$port")
+        assertThat(deployments.registered).containsExactly(endpointUrl)
         assertThat(deployments.discoverableWhenRegistered).containsExactly(true)
     }
 
@@ -76,9 +88,9 @@ class RestateEndpointLifecycleTest {
         // when / then
         assertThatThrownBy { lifecycle.start() }
             .isInstanceOf(IllegalStateException::class.java)
-            .hasMessageContaining("http://$ADVERTISED_HOST:$port")
+            .hasMessageContaining(endpointUrl)
             .hasMessageContaining("http://localhost:9070")
-            .hasMessageContaining("restate.advertised-host")
+            .hasMessageContaining("restate.endpoint-url")
             .hasMessageContaining("restate.admin-url")
             .hasMessageContaining("Connection refused")
         assertThat(lifecycle.isRunning).isFalse()
@@ -143,7 +155,6 @@ class RestateEndpointLifecycleTest {
         assertThat(beforeStart).isFalse()
         assertThat(afterStart).isTrue()
         assertThat(afterStop).isFalse()
-        assertThat(lifecycle.port()).isNull()
     }
 
     @Test
@@ -169,9 +180,8 @@ class RestateEndpointLifecycleTest {
 
         // then
         assertThat(lifecycle.isRunning).isTrue()
-        assertThat(lifecycle.port()).isEqualTo(port)
         assertThat(discover(port).statusCode()).isEqualTo(200)
-        assertThat(deployments.registered).containsExactly("http://$ADVERTISED_HOST:$port", "http://$ADVERTISED_HOST:$port")
+        assertThat(deployments.registered).containsExactly(endpointUrl, endpointUrl)
     }
 
     @Test
@@ -201,25 +211,6 @@ class RestateEndpointLifecycleTest {
     }
 
     @Test
-    fun `port 0 lets the OS pick the port, and registers that port`() {
-        // given
-        val anyPort = lifecycle(0)
-
-        try {
-            // when
-            anyPort.start()
-
-            // then
-            val picked = checkNotNull(anyPort.port())
-            assertThat(picked).isPositive()
-            assertThat(discover(picked).statusCode()).isEqualTo(200)
-            assertThat(deployments.registered).containsExactly("http://$ADVERTISED_HOST:$picked")
-        } finally {
-            anyPort.stop()
-        }
-    }
-
-    @Test
     fun `fails with a message naming the port when it is taken, and stays stopped`() {
         // given
         ServerSocket().use { taken ->
@@ -229,7 +220,7 @@ class RestateEndpointLifecycleTest {
             assertThatThrownBy { lifecycle.start() }
                 .isInstanceOf(IllegalStateException::class.java)
                 .hasMessageContaining("port $port")
-                .hasMessageContaining("restate.endpoint-port")
+                .hasMessageContaining("restate.endpoint-url")
         }
         assertThat(lifecycle.isRunning).isFalse()
         assertThat(deployments.registered).isEmpty()
@@ -250,19 +241,6 @@ class RestateEndpointLifecycleTest {
         assertThat(lifecycle.isRunning).isTrue()
         assertThat(discover(port).statusCode()).isEqualTo(200)
     }
-
-    private fun lifecycle(endpointPort: Int) = RestateEndpointLifecycle(
-        feeWorkflow = mock(FeeWorkflow::class.java),
-        deployments = deployments,
-        properties =
-            RestateProperties(
-                ingressUrl = "http://localhost:8080",
-                adminUrl = "http://localhost:9070",
-                endpointPort = endpointPort,
-                advertisedHost = ADVERTISED_HOST,
-                attachTimeout = Duration.ofSeconds(10),
-            ),
-    )
 
     /** Restate's admin API in memory: records registrations and removals, answers with the configured results. */
     private class FakeDeployments : RestateDeployments {
@@ -295,8 +273,8 @@ class RestateEndpointLifecycleTest {
         // The manifest version Restate 1.8.1 asks for first; the SDK answers it on HTTP/1.1 too.
         const val DISCOVERY_MEDIA_TYPE = "application/vnd.restate.endpointmanifest.v3+json"
 
-        // Not this machine's name, so a test proves the registered URL takes the setting, not a guess
-        const val ADVERTISED_HOST = "fee.restate-reaches-it.test"
+        // Not this machine's name, so a test proves the registered URL is the setting, not a guess
+        const val ENDPOINT_HOST = "fee.restate-reaches-it.test"
 
         val DEPLOYMENT = Deployment("dp_test", listOf("FeeWorkflow"))
 

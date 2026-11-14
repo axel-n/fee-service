@@ -14,11 +14,11 @@ import java.util.concurrent.ExecutionException
 private val log = LoggerFactory.getLogger(RestateEndpointLifecycle::class.java)
 
 /**
- * Serves the Spring-built [FeeWorkflow] bean as a Restate endpoint on `restate.endpoint-port`, and keeps it registered
- * with Restate while it runs. It is the only place that starts or stops the endpoint, so tests stop and start it to
- * simulate a crash or a restart.
+ * Serves the Spring-built [FeeWorkflow] bean as a Restate endpoint on the port of `restate.endpoint-url`, and keeps it
+ * registered with Restate while it runs. It is the only place that starts or stops the endpoint, so tests stop and start
+ * it to simulate a crash or a restart.
  *
- * Start listens, then registers the endpoint as `http://<restate.advertised-host>:<port>`. Registering the same URL again
+ * Start listens, then registers the endpoint as `restate.endpoint-url`. Registering the same URL again
  * after a restart keeps its deployment, so invocations pinned to it resume. A failed registration fails the start: an app
  * Restate can't reach would never finish a run, so every request would end in a 504.
  *
@@ -70,12 +70,9 @@ class RestateEndpointLifecycle(
 
     override fun isRunning(): Boolean = started != null
 
-    /** The port the endpoint listens on while it runs (the OS's pick when `endpoint-port` is 0), else `null`. */
-    fun port(): Int? = started?.server?.port
-
     // Restate discovers the services by calling the endpoint, so it registers only once the endpoint listens.
     private fun register(server: RunningServer): Deployment {
-        val uri = "http://${properties.advertisedHost}:${server.port}"
+        val uri = properties.endpointUrl
         return try {
             deployments
                 .register(uri)
@@ -84,7 +81,7 @@ class RestateEndpointLifecycle(
             server.close()
             throw IllegalStateException(
                 "Could not register the Restate endpoint $uri with Restate's admin API at ${properties.adminUrl} " +
-                    "(${RestateProperties.PREFIX}.advertised-host, ${RestateProperties.PREFIX}.admin-url): ${e.message}",
+                    "(${RestateProperties.PREFIX}.endpoint-url, ${RestateProperties.PREFIX}.admin-url): ${e.message}",
                 e,
             )
         }
@@ -136,7 +133,7 @@ class RestateEndpointLifecycle(
             private val HTTP_SERVER: Class<*> = Class.forName("io.vertx.core.http.HttpServer")
             private val FUTURE: Class<*> = Class.forName("io.vertx.core.Future")
 
-            /** Listens on [port] (0: the OS picks one); fails naming the port, leaving no Vert.x instance behind. */
+            /** Listens on [port]; fails naming the port, leaving no Vert.x instance behind. */
             fun listen(endpoint: Endpoint, port: Int): RunningServer {
                 val vertx = checkNotNull(invoke(null, VERTX, "vertx")) { "Vertx.vertx() returned null" }
                 try {
@@ -149,12 +146,11 @@ class RestateEndpointLifecycle(
                             },
                         ) { "RestateHttpServer.fromEndpoint returned null" }
                     await(unwrapping { HTTP_SERVER.getMethod("listen", Int::class.javaPrimitiveType).invoke(httpServer, port) })
-                    val actualPort = invoke(httpServer, HTTP_SERVER, "actualPort") as Int
-                    return RunningServer(vertx, httpServer, actualPort)
+                    return RunningServer(vertx, httpServer, port)
                 } catch (e: Exception) {
                     runCatching { await(invoke(vertx, VERTX, "close")) }
                     throw IllegalStateException(
-                        "Restate endpoint could not listen on port $port (${RestateProperties.PREFIX}.endpoint-port): ${e.message}",
+                        "Restate endpoint could not listen on port $port (${RestateProperties.PREFIX}.endpoint-url): ${e.message}",
                         e,
                     )
                 }
