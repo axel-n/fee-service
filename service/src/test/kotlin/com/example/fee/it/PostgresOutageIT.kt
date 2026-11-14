@@ -246,12 +246,11 @@ class PostgresOutageIT
         }
 
         // Restate's own count of failed attempts of the run
-        private fun retries(workflowId: String): Long =
-            RestateTestEnvironment.admin
-                .query("$RETRY_COUNT 'FeeWorkflow/$workflowId/run'")
-                .singleOrNull()
-                ?.get("retry_count")
-                ?.asLong() ?: 0
+        private fun retries(workflowId: String): Long = RestateTestEnvironment.admin
+            .query("$RETRY_COUNT 'FeeWorkflow/$workflowId/run'")
+            .singleOrNull()
+            ?.get("retry_count")
+            ?.asLong() ?: 0
 
         private fun assertChargedOnce(request: FeeRequest) {
             val transactionId = transactionIdOf(request)
@@ -266,27 +265,25 @@ class PostgresOutageIT
 
         private fun transactionIdOf(request: FeeRequest) = checkNotNull(request.transactionId)
 
-        private fun bodyOf(request: FeeRequest): Map<String, Any?> =
-            mapOf(
-                "transaction_id" to request.transactionId,
-                "amount" to request.amount,
-                "asset" to request.asset,
-                "asset_type" to request.assetType,
-                "type" to request.type,
-                "state" to request.state,
-                "created_at" to request.createdAt,
-            )
+        private fun bodyOf(request: FeeRequest): Map<String, Any?> = mapOf(
+            "transaction_id" to request.transactionId,
+            "amount" to request.amount,
+            "asset" to request.asset,
+            "asset_type" to request.assetType,
+            "type" to request.type,
+            "state" to request.state,
+            "created_at" to request.createdAt,
+        )
 
-        private fun validRequest(transactionId: String) =
-            FeeRequest(
-                transactionId = transactionId,
-                amount = BigDecimal("1000"),
-                asset = "USD",
-                assetType = "FIAT",
-                type = "Mobile Top Up",
-                state = "SETTLED - PENDING FEE",
-                createdAt = "2023-08-30 15:42:17.610059",
-            )
+        private fun validRequest(transactionId: String) = FeeRequest(
+            transactionId = transactionId,
+            amount = BigDecimal("1000"),
+            asset = "USD",
+            assetType = "FIAT",
+            type = "Mobile Top Up",
+            state = "SETTLED - PENDING FEE",
+            createdAt = "2023-08-30 15:42:17.610059",
+        )
 
         private companion object {
             val FEE = BigDecimal("1.50")

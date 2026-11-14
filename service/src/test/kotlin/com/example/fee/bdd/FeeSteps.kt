@@ -280,21 +280,19 @@ class FeeSteps(
     }
 
     /** The id the request carried, verbatim; for a request sent without one, the id its transaction was given with. */
-    fun submittedTransactionId(): String =
-        checkNotNull(request?.get("transaction_id") as? String ?: givenTransactionId) {
-            "No transaction with an id was given"
-        }
+    fun submittedTransactionId(): String = checkNotNull(request?.get("transaction_id") as? String ?: givenTransactionId) {
+        "No transaction with an id was given"
+    }
 
     private fun await(submission: CompletableFuture<FeeApi.Response>): FeeApi.Response =
         submission.get(RESPONSE_TIMEOUT_SECONDS, TimeUnit.SECONDS)
 
     // A feature's value as the request carries it: the id scoped to the scenario, the amount as a number
-    private fun requestValue(field: String, value: String?): Any? =
-        when (field) {
-            "transaction_id" -> value?.let(::transactionId)
-            "amount" -> value?.let(::BigDecimal)
-            else -> value
-        }
+    private fun requestValue(field: String, value: String?): Any? = when (field) {
+        "transaction_id" -> value?.let(::transactionId)
+        "amount" -> value?.let(::BigDecimal)
+        else -> value
+    }
 
     private companion object {
         // the created_at of the sample in requirements.md

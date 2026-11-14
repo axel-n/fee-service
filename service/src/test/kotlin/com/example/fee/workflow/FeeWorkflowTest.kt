@@ -40,18 +40,17 @@ class FeeWorkflowTest {
         )
 
     @Test
-    fun `charges the reference request and returns the fee response`() =
-        runBlocking<Unit> {
-            // given
-            val records = startedRecords()
+    fun `charges the reference request and returns the fee response`() = runBlocking<Unit> {
+        // given
+        val records = startedRecords()
 
-            // when
-            val response = workflow(FakeWorkflowContext(), records).run(validRequest)
+        // when
+        val response = workflow(FakeWorkflowContext(), records).run(validRequest)
 
-            // then
-            assertThat(response).isEqualTo(expectedResponse)
-            assertThat(records.records[TRANSACTION_ID]).isEqualTo(FeeRecord.pending(KEY).charge(expectedResponse))
-        }
+        // then
+        assertThat(response).isEqualTo(expectedResponse)
+        assertThat(records.records[TRANSACTION_ID]).isEqualTo(FeeRecord.pending(KEY).charge(expectedResponse))
+    }
 
     @Test
     fun `charges the transaction's record under the workflow key with the payload it charged, and writes nothing else`() =
@@ -68,112 +67,105 @@ class FeeWorkflowTest {
         }
 
     @Test
-    fun `wraps every step with the step hook, in order, with the transaction id`() =
-        runBlocking<Unit> {
-            // given
-            val context = FakeWorkflowContext()
+    fun `wraps every step with the step hook, in order, with the transaction id`() = runBlocking<Unit> {
+        // given
+        val context = FakeWorkflowContext()
 
-            // when
-            workflow(context).run(validRequest)
+        // when
+        workflow(context).run(validRequest)
 
-            // then
-            assertThat(hook.events).containsExactly(
-                "before CALCULATE $TRANSACTION_ID",
-                "after CALCULATE $TRANSACTION_ID",
-                "before CHARGE $TRANSACTION_ID",
-                "after CHARGE $TRANSACTION_ID",
-            )
-        }
-
-    @Test
-    fun `journals the calculation and the charge, and only those`() =
-        runBlocking<Unit> {
-            // given
-            val context = FakeWorkflowContext()
-
-            // when
-            workflow(context).run(validRequest)
-
-            // then
-            assertThat(context.journaled).containsExactly("calculate", "charge")
-        }
+        // then
+        assertThat(hook.events).containsExactly(
+            "before CALCULATE $TRANSACTION_ID",
+            "after CALCULATE $TRANSACTION_ID",
+            "before CHARGE $TRANSACTION_ID",
+            "after CHARGE $TRANSACTION_ID",
+        )
+    }
 
     @Test
-    fun `stores each step in workflow state before it runs, and DONE at the end`() =
-        runBlocking<Unit> {
-            // given
-            val context = FakeWorkflowContext()
-            val workflow = workflow(context)
+    fun `journals the calculation and the charge, and only those`() = runBlocking<Unit> {
+        // given
+        val context = FakeWorkflowContext()
 
-            // when
-            workflow.run(validRequest)
+        // when
+        workflow(context).run(validRequest)
 
-            // then
-            assertThat(context.stepWrites).containsExactly(WorkflowStep.CALCULATE, WorkflowStep.CHARGE, WorkflowStep.DONE)
-            assertThat(workflow.status()).isEqualTo(WorkflowStep.DONE)
-        }
+        // then
+        assertThat(context.journaled).containsExactly("calculate", "charge")
+    }
 
     @Test
-    fun `a crash injected before CHARGE stops the workflow before the fee is charged, with status CHARGE`() =
-        runBlocking<Unit> {
-            // given
-            val crash = IllegalStateException("injected crash")
-            val crashingHook =
-                object : StepHook {
-                    override fun before(step: WorkflowStep, transactionId: String) {
-                        if (step == WorkflowStep.CHARGE) throw crash
-                    }
+    fun `stores each step in workflow state before it runs, and DONE at the end`() = runBlocking<Unit> {
+        // given
+        val context = FakeWorkflowContext()
+        val workflow = workflow(context)
 
-                    override fun after(step: WorkflowStep, transactionId: String) = Unit
+        // when
+        workflow.run(validRequest)
+
+        // then
+        assertThat(context.stepWrites).containsExactly(WorkflowStep.CALCULATE, WorkflowStep.CHARGE, WorkflowStep.DONE)
+        assertThat(workflow.status()).isEqualTo(WorkflowStep.DONE)
+    }
+
+    @Test
+    fun `a crash injected before CHARGE stops the workflow before the fee is charged, with status CHARGE`() = runBlocking<Unit> {
+        // given
+        val crash = IllegalStateException("injected crash")
+        val crashingHook =
+            object : StepHook {
+                override fun before(step: WorkflowStep, transactionId: String) {
+                    if (step == WorkflowStep.CHARGE) throw crash
                 }
-            val records = startedRecords()
-            val workflow = workflow(FakeWorkflowContext(), records, stepHook = crashingHook)
 
-            // when / then
-            assertThatThrownBy { runBlocking { workflow.run(validRequest) } }.isSameAs(crash)
-            assertThat(records.calls).isEmpty()
-            assertThat(workflow.status()).isEqualTo(WorkflowStep.CHARGE)
-        }
+                override fun after(step: WorkflowStep, transactionId: String) = Unit
+            }
+        val records = startedRecords()
+        val workflow = workflow(FakeWorkflowContext(), records, stepHook = crashingHook)
 
-    @Test
-    fun `a failure inside CALCULATE propagates as a plain exception, so Restate retries it, and nothing is charged`() =
-        runBlocking<Unit> {
-            // given
-            val outage = IllegalStateException("configuration unreadable")
-            val records = startedRecords()
-            val workflow = workflow(FakeWorkflowContext(failing = mapOf("calculate" to outage)), records)
-
-            // when / then
-            assertThatThrownBy { runBlocking { workflow.run(validRequest) } }.isSameAs(outage)
-            assertThat(records.calls).isEmpty()
-            assertThat(workflow.status()).isEqualTo(WorkflowStep.CALCULATE)
-        }
+        // when / then
+        assertThatThrownBy { runBlocking { workflow.run(validRequest) } }.isSameAs(crash)
+        assertThat(records.calls).isEmpty()
+        assertThat(workflow.status()).isEqualTo(WorkflowStep.CHARGE)
+    }
 
     @Test
-    fun `a Postgres failure at CHARGE propagates as a plain exception, so Restate retries it`() =
-        runBlocking<Unit> {
-            // given
-            val outage = IllegalStateException("database unreachable")
-            val records = startedRecords(failing = mapOf("charge" to outage))
-            val workflow = workflow(FakeWorkflowContext(), records)
+    fun `a failure inside CALCULATE propagates as a plain exception, so Restate retries it, and nothing is charged`() = runBlocking<Unit> {
+        // given
+        val outage = IllegalStateException("configuration unreadable")
+        val records = startedRecords()
+        val workflow = workflow(FakeWorkflowContext(failing = mapOf("calculate" to outage)), records)
 
-            // when / then
-            assertThatThrownBy { runBlocking { workflow.run(validRequest) } }.isSameAs(outage)
-            assertThat(records.records[TRANSACTION_ID]).isEqualTo(FeeRecord.pending(KEY))
-            assertThat(workflow.status()).isEqualTo(WorkflowStep.CHARGE)
-        }
+        // when / then
+        assertThatThrownBy { runBlocking { workflow.run(validRequest) } }.isSameAs(outage)
+        assertThat(records.calls).isEmpty()
+        assertThat(workflow.status()).isEqualTo(WorkflowStep.CALCULATE)
+    }
 
     @Test
-    fun `a record started for another workflow is not charged, and the failure propagates so Restate retries it`() =
-        runBlocking<Unit> {
-            // given
-            val records = InMemoryFeeRecordRepository(TRANSACTION_ID to FeeRecord.pending("another-workflow"))
-            val workflow = workflow(FakeWorkflowContext(), records)
+    fun `a Postgres failure at CHARGE propagates as a plain exception, so Restate retries it`() = runBlocking<Unit> {
+        // given
+        val outage = IllegalStateException("database unreachable")
+        val records = startedRecords(failing = mapOf("charge" to outage))
+        val workflow = workflow(FakeWorkflowContext(), records)
 
-            // when / then
-            assertThatThrownBy { runBlocking { workflow.run(validRequest) } }.isInstanceOf(IllegalStateException::class.java)
-            assertThat(records.records[TRANSACTION_ID]).isEqualTo(FeeRecord.pending("another-workflow"))
-        }
+        // when / then
+        assertThatThrownBy { runBlocking { workflow.run(validRequest) } }.isSameAs(outage)
+        assertThat(records.records[TRANSACTION_ID]).isEqualTo(FeeRecord.pending(KEY))
+        assertThat(workflow.status()).isEqualTo(WorkflowStep.CHARGE)
+    }
+
+    @Test
+    fun `a record started for another workflow is not charged, and the failure propagates so Restate retries it`() = runBlocking<Unit> {
+        // given
+        val records = InMemoryFeeRecordRepository(TRANSACTION_ID to FeeRecord.pending("another-workflow"))
+        val workflow = workflow(FakeWorkflowContext(), records)
+
+        // when / then
+        assertThatThrownBy { runBlocking { workflow.run(validRequest) } }.isInstanceOf(IllegalStateException::class.java)
+        assertThat(records.records[TRANSACTION_ID]).isEqualTo(FeeRecord.pending("another-workflow"))
+    }
 
     @Test
     fun `a request that passed validation but can't be mapped is a bug, thrown before CALCULATE`() {
@@ -190,17 +182,16 @@ class FeeWorkflowTest {
     }
 
     @Test
-    fun `status is null for a workflow that never started`() =
-        runBlocking<Unit> {
-            // given
-            val context = FakeWorkflowContext()
+    fun `status is null for a workflow that never started`() = runBlocking<Unit> {
+        // given
+        val context = FakeWorkflowContext()
 
-            // when
-            val status = workflow(context).status()
+        // when
+        val status = workflow(context).status()
 
-            // then
-            assertThat(status).isNull()
-        }
+        // then
+        assertThat(status).isNull()
+    }
 
     @Test
     fun `is bound as a workflow with run and a shared status`() {

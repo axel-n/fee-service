@@ -91,14 +91,13 @@ class FeeServiceTest {
         )
     }
 
-    private fun restateProperties(attachTimeout: Duration) =
-        RestateProperties(
-            ingressUrl = "http://localhost:8080",
-            adminUrl = "http://localhost:9070",
-            endpointPort = 9_080,
-            advertisedHost = "localhost",
-            attachTimeout = attachTimeout,
-        )
+    private fun restateProperties(attachTimeout: Duration) = RestateProperties(
+        ingressUrl = "http://localhost:8080",
+        adminUrl = "http://localhost:9070",
+        endpointPort = 9_080,
+        advertisedHost = "localhost",
+        attachTimeout = attachTimeout,
+    )
 
     private fun cacheProperties(lookupTimeout: Duration) =
         FeeCacheProperties(maximumSize = 1_000, expireAfterWrite = Duration.ofDays(1), lookupTimeout = lookupTimeout)
@@ -113,114 +112,108 @@ class FeeServiceTest {
     private fun workflowId(): String = checkNotNull(records.records["txn_001"]).workflowId
 
     @Test
-    fun `a charged response answers the workflow's response with the fee as in the requirements' sample`() =
-        runBlocking<Unit> {
-            // given
-            val clients = FakeClients(attach = { response })
+    fun `a charged response answers the workflow's response with the fee as in the requirements' sample`() = runBlocking<Unit> {
+        // given
+        val clients = FakeClients(attach = { response })
 
-            // when
-            val submission = service(clients).submit(request)
+        // when
+        val submission = service(clients).submit(request)
 
-            // then
-            assertThat(submission).isEqualTo(answered)
-        }
+        // then
+        assertThat(submission).isEqualTo(answered)
+    }
 
     @ParameterizedTest(name = "stored {0} → answered {1}")
     @CsvSource("1.50, 1.5", "10.30, 10.3", "2.00, 2", "50.00, 50", "1.01, 1.01", "0.38, 0.38", "0.00, 0")
-    fun `answers the charged fee without trailing zeros, at the same value`(stored: BigDecimal, expected: String) =
-        runBlocking<Unit> {
-            // given
-            val clients = FakeClients(attach = { response.copy(fee = stored) })
+    fun `answers the charged fee without trailing zeros, at the same value`(stored: BigDecimal, expected: String) = runBlocking<Unit> {
+        // given
+        val clients = FakeClients(attach = { response.copy(fee = stored) })
 
-            // when
-            val fee = service(clients).submit(request).fee
+        // when
+        val fee = service(clients).submit(request).fee
 
-            // then
-            assertThat(fee.toPlainString()).isEqualTo(expected)
-            assertThat(fee).isEqualByComparingTo(stored)
-        }
-
-    @Test
-    fun `a new transaction id gets a fee record with a fresh workflow id, then its workflow under that id`() =
-        runBlocking<Unit> {
-            // given
-            val clients = FakeClients(attach = { response })
-
-            // when
-            service(clients).submit(request)
-
-            // then: the record is started before the workflow, with every request field
-            val workflowId = workflowId()
-            assertThat(UUID.fromString(workflowId).toString()).isEqualTo(workflowId)
-            assertThat(records.calls.map { it.name }).containsExactly("findCharged", "start")
-            assertThat(records.calls.last().transaction).isEqualTo(TransactionMapper().toTransaction(request))
-            assertThat(records.records["txn_001"]?.status).isEqualTo(FeeRecordStatus.PENDING)
-            assertThat(clients.submitted).containsExactly(workflowId to request)
-        }
+        // then
+        assertThat(fee.toPlainString()).isEqualTo(expected)
+        assertThat(fee).isEqualByComparingTo(stored)
+    }
 
     @Test
-    fun `every new transaction id gets its own workflow id`() =
-        runBlocking<Unit> {
-            // given
-            val clients = FakeClients(attach = { response })
-            val service = service(clients)
+    fun `a new transaction id gets a fee record with a fresh workflow id, then its workflow under that id`() = runBlocking<Unit> {
+        // given
+        val clients = FakeClients(attach = { response })
 
-            // when
-            service.submit(request)
-            service.submit(request.copy(transactionId = "txn_002"))
+        // when
+        service(clients).submit(request)
 
-            // then
-            val workflowIds = clients.submitted.map { it.first }
-            assertThat(workflowIds).doesNotHaveDuplicates().hasSize(2)
-        }
-
-    @Test
-    fun `a transaction id whose record was started earlier goes to that record's workflow, whatever its payload`() =
-        runBlocking<Unit> {
-            // given: an earlier request started the record, and its workflow is still running
-            records.records["txn_001"] = FeeRecord.pending("earlier-workflow")
-            val clients = FakeClients(attach = { response })
-            val changed = request.copy(amount = BigDecimal("2000"))
-
-            // when
-            val submission = service(clients).submit(changed)
-
-            // then
-            assertThat(submission).isEqualTo(answered)
-            assertThat(clients.submitted).containsExactly("earlier-workflow" to changed)
-            assertThat(records.records["txn_001"]).isEqualTo(FeeRecord.pending("earlier-workflow"))
-        }
+        // then: the record is started before the workflow, with every request field
+        val workflowId = workflowId()
+        assertThat(UUID.fromString(workflowId).toString()).isEqualTo(workflowId)
+        assertThat(records.calls.map { it.name }).containsExactly("findCharged", "start")
+        assertThat(records.calls.last().transaction).isEqualTo(TransactionMapper().toTransaction(request))
+        assertThat(records.records["txn_001"]?.status).isEqualTo(FeeRecordStatus.PENDING)
+        assertThat(clients.submitted).containsExactly(workflowId to request)
+    }
 
     @Test
-    fun `a record charged between the lookup and the start is answered without Restate, and cached`() =
-        runBlocking<Unit> {
-            // given: the lookup finds nothing charged, then the start meets the record another request just charged
-            val racing =
-                object : FeeRecordRepository by records {
-                    override suspend fun findCharged(transactionId: String): FeeResponse? = null
-                }
-            records.records["txn_001"] = FeeRecord.pending("earlier-workflow").charge(response)
-            val clients = FakeClients(attach = { error("Restate must not be called") })
-            val cacheProperties = cacheProperties(Duration.ofSeconds(1))
-            val service =
-                FeeService(
-                    requestValidator,
-                    TransactionMapper(),
-                    ChargedFees(cache, racing, cacheProperties),
-                    racing,
-                    clients,
-                    restateProperties(Duration.ofSeconds(5)),
-                    cacheProperties,
-                )
+    fun `every new transaction id gets its own workflow id`() = runBlocking<Unit> {
+        // given
+        val clients = FakeClients(attach = { response })
+        val service = service(clients)
 
-            // when
-            val submission = service.submit(request)
+        // when
+        service.submit(request)
+        service.submit(request.copy(transactionId = "txn_002"))
 
-            // then
-            assertThat(submission).isEqualTo(answered)
-            assertThat(clients.submitted).isEmpty()
-            assertThat(cache.getIfPresent("txn_001")).isEqualTo(response)
-        }
+        // then
+        val workflowIds = clients.submitted.map { it.first }
+        assertThat(workflowIds).doesNotHaveDuplicates().hasSize(2)
+    }
+
+    @Test
+    fun `a transaction id whose record was started earlier goes to that record's workflow, whatever its payload`() = runBlocking<Unit> {
+        // given: an earlier request started the record, and its workflow is still running
+        records.records["txn_001"] = FeeRecord.pending("earlier-workflow")
+        val clients = FakeClients(attach = { response })
+        val changed = request.copy(amount = BigDecimal("2000"))
+
+        // when
+        val submission = service(clients).submit(changed)
+
+        // then
+        assertThat(submission).isEqualTo(answered)
+        assertThat(clients.submitted).containsExactly("earlier-workflow" to changed)
+        assertThat(records.records["txn_001"]).isEqualTo(FeeRecord.pending("earlier-workflow"))
+    }
+
+    @Test
+    fun `a record charged between the lookup and the start is answered without Restate, and cached`() = runBlocking<Unit> {
+        // given: the lookup finds nothing charged, then the start meets the record another request just charged
+        val racing =
+            object : FeeRecordRepository by records {
+                override suspend fun findCharged(transactionId: String): FeeResponse? = null
+            }
+        records.records["txn_001"] = FeeRecord.pending("earlier-workflow").charge(response)
+        val clients = FakeClients(attach = { error("Restate must not be called") })
+        val cacheProperties = cacheProperties(Duration.ofSeconds(1))
+        val service =
+            FeeService(
+                requestValidator,
+                TransactionMapper(),
+                ChargedFees(cache, racing, cacheProperties),
+                racing,
+                clients,
+                restateProperties(Duration.ofSeconds(5)),
+                cacheProperties,
+            )
+
+        // when
+        val submission = service.submit(request)
+
+        // then
+        assertThat(submission).isEqualTo(answered)
+        assertThat(clients.submitted).isEmpty()
+        assertThat(cache.getIfPresent("txn_001")).isEqualTo(response)
+    }
 
     @Test
     fun `a malformed request is a 400 naming the field before Postgres or Restate is asked`() {
@@ -298,38 +291,36 @@ class FeeServiceTest {
         }
 
     @Test
-    fun `a charged transaction id missing from the cache is answered from Postgres without Restate, and cached`() =
-        runBlocking<Unit> {
-            // given: charged earlier, by this instance before a restart or by another one
-            records.records["txn_001"] = FeeRecord.pending("earlier-workflow").charge(response)
-            val clients = FakeClients(attach = { error("Restate must not be called") })
+    fun `a charged transaction id missing from the cache is answered from Postgres without Restate, and cached`() = runBlocking<Unit> {
+        // given: charged earlier, by this instance before a restart or by another one
+        records.records["txn_001"] = FeeRecord.pending("earlier-workflow").charge(response)
+        val clients = FakeClients(attach = { error("Restate must not be called") })
 
-            // when
-            val submission = service(clients).submit(request)
+        // when
+        val submission = service(clients).submit(request)
 
-            // then
-            assertThat(submission).isEqualTo(answered)
-            assertThat(records.calls.map { it.name }).containsExactly("findCharged")
-            assertThat(clients.submitted).isEmpty()
-            assertThat(cache.getIfPresent("txn_001")).isEqualTo(response)
-        }
+        // then
+        assertThat(submission).isEqualTo(answered)
+        assertThat(records.calls.map { it.name }).containsExactly("findCharged")
+        assertThat(clients.submitted).isEmpty()
+        assertThat(cache.getIfPresent("txn_001")).isEqualTo(response)
+    }
 
     @Test
-    fun `a charge from Restate is remembered, so the same transaction id sent again doesn't reach Restate`() =
-        runBlocking<Unit> {
-            // given
-            val clients = FakeClients(attach = { response })
-            val service = service(clients)
-            service.submit(request)
+    fun `a charge from Restate is remembered, so the same transaction id sent again doesn't reach Restate`() = runBlocking<Unit> {
+        // given
+        val clients = FakeClients(attach = { response })
+        val service = service(clients)
+        service.submit(request)
 
-            // when
-            val again = service.submit(request.copy(amount = BigDecimal("2000")))
+        // when
+        val again = service.submit(request.copy(amount = BigDecimal("2000")))
 
-            // then
-            assertThat(again).isEqualTo(answered)
-            assertThat(clients.submitted).hasSize(1)
-            assertThat(cache.getIfPresent("txn_001")).isEqualTo(response)
-        }
+        // then
+        assertThat(again).isEqualTo(answered)
+        assertThat(clients.submitted).hasSize(1)
+        assertThat(cache.getIfPresent("txn_001")).isEqualTo(response)
+    }
 
     @Test
     fun `a run not finished in time is not remembered`() {
@@ -343,20 +334,19 @@ class FeeServiceTest {
     }
 
     @Test
-    fun `a failed Postgres lookup leaves the decision to the start of the record`() =
-        runBlocking<Unit> {
-            // given: the read fails once, the insert works
-            val flaky = InMemoryFeeRecordRepository(failing = mapOf("findCharged" to IllegalStateException("database unreachable")))
-            val clients = FakeClients(attach = { response })
+    fun `a failed Postgres lookup leaves the decision to the start of the record`() = runBlocking<Unit> {
+        // given: the read fails once, the insert works
+        val flaky = InMemoryFeeRecordRepository(failing = mapOf("findCharged" to IllegalStateException("database unreachable")))
+        val clients = FakeClients(attach = { response })
 
-            // when
-            val submission = service(clients, feeRecords = flaky).submit(request)
+        // when
+        val submission = service(clients, feeRecords = flaky).submit(request)
 
-            // then
-            assertThat(submission).isEqualTo(answered)
-            assertThat(flaky.calls.map { it.name }).containsExactly("findCharged", "start")
-            assertThat(clients.submitted.map { it.first }).containsExactly(flaky.records["txn_001"]?.workflowId)
-        }
+        // then
+        assertThat(submission).isEqualTo(answered)
+        assertThat(flaky.calls.map { it.name }).containsExactly("findCharged", "start")
+        assertThat(clients.submitted.map { it.first }).containsExactly(flaky.records["txn_001"]?.workflowId)
+    }
 
     @Test
     fun `a failed start of the record is a 503, and Restate is not asked`() {
@@ -464,17 +454,16 @@ class FeeServiceTest {
     }
 
     @Test
-    fun `a run that finished just after the attach timeout answers its response, not 504`() =
-        runBlocking<Unit> {
-            // given: the attach outlasts the timeout, but Restate already has the output when asked
-            val clients = FakeClients(attach = { awaitCancellation() }, output = { response })
+    fun `a run that finished just after the attach timeout answers its response, not 504`() = runBlocking<Unit> {
+        // given: the attach outlasts the timeout, but Restate already has the output when asked
+        val clients = FakeClients(attach = { awaitCancellation() }, output = { response })
 
-            // when
-            val submission = service(clients, attachTimeout = Duration.ofMillis(50)).submit(request)
+        // when
+        val submission = service(clients, attachTimeout = Duration.ofMillis(50)).submit(request)
 
-            // then
-            assertThat(submission).isEqualTo(answered)
-        }
+        // then
+        assertThat(submission).isEqualTo(answered)
+    }
 
     @Test
     fun `an output request that fails after the attach timeout is a 503, not 504`() {
@@ -490,33 +479,31 @@ class FeeServiceTest {
     }
 
     @Test
-    fun `a run that finishes within the attach timeout never asks Restate for its output`() =
-        runBlocking<Unit> {
-            // given
-            val clients = FakeClients(attach = { response })
+    fun `a run that finishes within the attach timeout never asks Restate for its output`() = runBlocking<Unit> {
+        // given
+        val clients = FakeClients(attach = { response })
 
-            // when
-            service(clients).submit(request)
+        // when
+        service(clients).submit(request)
 
-            // then
-            assertThat(clients.outputs).isZero()
-        }
+        // then
+        assertThat(clients.outputs).isZero()
+    }
 
     @Test
-    fun `a request cancelled while it waits stays a cancellation and is not reported as a 503`() =
-        runBlocking<Unit> {
-            // given: the workflow was accepted but never finishes, and the caller is waiting for it
-            val clients = FakeClients(attach = { awaitCancellation() })
-            val submission = async { service(clients).submit(request) }
-            clients.attaching.await()
+    fun `a request cancelled while it waits stays a cancellation and is not reported as a 503`() = runBlocking<Unit> {
+        // given: the workflow was accepted but never finishes, and the caller is waiting for it
+        val clients = FakeClients(attach = { awaitCancellation() })
+        val submission = async { service(clients).submit(request) }
+        clients.attaching.await()
 
-            // when
-            submission.cancel()
-            val failure = runCatching { submission.await() }.exceptionOrNull()
+        // when
+        submission.cancel()
+        val failure = runCatching { submission.await() }.exceptionOrNull()
 
-            // then
-            assertThat(failure).isInstanceOf(CancellationException::class.java)
-        }
+        // then
+        assertThat(failure).isInstanceOf(CancellationException::class.java)
+    }
 
     /**
      * The ingress in memory: [submit] runs on every submission, which the fake records with its workflow id, and

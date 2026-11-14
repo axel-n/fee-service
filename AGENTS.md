@@ -75,8 +75,9 @@ Approach:
 - **Caffeine** for the local cache of charged fees in `FeeService` (`ChargedFees`)
 - Tests: JUnit 6, Mockito, Testcontainers 2, Cucumber 8
 - Formatting: ktlint through `ktlint-maven-plugin` (root `pom.xml`), with its default `ktlint_official` style. The root
-  `.editorconfig` changes one thing: a function signature that fits on one line stays on one line, instead of one line per
-  parameter from two parameters on. It checks main and test sources of both modules in the `validate` phase, so a format
+  `.editorconfig` changes two things: a function signature that fits on one line stays on one line, instead of one line
+  per parameter from two parameters on, and an expression after `=` starts on the same line (`val x = call {`,
+  `fun f(): T = try {`) instead of a line of its own. It checks main and test sources of both modules in the `validate` phase, so a format
   problem fails every build, `mvn test` included
 
 ## Hard rules

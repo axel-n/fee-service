@@ -142,35 +142,34 @@ class AppContainerIT {
     }
 
     /** Starts the packaged app on the network; it is ready once it registered its endpoint at [ADVERTISED_URL]. */
-    private fun startApp(): GenericContainer<*> =
-        GenericContainer(DockerImageName.parse(JAVA_IMAGE))
-            .withNetwork(network)
-            .withNetworkAliases(APP_ALIAS)
-            .withCopyFileToContainer(MountableFile.forHostPath(appJar), "/app/fee-service.jar")
-            .withCommand("java", "-jar", "/app/fee-service.jar")
-            .withEnv(
-                mapOf(
-                    "SERVER_PORT" to "$APP_PORT",
-                    "RESTATE_INGRESS_URL" to "http://$RESTATE_ALIAS:${RestateTestEnvironment.INGRESS_PORT}",
-                    "RESTATE_ADMIN_URL" to "http://$RESTATE_ALIAS:${RestateTestEnvironment.ADMIN_PORT}",
-                    "RESTATE_ENDPOINT_PORT" to "$ENDPOINT_PORT",
-                    "RESTATE_ADVERTISED_HOST" to APP_ALIAS,
-                    "DATABASE_URL" to
-                        "r2dbc:postgresql://$POSTGRES_ALIAS:${PostgresTestEnvironment.PORT}/${PostgresTestEnvironment.DATABASE}",
-                    "DATABASE_USERNAME" to PostgresTestEnvironment.USERNAME,
-                    "DATABASE_PASSWORD" to PostgresTestEnvironment.PASSWORD,
-                ),
-            ).withExposedPorts(APP_PORT)
-            .withLogConsumer(Slf4jLogConsumer(log).withPrefix("app"))
-            .waitingFor(
-                // (?s): a log line ends with its newline
-                Wait
-                    .forLogMessage("(?s).*Restate endpoint registered as ${Pattern.quote(ADVERTISED_URL)} .*", 1)
-                    .withStartupTimeout(Duration.ofMinutes(2)),
-            ).also {
-                apps += it
-                it.start()
-            }
+    private fun startApp(): GenericContainer<*> = GenericContainer(DockerImageName.parse(JAVA_IMAGE))
+        .withNetwork(network)
+        .withNetworkAliases(APP_ALIAS)
+        .withCopyFileToContainer(MountableFile.forHostPath(appJar), "/app/fee-service.jar")
+        .withCommand("java", "-jar", "/app/fee-service.jar")
+        .withEnv(
+            mapOf(
+                "SERVER_PORT" to "$APP_PORT",
+                "RESTATE_INGRESS_URL" to "http://$RESTATE_ALIAS:${RestateTestEnvironment.INGRESS_PORT}",
+                "RESTATE_ADMIN_URL" to "http://$RESTATE_ALIAS:${RestateTestEnvironment.ADMIN_PORT}",
+                "RESTATE_ENDPOINT_PORT" to "$ENDPOINT_PORT",
+                "RESTATE_ADVERTISED_HOST" to APP_ALIAS,
+                "DATABASE_URL" to
+                    "r2dbc:postgresql://$POSTGRES_ALIAS:${PostgresTestEnvironment.PORT}/${PostgresTestEnvironment.DATABASE}",
+                "DATABASE_USERNAME" to PostgresTestEnvironment.USERNAME,
+                "DATABASE_PASSWORD" to PostgresTestEnvironment.PASSWORD,
+            ),
+        ).withExposedPorts(APP_PORT)
+        .withLogConsumer(Slf4jLogConsumer(log).withPrefix("app"))
+        .waitingFor(
+            // (?s): a log line ends with its newline
+            Wait
+                .forLogMessage("(?s).*Restate endpoint registered as ${Pattern.quote(ADVERTISED_URL)} .*", 1)
+                .withStartupTimeout(Duration.ofMinutes(2)),
+        ).also {
+            apps += it
+            it.start()
+        }
 
     private fun api(app: GenericContainer<*>) = FeeApi(app.getMappedPort(APP_PORT), app.host)
 
@@ -194,12 +193,11 @@ class AppContainerIT {
         app.stop()
     }
 
-    private fun runStatus(workflowId: String): String? =
-        admin
-            .query("$RUN_STATUS 'FeeWorkflow/$workflowId/run'")
-            .singleOrNull()
-            ?.get("status")
-            ?.asText()
+    private fun runStatus(workflowId: String): String? = admin
+        .query("$RUN_STATUS 'FeeWorkflow/$workflowId/run'")
+        .singleOrNull()
+        ?.get("status")
+        ?.asText()
 
     // In the app's own Postgres, past the app: the PENDING record of the sample request, under a fresh workflow id
     private fun startRecord(transactionId: String): String {
@@ -225,17 +223,16 @@ class AppContainerIT {
     }
 
     // Read in the app's own Postgres, past the app
-    private fun chargedRecords(transactionId: String): Long =
-        runBlocking {
-            database
-                .selectCount()
-                .from(FEE_RECORD)
-                .where(FEE_RECORD.TRANSACTION_ID.eq(transactionId))
-                .and(FEE_RECORD.STATUS.eq(FeeRecordStatus.CHARGED.name))
-                .awaitSingle()
-                .value1()
-                .toLong()
-        }
+    private fun chargedRecords(transactionId: String): Long = runBlocking {
+        database
+            .selectCount()
+            .from(FEE_RECORD)
+            .where(FEE_RECORD.TRANSACTION_ID.eq(transactionId))
+            .and(FEE_RECORD.STATUS.eq(FeeRecordStatus.CHARGED.name))
+            .awaitSingle()
+            .value1()
+            .toLong()
+    }
 
     /** A call to Restate's ingress past the app, with [body] as JSON if given. */
     private fun ingress(method: String, path: String, body: Map<String, Any?>? = null): HttpResponse<String> {
@@ -254,16 +251,15 @@ class AppContainerIT {
 
     private fun newTransactionId() = "it-container-${UUID.randomUUID().toString().take(13)}"
 
-    private fun body(transactionId: String, type: String): Map<String, Any?> =
-        mapOf(
-            "transaction_id" to transactionId,
-            "amount" to BigDecimal("1000"),
-            "asset" to "USD",
-            "asset_type" to "FIAT",
-            "type" to type,
-            "state" to "SETTLED - PENDING FEE",
-            "created_at" to "2023-08-30 15:42:17.610059",
-        )
+    private fun body(transactionId: String, type: String): Map<String, Any?> = mapOf(
+        "transaction_id" to transactionId,
+        "amount" to BigDecimal("1000"),
+        "asset" to "USD",
+        "asset_type" to "FIAT",
+        "type" to type,
+        "state" to "SETTLED - PENDING FEE",
+        "created_at" to "2023-08-30 15:42:17.610059",
+    )
 
     companion object {
         private const val JAVA_IMAGE = "docker.io/library/eclipse-temurin:25-jre"

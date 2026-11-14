@@ -36,14 +36,13 @@ data class FeeProblem(
      * The [FeeException] the service raised, rebuilt from this body so a client can throw or match it; `null` when
      * [code] is missing or unknown, or a property the exception needs is absent.
      */
-    fun toException(): FeeException? =
-        when (errorCode()) {
-            FeeErrorCode.INVALID_REQUEST -> validation(ValidationException.Kind.INVALID)
-            FeeErrorCode.UNSUPPORTED_REQUEST -> validation(ValidationException.Kind.UNSUPPORTED)
-            FeeErrorCode.WORKFLOW_UNAVAILABLE -> WorkflowUnavailableException()
-            FeeErrorCode.WORKFLOW_TIMEOUT -> transactionId?.let { WorkflowTimeoutException(it) }
-            null -> null
-        }
+    fun toException(): FeeException? = when (errorCode()) {
+        FeeErrorCode.INVALID_REQUEST -> validation(ValidationException.Kind.INVALID)
+        FeeErrorCode.UNSUPPORTED_REQUEST -> validation(ValidationException.Kind.UNSUPPORTED)
+        FeeErrorCode.WORKFLOW_UNAVAILABLE -> WorkflowUnavailableException()
+        FeeErrorCode.WORKFLOW_TIMEOUT -> transactionId?.let { WorkflowTimeoutException(it) }
+        null -> null
+    }
 
     private fun validation(kind: ValidationException.Kind): ValidationException? {
         val text = message ?: detail

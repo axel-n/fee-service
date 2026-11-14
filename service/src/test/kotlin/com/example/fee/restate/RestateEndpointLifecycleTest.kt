@@ -251,19 +251,18 @@ class RestateEndpointLifecycleTest {
         assertThat(discover(port).statusCode()).isEqualTo(200)
     }
 
-    private fun lifecycle(endpointPort: Int) =
-        RestateEndpointLifecycle(
-            feeWorkflow = mock(FeeWorkflow::class.java),
-            deployments = deployments,
-            properties =
-                RestateProperties(
-                    ingressUrl = "http://localhost:8080",
-                    adminUrl = "http://localhost:9070",
-                    endpointPort = endpointPort,
-                    advertisedHost = ADVERTISED_HOST,
-                    attachTimeout = Duration.ofSeconds(10),
-                ),
-        )
+    private fun lifecycle(endpointPort: Int) = RestateEndpointLifecycle(
+        feeWorkflow = mock(FeeWorkflow::class.java),
+        deployments = deployments,
+        properties =
+            RestateProperties(
+                ingressUrl = "http://localhost:8080",
+                adminUrl = "http://localhost:9070",
+                endpointPort = endpointPort,
+                advertisedHost = ADVERTISED_HOST,
+                attachTimeout = Duration.ofSeconds(10),
+            ),
+    )
 
     /** Restate's admin API in memory: records registrations and removals, answers with the configured results. */
     private class FakeDeployments : RestateDeployments {
@@ -305,17 +304,16 @@ class RestateEndpointLifecycleTest {
 
         fun canBind(port: Int): Boolean = runCatching { ServerSocket().use { it.bind(InetSocketAddress(port)) } }.isSuccess
 
-        fun discover(port: Int): HttpResponse<String> =
-            HttpClient.newBuilder().version(HttpClient.Version.HTTP_1_1).build().use { client ->
-                client.send(
-                    HttpRequest
-                        .newBuilder(URI("http://localhost:$port/discover"))
-                        .header("Accept", DISCOVERY_MEDIA_TYPE)
-                        .timeout(Duration.ofSeconds(10))
-                        .GET()
-                        .build(),
-                    HttpResponse.BodyHandlers.ofString(),
-                )
-            }
+        fun discover(port: Int): HttpResponse<String> = HttpClient.newBuilder().version(HttpClient.Version.HTTP_1_1).build().use { client ->
+            client.send(
+                HttpRequest
+                    .newBuilder(URI("http://localhost:$port/discover"))
+                    .header("Accept", DISCOVERY_MEDIA_TYPE)
+                    .timeout(Duration.ofSeconds(10))
+                    .GET()
+                    .build(),
+                HttpResponse.BodyHandlers.ofString(),
+            )
+        }
     }
 }

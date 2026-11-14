@@ -17,6 +17,11 @@ build). Everything else here is followed by whoever writes the code, and checked
 
 - Code is ktlint-clean. Run `mvn ktlint:format`, then fix by hand what it can't, e.g. a file must be named after its
   single class (a test class takes its file's name, `FeeRuleTest`), and a KDoc can't be followed by a `//` comment.
+- Write a statement so it fits on one line instead of leaving ktlint to spread it out. When a call doesn't fit, ktlint
+  puts every argument on its own line, so shorten the call instead (for example, a shorter log message). Steps nested in
+  lambdas with a `?:` at the end go into a named private function, one `val` per step.
+- A null that ends the function is an early exit on a line of its own, not a `?: throw` inside another call:
+  `if (response == null) throw notFinished(…)`, then `return charged(response)`.
 - Idiomatic Kotlin: `val` over `var`, data classes for values, sealed types for closed hierarchies, no `!!`, no `lateinit`
   in production code.
 - A logger is a file-private top-level property, right after the imports and before the class and its KDoc:

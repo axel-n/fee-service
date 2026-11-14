@@ -23,10 +23,9 @@ class PercentageFee(
         requireRate(rate)
     }
 
-    override fun calculate(transaction: Transaction): FeeQuote =
-        FeeQuote(
-            fee = (transaction.amount * rate).roundedFor(transaction.asset),
-            rate = rate,
-            description = description(transaction.asset),
-        )
+    override fun calculate(transaction: Transaction): FeeQuote = FeeQuote(
+        fee = (transaction.amount * rate).roundedFor(transaction.asset),
+        rate = rate,
+        description = description(transaction.asset),
+    )
 }

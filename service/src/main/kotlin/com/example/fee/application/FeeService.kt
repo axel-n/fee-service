@@ -49,10 +49,11 @@ class FeeService(
     private val chargedFees: ChargedFees,
     private val feeRecords: FeeRecordRepository,
     private val feeWorkflowClients: FeeWorkflowClients,
-    private val restateProperties: RestateProperties,
+    restateProperties: RestateProperties,
     feeCacheProperties: FeeCacheProperties,
 ) {
-    private val databaseTimeout = feeCacheProperties.lookupTimeout
+    private val attachTimeout = restateProperties.attachTimeout.toKotlinDuration()
+    private val databaseTimeout = feeCacheProperties.lookupTimeout.toKotlinDuration()
 
     suspend fun submit(request: FeeRequest): FeeResponse {
         requestValidator.validate(request)?.let { throw rejected(it) }
@@ -65,22 +66,17 @@ class FeeService(
         val workflowId = record.workflowId
         log.info("Transaction {} is processed by workflow {}", transactionId, workflowId)
 
-        val attachTimeout = restateProperties.attachTimeout
-        val run = unavailableOnFailure("Restate call for workflow $workflowId") { feeWorkflowClients.submit(workflowId, request) }
-        val response =
-            unavailableOnFailure("Restate call for workflow $workflowId") {
-                withTimeoutOrNull(attachTimeout.toKotlinDuration()) { run.attach() } ?: run.output()
-            }
-        if (response == null) {
-            log.info(
-                "Restate reports workflow {} of transaction {} not finished (470) after {}; answering 504",
-                workflowId,
-                transactionId,
-                attachTimeout,
-            )
-            throw WorkflowTimeoutException(transactionId)
-        }
+        val response = unavailableOnFailure("Restate call for workflow $workflowId") { process(workflowId, request) }
+        if (response == null) throw notFinished(transactionId, workflowId)
         return charged(response)
+    }
+
+    // Submits the workflow, or joins the run an earlier request of the id submitted. After restate.attach-timeout,
+    // Restate's own answer decides: null only when it says the run hasn't finished (470).
+    private suspend fun process(workflowId: String, request: FeeRequest): FeeResponse? {
+        val run = feeWorkflowClients.submit(workflowId, request)
+        val attached = withTimeoutOrNull(attachTimeout) { run.attach() }
+        return attached ?: run.output()
     }
 
     // The id's fee record, started now with a new workflow_id, or the one an earlier request started. Bounded by
@@ -91,7 +87,7 @@ class FeeService(
                 "Request for transaction '${request.transactionId}' passed validation but could not be mapped"
             }
         return unavailableOnFailure("Starting the fee record of ${transaction.transactionId}") {
-            withTimeout(databaseTimeout.toKotlinDuration()) { feeRecords.start(transaction, UUID.randomUUID().toString()) }
+            withTimeout(databaseTimeout) { feeRecords.start(transaction, UUID.randomUUID().toString()) }
         }
     }
 
@@ -101,16 +97,15 @@ class FeeService(
     // A failed call means Postgres or Restate is unavailable, and so does a Postgres call that outlasted its timeout. A
     // cancellation of the caller isn't a failure: the caller went away, so it passes through untouched, as coroutines
     // require.
-    private suspend fun <T> unavailableOnFailure(call: String, action: suspend () -> T): T =
-        try {
-            action()
-        } catch (e: TimeoutCancellationException) {
-            throw unavailable(call, e)
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            throw unavailable(call, e)
-        }
+    private suspend fun <T> unavailableOnFailure(call: String, action: suspend () -> T): T = try {
+        action()
+    } catch (e: TimeoutCancellationException) {
+        throw unavailable(call, e)
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        throw unavailable(call, e)
+    }
 
     // The fee is stored at the asset's decimals (1.50); the API answers it without trailing zeros (1.5), as the
     // challenge's sample does. Same value, so nothing is rounded.
@@ -124,6 +119,11 @@ class FeeService(
                 ValidationError.Kind.UNSUPPORTED -> ValidationException.Kind.UNSUPPORTED
             }
         return ValidationException(error.field, error.value, error.message, kind)
+    }
+
+    private fun notFinished(transactionId: String, workflowId: String): FeeException {
+        log.info("Workflow {} of transaction {} not finished after {} (Restate: 470): 504", workflowId, transactionId, attachTimeout)
+        return WorkflowTimeoutException(transactionId)
     }
 
     private fun unavailable(call: String, cause: Throwable): FeeException {

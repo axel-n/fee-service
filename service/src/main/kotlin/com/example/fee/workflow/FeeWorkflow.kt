@@ -86,21 +86,19 @@ class FeeWorkflow(
 
     // FeeService validated the request before it submitted the run, so the mapper can't return null; if it does, that
     // is a bug: a plain exception, retried until Restate pauses the invocation.
-    private fun map(request: FeeRequest): Transaction =
-        checkNotNull(transactionMapper.toTransaction(request)) {
-            "Request for transaction '${request.transactionId}' passed validation but could not be mapped"
-        }
+    private fun map(request: FeeRequest): Transaction = checkNotNull(transactionMapper.toTransaction(request)) {
+        "Request for transaction '${request.transactionId}' passed validation but could not be mapped"
+    }
 
-    private fun response(transaction: Transaction, quote: FeeQuote) =
-        FeeResponse(
-            transactionId = transaction.transactionId,
-            amount = transaction.amount,
-            asset = transaction.asset.value,
-            type = transaction.type.value,
-            fee = quote.fee,
-            rate = quote.rate,
-            description = quote.description,
-        )
+    private fun response(transaction: Transaction, quote: FeeQuote) = FeeResponse(
+        transactionId = transaction.transactionId,
+        amount = transaction.amount,
+        asset = transaction.asset.value,
+        type = transaction.type.value,
+        fee = quote.fee,
+        rate = quote.rate,
+        description = quote.description,
+    )
 }
 
 /**

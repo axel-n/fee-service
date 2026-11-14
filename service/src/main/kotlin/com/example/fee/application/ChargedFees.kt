@@ -36,16 +36,15 @@ class ChargedFees(
     /** Keeps [response], the charged fee of its transaction, for the next request of the same `transaction_id`. */
     fun remember(response: FeeResponse) = cache.put(response.transactionId, response)
 
-    private suspend fun charged(transactionId: String): FeeResponse? =
-        try {
-            withTimeout(lookupTimeout.toKotlinDuration()) { feeRecords.findCharged(transactionId) }
-        } catch (_: TimeoutCancellationException) {
-            log.warn("Reading the fee record of {} took longer than {}", transactionId, lookupTimeout)
-            null
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            log.warn("Reading the fee record of {} failed: {}", transactionId, e.toString())
-            null
-        }
+    private suspend fun charged(transactionId: String): FeeResponse? = try {
+        withTimeout(lookupTimeout.toKotlinDuration()) { feeRecords.findCharged(transactionId) }
+    } catch (_: TimeoutCancellationException) {
+        log.warn("Reading the fee record of {} took longer than {}", transactionId, lookupTimeout)
+        null
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        log.warn("Reading the fee record of {} failed: {}", transactionId, e.toString())
+        null
+    }
 }

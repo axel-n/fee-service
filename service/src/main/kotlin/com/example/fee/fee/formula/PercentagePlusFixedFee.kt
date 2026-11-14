@@ -27,10 +27,9 @@ class PercentagePlusFixedFee(
         requireNonNegative("fixed", fixed)
     }
 
-    override fun calculate(transaction: Transaction): FeeQuote =
-        FeeQuote(
-            fee = (transaction.amount * rate + fixed).roundedFor(transaction.asset),
-            rate = rate,
-            description = description(transaction.asset),
-        )
+    override fun calculate(transaction: Transaction): FeeQuote = FeeQuote(
+        fee = (transaction.amount * rate + fixed).roundedFor(transaction.asset),
+        rate = rate,
+        description = description(transaction.asset),
+    )
 }

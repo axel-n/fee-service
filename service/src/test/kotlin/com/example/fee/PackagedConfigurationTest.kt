@@ -19,10 +19,9 @@ import java.time.Duration
  * real ones of the machine (the dev container sets `RESTATE_*`) can't change the result.
  */
 class PackagedConfigurationTest {
-    private fun packagedYaml(): OriginTrackedMapPropertySource =
-        YamlPropertySourceLoader()
-            .load("application.yml", ClassPathResource("application.yml"))
-            .single() as OriginTrackedMapPropertySource
+    private fun packagedYaml(): OriginTrackedMapPropertySource = YamlPropertySourceLoader()
+        .load("application.yml", ClassPathResource("application.yml"))
+        .single() as OriginTrackedMapPropertySource
 
     private fun environment(variables: Map<String, Any> = emptyMap()): ConfigurableEnvironment {
         val environment = object : AbstractEnvironment() {}

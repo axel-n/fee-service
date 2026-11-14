@@ -24,10 +24,9 @@ class FlatFee(
         requireNonNegative("fixed", fixed)
     }
 
-    override fun calculate(transaction: Transaction): FeeQuote =
-        FeeQuote(
-            fee = fixed.roundedFor(transaction.asset),
-            rate = BigDecimal.ZERO,
-            description = description(transaction.asset),
-        )
+    override fun calculate(transaction: Transaction): FeeQuote = FeeQuote(
+        fee = fixed.roundedFor(transaction.asset),
+        rate = BigDecimal.ZERO,
+        description = description(transaction.asset),
+    )
 }

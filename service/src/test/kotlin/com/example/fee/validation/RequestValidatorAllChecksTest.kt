@@ -192,16 +192,15 @@ class RequestValidatorAllChecksTest {
 
     companion object {
         @JvmStatic
-        fun structuralProblems(): List<Arguments> =
-            listOf(
-                problem("transaction_id") { it.copy(transactionId = null) },
-                problem("amount") { it.copy(amount = null) },
-                problem("created_at") { it.copy(createdAt = " ") },
-                problem("transaction_id") { it.copy(transactionId = "txn:001") },
-                problem("amount") { it.copy(amount = BigDecimal("-10.001")) },
-                problem("created_at") { it.copy(createdAt = "2023-08-30T15:42:17") },
-                problem("created_at") { it.copy(createdAt = "2099-01-01 00:00:00") },
-            )
+        fun structuralProblems(): List<Arguments> = listOf(
+            problem("transaction_id") { it.copy(transactionId = null) },
+            problem("amount") { it.copy(amount = null) },
+            problem("created_at") { it.copy(createdAt = " ") },
+            problem("transaction_id") { it.copy(transactionId = "txn:001") },
+            problem("amount") { it.copy(amount = BigDecimal("-10.001")) },
+            problem("created_at") { it.copy(createdAt = "2023-08-30T15:42:17") },
+            problem("created_at") { it.copy(createdAt = "2099-01-01 00:00:00") },
+        )
 
         private fun problem(field: String, broken: (FeeRequest) -> FeeRequest): Arguments = Arguments.of(field, broken)
     }

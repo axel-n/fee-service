@@ -47,12 +47,11 @@ class DurableTypesSerdeTest {
             )
 
         @JvmStatic
-        fun durableValues() =
-            listOf(
-                Arguments.of("FeeRequest (the workflow input)", request, FeeRequest::class.java),
-                Arguments.of("FeeRequest with missing fields", FeeRequest(transactionId = "txn_001"), FeeRequest::class.java),
-                Arguments.of("FeeResponse (the workflow output)", response, FeeResponse::class.java),
-                Arguments.of("FeeQuote", FeeQuote(BigDecimal("1.50"), BigDecimal("0.0015"), "Fee"), FeeQuote::class.java),
-            ) + WorkflowStep.entries.map { Arguments.of("WorkflowStep.$it", it, WorkflowStep::class.java) }
+        fun durableValues() = listOf(
+            Arguments.of("FeeRequest (the workflow input)", request, FeeRequest::class.java),
+            Arguments.of("FeeRequest with missing fields", FeeRequest(transactionId = "txn_001"), FeeRequest::class.java),
+            Arguments.of("FeeResponse (the workflow output)", response, FeeResponse::class.java),
+            Arguments.of("FeeQuote", FeeQuote(BigDecimal("1.50"), BigDecimal("0.0015"), "Fee"), FeeQuote::class.java),
+        ) + WorkflowStep.entries.map { Arguments.of("WorkflowStep.$it", it, WorkflowStep::class.java) }
     }
 }

@@ -22,12 +22,11 @@ object CreatedAtFormat {
             .withResolverStyle(ResolverStyle.STRICT)
 
     /** The parsed value, or `null` for null or anything not in the format (including impossible dates). Never throws. */
-    fun parseOrNull(raw: String?): LocalDateTime? =
-        raw?.let {
-            try {
-                LocalDateTime.parse(it, formatter)
-            } catch (_: DateTimeParseException) {
-                null
-            }
+    fun parseOrNull(raw: String?): LocalDateTime? = raw?.let {
+        try {
+            LocalDateTime.parse(it, formatter)
+        } catch (_: DateTimeParseException) {
+            null
         }
+    }
 }

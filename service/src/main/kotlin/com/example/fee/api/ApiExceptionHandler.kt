@@ -28,12 +28,11 @@ import tools.jackson.databind.exc.InvalidFormatException
 @RestControllerAdvice
 class ApiExceptionHandler : ResponseEntityExceptionHandler() {
     @ExceptionHandler(ValidationException::class)
-    fun handleValidation(exception: ValidationException): ProblemDetail =
-        problem(exception).apply {
-            setProperty(FIELD, exception.field)
-            setProperty(VALUE, exception.value)
-            setProperty(MESSAGE, exception.message)
-        }
+    fun handleValidation(exception: ValidationException): ProblemDetail = problem(exception).apply {
+        setProperty(FIELD, exception.field)
+        setProperty(VALUE, exception.value)
+        setProperty(MESSAGE, exception.message)
+    }
 
     /** A run Restate reports as not finished (470) after `restate.attach-timeout`: 504, naming the transaction to resend. */
     @ExceptionHandler(WorkflowTimeoutException::class)

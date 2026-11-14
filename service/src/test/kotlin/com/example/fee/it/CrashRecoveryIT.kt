@@ -127,36 +127,33 @@ class CrashRecoveryIT
             assertThat(record?.response?.fee).isEqualByComparingTo(BigDecimal("1.50"))
         }
 
-        private fun bodyOf(request: FeeRequest): Map<String, Any?> =
-            mapOf(
-                "transaction_id" to request.transactionId,
-                "amount" to request.amount,
-                "asset" to request.asset,
-                "asset_type" to request.assetType,
-                "type" to request.type,
-                "state" to request.state,
-                "created_at" to request.createdAt,
-            )
+        private fun bodyOf(request: FeeRequest): Map<String, Any?> = mapOf(
+            "transaction_id" to request.transactionId,
+            "amount" to request.amount,
+            "asset" to request.asset,
+            "asset_type" to request.assetType,
+            "type" to request.type,
+            "state" to request.state,
+            "created_at" to request.createdAt,
+        )
 
         private companion object {
             // Every step except DONE (it has no hook), on both sides: a new WorkflowStep gets its rows automatically
             @JvmStatic
-            fun boundaries(): Stream<Arguments> =
-                WorkflowStep.entries
-                    .filter { it != WorkflowStep.DONE }
-                    .flatMap { step ->
-                        FaultInjectingStepHook.Phase.entries.map { phase -> Arguments.of(step, phase) }
-                    }.stream()
+            fun boundaries(): Stream<Arguments> = WorkflowStep.entries
+                .filter { it != WorkflowStep.DONE }
+                .flatMap { step ->
+                    FaultInjectingStepHook.Phase.entries.map { phase -> Arguments.of(step, phase) }
+                }.stream()
 
-            fun validRequest(transactionId: String) =
-                FeeRequest(
-                    transactionId = transactionId,
-                    amount = BigDecimal("1000"),
-                    asset = "USD",
-                    assetType = "FIAT",
-                    type = "Mobile Top Up",
-                    state = "SETTLED - PENDING FEE",
-                    createdAt = "2023-08-30 15:42:17.610059",
-                )
+            fun validRequest(transactionId: String) = FeeRequest(
+                transactionId = transactionId,
+                amount = BigDecimal("1000"),
+                asset = "USD",
+                assetType = "FIAT",
+                type = "Mobile Top Up",
+                state = "SETTLED - PENDING FEE",
+                createdAt = "2023-08-30 15:42:17.610059",
+            )
         }
     }

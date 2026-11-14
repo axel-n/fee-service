@@ -95,26 +95,24 @@ class RequiredFieldsValidatorTest {
 
     companion object {
         @JvmStatic
-        fun withoutField(): Stream<Arguments> =
-            Stream.of(
-                Arguments.of("transaction_id", validRequest.copy(transactionId = null)),
-                Arguments.of("amount", validRequest.copy(amount = null)),
-                Arguments.of("asset", validRequest.copy(asset = null)),
-                Arguments.of("asset_type", validRequest.copy(assetType = null)),
-                Arguments.of("type", validRequest.copy(type = null)),
-                Arguments.of("state", validRequest.copy(state = null)),
-                Arguments.of("created_at", validRequest.copy(createdAt = null)),
-            )
+        fun withoutField(): Stream<Arguments> = Stream.of(
+            Arguments.of("transaction_id", validRequest.copy(transactionId = null)),
+            Arguments.of("amount", validRequest.copy(amount = null)),
+            Arguments.of("asset", validRequest.copy(asset = null)),
+            Arguments.of("asset_type", validRequest.copy(assetType = null)),
+            Arguments.of("type", validRequest.copy(type = null)),
+            Arguments.of("state", validRequest.copy(state = null)),
+            Arguments.of("created_at", validRequest.copy(createdAt = null)),
+        )
 
         @JvmStatic
-        fun withBlankField(): Stream<Arguments> =
-            Stream.of(
-                Arguments.of("transaction_id", validRequest.copy(transactionId = "  ")),
-                Arguments.of("asset", validRequest.copy(asset = "  ")),
-                Arguments.of("asset_type", validRequest.copy(assetType = "  ")),
-                Arguments.of("type", validRequest.copy(type = "  ")),
-                Arguments.of("state", validRequest.copy(state = "  ")),
-                Arguments.of("created_at", validRequest.copy(createdAt = "  ")),
-            )
+        fun withBlankField(): Stream<Arguments> = Stream.of(
+            Arguments.of("transaction_id", validRequest.copy(transactionId = "  ")),
+            Arguments.of("asset", validRequest.copy(asset = "  ")),
+            Arguments.of("asset_type", validRequest.copy(assetType = "  ")),
+            Arguments.of("type", validRequest.copy(type = "  ")),
+            Arguments.of("state", validRequest.copy(state = "  ")),
+            Arguments.of("created_at", validRequest.copy(createdAt = "  ")),
+        )
     }
 }

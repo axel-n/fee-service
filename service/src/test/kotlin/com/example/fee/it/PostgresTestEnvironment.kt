@@ -173,18 +173,17 @@ private const val POSTGRES_IMAGE = "docker.io/library/postgres:18.7"
  * accepts connections; its port is mapped to a free host port. [PostgresTestEnvironment] starts the shared one with it,
  * `AppContainerIT` its own. Top-level, so creating one doesn't start the shared Postgres.
  */
-fun postgresContainer(): GenericContainer<*> =
-    GenericContainer(DockerImageName.parse(POSTGRES_IMAGE))
-        .withEnv(
-            mapOf(
-                "POSTGRES_DB" to PostgresTestEnvironment.DATABASE,
-                "POSTGRES_USER" to PostgresTestEnvironment.USERNAME,
-                "POSTGRES_PASSWORD" to PostgresTestEnvironment.PASSWORD,
-            ),
-        ).withExposedPorts(PostgresTestEnvironment.PORT)
-        .waitingFor(
-            // the image starts a server to initialise the database, stops it, then starts the real one: the second "ready"
-            Wait
-                .forLogMessage(".*database system is ready to accept connections.*\\s", 2)
-                .withStartupTimeout(Duration.ofMinutes(2)),
-        )
+fun postgresContainer(): GenericContainer<*> = GenericContainer(DockerImageName.parse(POSTGRES_IMAGE))
+    .withEnv(
+        mapOf(
+            "POSTGRES_DB" to PostgresTestEnvironment.DATABASE,
+            "POSTGRES_USER" to PostgresTestEnvironment.USERNAME,
+            "POSTGRES_PASSWORD" to PostgresTestEnvironment.PASSWORD,
+        ),
+    ).withExposedPorts(PostgresTestEnvironment.PORT)
+    .waitingFor(
+        // the image starts a server to initialise the database, stops it, then starts the real one: the second "ready"
+        Wait
+            .forLogMessage(".*database system is ready to accept connections.*\\s", 2)
+            .withStartupTimeout(Duration.ofMinutes(2)),
+    )

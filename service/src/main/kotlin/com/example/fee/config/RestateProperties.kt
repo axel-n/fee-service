@@ -46,10 +46,9 @@ class RestateProperties(
         private fun <T : Any> present(key: String, value: T?): T =
             requireNotNull(value) { "$PREFIX.$key is missing; set it in application.yml" }
 
-        private fun positive(key: String, value: Duration?): Duration =
-            present(key, value).also {
-                require(it.isPositive) { "$PREFIX.$key must be positive, was $it" }
-            }
+        private fun positive(key: String, value: Duration?): Duration = present(key, value).also {
+            require(it.isPositive) { "$PREFIX.$key must be positive, was $it" }
+        }
 
         private fun host(key: String, value: String?): String {
             val host = present(key, value)

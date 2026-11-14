@@ -111,106 +111,103 @@ class RejectedIT
         private fun newTransactionId() = "it-rejected-${UUID.randomUUID().toString().take(13)}"
 
         // Only the fields that are set, so a missing field is absent from the JSON, as a client would leave it out
-        private fun bodyOf(request: FeeRequest): Map<String, Any?> =
-            mapOf(
-                "transaction_id" to request.transactionId,
-                "amount" to request.amount,
-                "asset" to request.asset,
-                "asset_type" to request.assetType,
-                "type" to request.type,
-                "state" to request.state,
-                "created_at" to request.createdAt,
-            ).filterValues { it != null }
+        private fun bodyOf(request: FeeRequest): Map<String, Any?> = mapOf(
+            "transaction_id" to request.transactionId,
+            "amount" to request.amount,
+            "asset" to request.asset,
+            "asset_type" to request.assetType,
+            "type" to request.type,
+            "state" to request.state,
+            "created_at" to request.createdAt,
+        ).filterValues { it != null }
 
         companion object {
-            private fun validRequest(transactionId: String) =
-                FeeRequest(
-                    transactionId = transactionId,
-                    amount = BigDecimal("1000"),
-                    asset = "USD",
-                    assetType = "FIAT",
-                    type = "Mobile Top Up",
-                    state = "SETTLED - PENDING FEE",
-                    createdAt = "2023-08-30 15:42:17.610059",
-                )
+            private fun validRequest(transactionId: String) = FeeRequest(
+                transactionId = transactionId,
+                amount = BigDecimal("1000"),
+                asset = "USD",
+                assetType = "FIAT",
+                type = "Mobile Top Up",
+                state = "SETTLED - PENDING FEE",
+                createdAt = "2023-08-30 15:42:17.610059",
+            )
 
             // Cases across the validators, in @Order order; the transaction_id has its own test above
             @JvmStatic
-            fun cases(): List<Case> =
-                listOf(
-                    Case(
-                        "required field missing",
-                        "asset",
-                        null,
-                        400,
-                        "Field 'asset' is required",
-                    ) { it.copy(asset = null) },
-                    Case(
-                        "required field blank",
-                        "state",
-                        "  ",
-                        400,
-                        "Field 'state' is required but was blank: '  '",
-                    ) { it.copy(state = "  ") },
-                    Case(
-                        "amount not positive",
-                        "amount",
-                        "0",
-                        400,
-                        "Invalid amount '0'. Allowed: a number greater than 0",
-                    ) { it.copy(amount = BigDecimal("0")) },
-                    Case(
-                        "created_at malformed",
-                        "created_at",
-                        "2023-08-30T15:42:17",
-                        400,
-                        "Invalid created_at '2023-08-30T15:42:17'. Allowed: 'yyyy-MM-dd HH:mm:ss' with 0 to 9 fraction " +
-                            "digits, e.g. '2023-08-30 15:42:17.610059'",
-                    ) { it.copy(createdAt = "2023-08-30T15:42:17") },
-                    Case(
-                        "created_at in the future",
-                        "created_at",
-                        "2999-01-01 00:00:00",
-                        400,
-                        "Invalid created_at '2999-01-01 00:00:00': it is in the future. Allowed: up to now, ",
-                        messageIsPrefix = true,
-                    ) { it.copy(createdAt = "2999-01-01 00:00:00") },
-                    Case(
-                        "state not supported",
-                        "state",
-                        "PENDING",
-                        422,
-                        "Unsupported state 'PENDING'. Supported: 'SETTLED - PENDING FEE'",
-                    ) { it.copy(state = "PENDING") },
-                    Case(
-                        "asset not supported",
-                        "asset",
-                        "BTC",
-                        422,
-                        "Unsupported asset 'BTC'. Supported: 'USD', 'EUR'",
-                    ) { it.copy(asset = "BTC") },
-                    Case(
-                        "asset_type not supported",
-                        "asset_type",
-                        "CRYPTO",
-                        422,
-                        "Unsupported asset_type 'CRYPTO'. Supported: 'FIAT'",
-                    ) { it.copy(assetType = "CRYPTO") },
-                    Case(
-                        "type not supported",
-                        "type",
-                        "Refund",
-                        422,
-                        "Unsupported type 'Refund'. Supported: 'Mobile Top Up', 'Bank Transfer', 'Merchant Payment', " +
-                            "'Cash Withdrawal'",
-                    ) { it.copy(type = "Refund") },
-                    Case(
-                        "amount has too many decimals",
-                        "amount",
-                        "10.001",
-                        422,
-                        "Amount 10.001 has 3 decimals. USD allows 2",
-                    ) { it.copy(amount = BigDecimal("10.001")) },
-                )
+            fun cases(): List<Case> = listOf(
+                Case(
+                    "required field missing",
+                    "asset",
+                    null,
+                    400,
+                    "Field 'asset' is required",
+                ) { it.copy(asset = null) },
+                Case(
+                    "required field blank",
+                    "state",
+                    "  ",
+                    400,
+                    "Field 'state' is required but was blank: '  '",
+                ) { it.copy(state = "  ") },
+                Case(
+                    "amount not positive",
+                    "amount",
+                    "0",
+                    400,
+                    "Invalid amount '0'. Allowed: a number greater than 0",
+                ) { it.copy(amount = BigDecimal("0")) },
+                Case(
+                    "created_at malformed",
+                    "created_at",
+                    "2023-08-30T15:42:17",
+                    400,
+                    "Invalid created_at '2023-08-30T15:42:17'. Allowed: 'yyyy-MM-dd HH:mm:ss' with 0 to 9 fraction " +
+                        "digits, e.g. '2023-08-30 15:42:17.610059'",
+                ) { it.copy(createdAt = "2023-08-30T15:42:17") },
+                Case(
+                    "created_at in the future",
+                    "created_at",
+                    "2999-01-01 00:00:00",
+                    400,
+                    "Invalid created_at '2999-01-01 00:00:00': it is in the future. Allowed: up to now, ",
+                    messageIsPrefix = true,
+                ) { it.copy(createdAt = "2999-01-01 00:00:00") },
+                Case(
+                    "state not supported",
+                    "state",
+                    "PENDING",
+                    422,
+                    "Unsupported state 'PENDING'. Supported: 'SETTLED - PENDING FEE'",
+                ) { it.copy(state = "PENDING") },
+                Case(
+                    "asset not supported",
+                    "asset",
+                    "BTC",
+                    422,
+                    "Unsupported asset 'BTC'. Supported: 'USD', 'EUR'",
+                ) { it.copy(asset = "BTC") },
+                Case(
+                    "asset_type not supported",
+                    "asset_type",
+                    "CRYPTO",
+                    422,
+                    "Unsupported asset_type 'CRYPTO'. Supported: 'FIAT'",
+                ) { it.copy(assetType = "CRYPTO") },
+                Case(
+                    "type not supported",
+                    "type",
+                    "Refund",
+                    422,
+                    "Unsupported type 'Refund'. Supported: 'Mobile Top Up', 'Bank Transfer', 'Merchant Payment', " +
+                        "'Cash Withdrawal'",
+                ) { it.copy(type = "Refund") },
+                Case(
+                    "amount has too many decimals",
+                    "amount",
+                    "10.001",
+                    422,
+                    "Amount 10.001 has 3 decimals. USD allows 2",
+                ) { it.copy(amount = BigDecimal("10.001")) },
+            )
         }
     }

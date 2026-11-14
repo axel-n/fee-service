@@ -28,13 +28,12 @@ data class ValidationError(
  */
 object UnsupportedValue {
     /** [raw] of [field] is not one of [supported]; the message names both, in the order given. */
-    fun error(field: String, raw: String, supported: List<String>): ValidationError =
-        ValidationError(
-            field,
-            raw,
-            "Unsupported $field ${ValueDisplay.quoted(raw)}. Supported: ${supported.joinToString(", ") { "'$it'" }}",
-            ValidationError.Kind.UNSUPPORTED,
-        )
+    fun error(field: String, raw: String, supported: List<String>): ValidationError = ValidationError(
+        field,
+        raw,
+        "Unsupported $field ${ValueDisplay.quoted(raw)}. Supported: ${supported.joinToString(", ") { "'$it'" }}",
+        ValidationError.Kind.UNSUPPORTED,
+    )
 }
 
 /**
@@ -46,12 +45,11 @@ object ValueDisplay {
     const val MAX_MESSAGE_LENGTH = 64
 
     /** The amount as JSON carries it: plain (`1000`, `-1.50`), scientific only beyond the serializer's bound. */
-    fun value(amount: BigDecimal): String =
-        if (amount.scale() in -PlainBigDecimal.MAX_PLAIN_SCALE..PlainBigDecimal.MAX_PLAIN_SCALE) {
-            amount.toPlainString()
-        } else {
-            amount.toString()
-        }
+    fun value(amount: BigDecimal): String = if (amount.scale() in -PlainBigDecimal.MAX_PLAIN_SCALE..PlainBigDecimal.MAX_PLAIN_SCALE) {
+        amount.toPlainString()
+    } else {
+        amount.toString()
+    }
 
     /** [raw] shortened to [MAX_MESSAGE_LENGTH] characters, for a message that shows it without quotes. */
     fun shortened(raw: String): String = if (raw.length <= MAX_MESSAGE_LENGTH) raw else "${raw.take(MAX_MESSAGE_LENGTH)}…"

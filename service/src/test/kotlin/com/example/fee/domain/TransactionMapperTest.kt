@@ -101,10 +101,9 @@ class TransactionMapperTest {
 
     companion object {
         @JvmStatic
-        fun supportedTypes(): List<Arguments> =
-            TransactionType.entries
-                .filter { it != TransactionType.UNKNOWN }
-                .map { Arguments.of(it.value, it) }
+        fun supportedTypes(): List<Arguments> = TransactionType.entries
+            .filter { it != TransactionType.UNKNOWN }
+            .map { Arguments.of(it.value, it) }
 
         @JvmStatic
         fun unvalidatedRequests(): List<Arguments> {

@@ -34,88 +34,83 @@ object StoredFeeRecords {
     private val PG_STAT_ACTIVITY = DSL.table(DSL.name("pg_stat_activity"))
 
     /** The record of [transactionId], or `null` if the id has no record. */
-    fun of(transactionId: String): FeeRecord? =
-        runBlocking {
-            PostgresTestEnvironment.dsl
-                .selectFrom(FEE_RECORD)
-                .where(FEE_RECORD.TRANSACTION_ID.eq(transactionId))
-                .awaitFirstOrNull()
-                ?.let { row ->
-                    val status = FeeRecordStatus.valueOf(row.status)
-                    val response =
-                        if (status == FeeRecordStatus.CHARGED) {
-                            FeeResponse(
-                                transactionId = transactionId,
-                                amount = row.amount,
-                                asset = row.asset,
-                                type = row.type,
-                                fee = checkNotNull(row.fee),
-                                rate = checkNotNull(row.rate),
-                                description = row.description.orEmpty(),
-                            )
-                        } else {
-                            null
-                        }
-                    FeeRecord(status, row.workflowId, response)
-                }
-        }
+    fun of(transactionId: String): FeeRecord? = runBlocking {
+        PostgresTestEnvironment.dsl
+            .selectFrom(FEE_RECORD)
+            .where(FEE_RECORD.TRANSACTION_ID.eq(transactionId))
+            .awaitFirstOrNull()
+            ?.let { row ->
+                val status = FeeRecordStatus.valueOf(row.status)
+                val response =
+                    if (status == FeeRecordStatus.CHARGED) {
+                        FeeResponse(
+                            transactionId = transactionId,
+                            amount = row.amount,
+                            asset = row.asset,
+                            type = row.type,
+                            fee = checkNotNull(row.fee),
+                            rate = checkNotNull(row.rate),
+                            description = row.description.orEmpty(),
+                        )
+                    } else {
+                        null
+                    }
+                FeeRecord(status, row.workflowId, response)
+            }
+    }
 
     /** The request fields stored in the record of [transactionId], or `null` if the id has no record. */
-    fun transactionOf(transactionId: String): Transaction? =
-        runBlocking {
-            PostgresTestEnvironment.dsl
-                .selectFrom(FEE_RECORD)
-                .where(FEE_RECORD.TRANSACTION_ID.eq(transactionId))
-                .awaitFirstOrNull()
-                ?.let { row ->
-                    Transaction(
-                        transactionId = transactionId,
-                        amount = row.amount,
-                        asset = Asset.fromValue(row.asset),
-                        assetType = AssetType.fromValue(row.assetType),
-                        type = TransactionType.fromValue(row.type),
-                        state = TransactionState.fromValue(row.state),
-                        createdAt = row.createdAt,
-                    )
-                }
-        }
+    fun transactionOf(transactionId: String): Transaction? = runBlocking {
+        PostgresTestEnvironment.dsl
+            .selectFrom(FEE_RECORD)
+            .where(FEE_RECORD.TRANSACTION_ID.eq(transactionId))
+            .awaitFirstOrNull()
+            ?.let { row ->
+                Transaction(
+                    transactionId = transactionId,
+                    amount = row.amount,
+                    asset = Asset.fromValue(row.asset),
+                    assetType = AssetType.fromValue(row.assetType),
+                    type = TransactionType.fromValue(row.type),
+                    state = TransactionState.fromValue(row.state),
+                    createdAt = row.createdAt,
+                )
+            }
+    }
 
     /**
      * The `created_at` of the record of [transactionId] as Postgres itself writes it (`2023-08-30 15:42:17.610059`), cast
      * to text in the database, so no Java date binding can shift it; `null` if the id has no record.
      */
-    fun createdAtAsStored(transactionId: String): String? =
-        runBlocking {
-            PostgresTestEnvironment.dsl
-                .select(FEE_RECORD.CREATED_AT.cast(SQLDataType.VARCHAR))
-                .from(FEE_RECORD)
-                .where(FEE_RECORD.TRANSACTION_ID.eq(transactionId))
-                .awaitFirstOrNull()
-                ?.value1()
-        }
+    fun createdAtAsStored(transactionId: String): String? = runBlocking {
+        PostgresTestEnvironment.dsl
+            .select(FEE_RECORD.CREATED_AT.cast(SQLDataType.VARCHAR))
+            .from(FEE_RECORD)
+            .where(FEE_RECORD.TRANSACTION_ID.eq(transactionId))
+            .awaitFirstOrNull()
+            ?.value1()
+    }
 
     /** When the record of [transactionId] was started and charged, or `null` if the id has no record. */
-    fun timesOf(transactionId: String): StoredTimes? =
-        runBlocking {
-            PostgresTestEnvironment.dsl
-                .select(FEE_RECORD.STARTED_AT, FEE_RECORD.CHARGED_AT)
-                .from(FEE_RECORD)
-                .where(FEE_RECORD.TRANSACTION_ID.eq(transactionId))
-                .awaitFirstOrNull()
-                ?.let { (startedAt, chargedAt) -> StoredTimes(checkNotNull(startedAt), chargedAt) }
-        }
+    fun timesOf(transactionId: String): StoredTimes? = runBlocking {
+        PostgresTestEnvironment.dsl
+            .select(FEE_RECORD.STARTED_AT, FEE_RECORD.CHARGED_AT)
+            .from(FEE_RECORD)
+            .where(FEE_RECORD.TRANSACTION_ID.eq(transactionId))
+            .awaitFirstOrNull()
+            ?.let { (startedAt, chargedAt) -> StoredTimes(checkNotNull(startedAt), chargedAt) }
+    }
 
     /** How many rows `fee_record` holds for [transactionId]: 0 or 1, the primary key allows no more. */
-    fun count(transactionId: String): Long =
-        runBlocking {
-            PostgresTestEnvironment.dsl
-                .selectCount()
-                .from(FEE_RECORD)
-                .where(FEE_RECORD.TRANSACTION_ID.eq(transactionId))
-                .awaitSingle()
-                .value1()
-                .toLong()
-        }
+    fun count(transactionId: String): Long = runBlocking {
+        PostgresTestEnvironment.dsl
+            .selectCount()
+            .from(FEE_RECORD)
+            .where(FEE_RECORD.TRANSACTION_ID.eq(transactionId))
+            .awaitSingle()
+            .value1()
+            .toLong()
+    }
 
     /**
      * Inserts a `PENDING` record of [transactionId] (the requirements' sample request) under a fresh `workflow_id`, and
@@ -184,16 +179,15 @@ object StoredFeeRecords {
         private val backendPid: Int,
     ) : AutoCloseable {
         /** How many statements of other connections wait for this transaction, such as an insert of the same id. */
-        fun blockedStatements(): Long =
-            runBlocking {
-                PostgresTestEnvironment.dsl
-                    .selectCount()
-                    .from(PG_STAT_ACTIVITY)
-                    .where(DSL.condition(BLOCKED_BY, DSL.value(backendPid)))
-                    .awaitSingle()
-                    .value1()
-                    .toLong()
-            }
+        fun blockedStatements(): Long = runBlocking {
+            PostgresTestEnvironment.dsl
+                .selectCount()
+                .from(PG_STAT_ACTIVITY)
+                .where(DSL.condition(BLOCKED_BY, DSL.value(backendPid)))
+                .awaitSingle()
+                .value1()
+                .toLong()
+        }
 
         /** Commits the record: every connection sees it from now on. */
         fun commit() {

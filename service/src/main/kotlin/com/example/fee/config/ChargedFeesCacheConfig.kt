@@ -10,10 +10,9 @@ import org.springframework.context.annotation.Configuration
 @Configuration(proxyBeanMethods = false)
 class ChargedFeesCacheConfig {
     @Bean
-    fun chargedFeesCache(properties: FeeCacheProperties): Cache<String, FeeResponse> =
-        Caffeine
-            .newBuilder()
-            .maximumSize(properties.maximumSize)
-            .expireAfterWrite(properties.expireAfterWrite)
-            .build()
+    fun chargedFeesCache(properties: FeeCacheProperties): Cache<String, FeeResponse> = Caffeine
+        .newBuilder()
+        .maximumSize(properties.maximumSize)
+        .expireAfterWrite(properties.expireAfterWrite)
+        .build()
 }

@@ -172,12 +172,11 @@ class RestateEndpointLifecycle(
                 }
             }
 
-            private fun <T> unwrapping(call: () -> T): T =
-                try {
-                    call()
-                } catch (e: InvocationTargetException) {
-                    throw e.targetException ?: e
-                }
+            private fun <T> unwrapping(call: () -> T): T = try {
+                call()
+            } catch (e: InvocationTargetException) {
+                throw e.targetException ?: e
+            }
         }
     }
 }

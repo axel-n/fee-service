@@ -36,29 +36,27 @@ internal val validRequest =
     )
 
 /** A [FeeCalculator] with the four production rules, as Spring builds it. */
-internal fun allRulesCalculator(): FeeCalculator =
-    FeeCalculator(
-        listOf(
-            MobileTopUpFeeRule(MobileTopUpFeeProperties(BigDecimal("0.0015"))),
-            BankTransferFeeRule(BankTransferFeeProperties(BigDecimal("0.005"), BigDecimal("1.00"))),
-            MerchantPaymentFeeRule(MerchantPaymentFeeProperties(BigDecimal("0.01"), BigDecimal("0.30"))),
-            CashWithdrawalFeeRule(CashWithdrawalFeeProperties(BigDecimal("2.00"))),
-        ),
-    )
+internal fun allRulesCalculator(): FeeCalculator = FeeCalculator(
+    listOf(
+        MobileTopUpFeeRule(MobileTopUpFeeProperties(BigDecimal("0.0015"))),
+        BankTransferFeeRule(BankTransferFeeProperties(BigDecimal("0.005"), BigDecimal("1.00"))),
+        MerchantPaymentFeeRule(MerchantPaymentFeeProperties(BigDecimal("0.01"), BigDecimal("0.30"))),
+        CashWithdrawalFeeRule(CashWithdrawalFeeProperties(BigDecimal("2.00"))),
+    ),
+)
 
 /** A [RequestValidator] with the 10 production validators, as Spring builds it; `created_at` is checked against [clock]. */
-internal fun allChecksRequestValidator(clock: Clock): RequestValidator =
-    RequestValidator(
-        listOf(
-            RequiredFieldsValidator(),
-            TransactionIdValidator(),
-            AmountValidator(),
-            CreatedAtValidator(clock),
-            StateValidator(),
-            AssetValidator(),
-            AssetTypeValidator(),
-            TransactionTypeValidator(allRulesCalculator()),
-            AmountScaleValidator(),
-            MaxAmountValidator(),
-        ),
-    )
+internal fun allChecksRequestValidator(clock: Clock): RequestValidator = RequestValidator(
+    listOf(
+        RequiredFieldsValidator(),
+        TransactionIdValidator(),
+        AmountValidator(),
+        CreatedAtValidator(clock),
+        StateValidator(),
+        AssetValidator(),
+        AssetTypeValidator(),
+        TransactionTypeValidator(allRulesCalculator()),
+        AmountScaleValidator(),
+        MaxAmountValidator(),
+    ),
+)

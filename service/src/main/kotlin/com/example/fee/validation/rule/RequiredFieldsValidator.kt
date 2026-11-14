@@ -23,14 +23,13 @@ class RequiredFieldsValidator : TransactionValidator {
         }
     }
 
-    private fun textFields(request: FeeRequest): List<Pair<String, String?>> =
-        listOf(
-            "asset" to request.asset,
-            "asset_type" to request.assetType,
-            "type" to request.type,
-            "state" to request.state,
-            "created_at" to request.createdAt,
-        )
+    private fun textFields(request: FeeRequest): List<Pair<String, String?>> = listOf(
+        "asset" to request.asset,
+        "asset_type" to request.assetType,
+        "type" to request.type,
+        "state" to request.state,
+        "created_at" to request.createdAt,
+    )
 
     private fun missing(field: String, raw: String?): ValidationError {
         val message =

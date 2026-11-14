@@ -56,14 +56,13 @@ object RestateTestEnvironment {
      * variables (`RESTATE_INGRESS_URL`, …) and config files, so a developer's local settings can't point the tests at
      * another Restate.
      */
-    fun restateProperties(): Map<String, String> =
-        mapOf(
-            "restate.ingress-url" to ingressUrl,
-            "restate.admin-url" to adminUrl,
-            "restate.endpoint-port" to endpointPort.toString(),
-            "restate.advertised-host" to ADVERTISED_HOST,
-            "restate.attach-timeout" to "30s",
-        )
+    fun restateProperties(): Map<String, String> = mapOf(
+        "restate.ingress-url" to ingressUrl,
+        "restate.admin-url" to adminUrl,
+        "restate.endpoint-port" to endpointPort.toString(),
+        "restate.advertised-host" to ADVERTISED_HOST,
+        "restate.attach-timeout" to "30s",
+    )
 
     fun registerProperties(registry: DynamicPropertyRegistry) {
         restateProperties().forEach { (key, value) -> registry.add(key) { value } }
@@ -94,12 +93,11 @@ private const val RESTATE_IMAGE = "docker.io/restatedev/restate:1.8.1"
  * mapped to free host ports. [RestateTestEnvironment] starts the shared one with it, `AppContainerIT` its own. Top-level,
  * so creating one doesn't start the shared Restate.
  */
-fun restateContainer(): GenericContainer<*> =
-    GenericContainer(DockerImageName.parse(RESTATE_IMAGE))
-        .withExposedPorts(RestateTestEnvironment.INGRESS_PORT, RestateTestEnvironment.ADMIN_PORT)
-        .waitingFor(
-            WaitAllStrategy()
-                .withStrategy(Wait.forHttp("/health").forPort(RestateTestEnvironment.ADMIN_PORT).forStatusCode(200))
-                .withStrategy(Wait.forHttp("/restate/health").forPort(RestateTestEnvironment.INGRESS_PORT).forStatusCode(200))
-                .withStartupTimeout(Duration.ofMinutes(2)),
-        )
+fun restateContainer(): GenericContainer<*> = GenericContainer(DockerImageName.parse(RESTATE_IMAGE))
+    .withExposedPorts(RestateTestEnvironment.INGRESS_PORT, RestateTestEnvironment.ADMIN_PORT)
+    .waitingFor(
+        WaitAllStrategy()
+            .withStrategy(Wait.forHttp("/health").forPort(RestateTestEnvironment.ADMIN_PORT).forStatusCode(200))
+            .withStrategy(Wait.forHttp("/restate/health").forPort(RestateTestEnvironment.INGRESS_PORT).forStatusCode(200))
+            .withStartupTimeout(Duration.ofMinutes(2)),
+    )

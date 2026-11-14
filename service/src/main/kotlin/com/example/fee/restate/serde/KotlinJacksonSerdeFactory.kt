@@ -21,12 +21,11 @@ import kotlin.reflect.jvm.javaType
  */
 class KotlinJacksonSerdeFactory : JacksonSerdeFactory() {
     @Suppress("UNCHECKED_CAST")
-    override fun <T : Any?> create(typeTag: TypeTag<T>): Serde<T> =
-        when {
-            typeTag !is KtTypeTag<*> -> super.create(typeTag)
-            typeTag.type == Unit::class -> KotlinSerializationSerdeFactory.UNIT as Serde<T>
-            else -> create(JavaTypeRef<T>(typeTag.kotlinType?.javaType ?: typeTag.type.java))
-        }
+    override fun <T : Any?> create(typeTag: TypeTag<T>): Serde<T> = when {
+        typeTag !is KtTypeTag<*> -> super.create(typeTag)
+        typeTag.type == Unit::class -> KotlinSerializationSerdeFactory.UNIT as Serde<T>
+        else -> create(JavaTypeRef<T>(typeTag.kotlinType?.javaType ?: typeTag.type.java))
+    }
 
     // TypeRef reads its type from a subclass's generic signature; this one takes it from Kotlin reflection instead.
     private class JavaTypeRef<T>(

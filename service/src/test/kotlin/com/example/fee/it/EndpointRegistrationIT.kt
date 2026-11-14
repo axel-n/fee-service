@@ -55,11 +55,10 @@ class EndpointRegistrationIT
         private fun registered(): RestateAdminApi.Deployment? =
             admin.deployments().singleOrNull { it.uri?.removeSuffix("/") == RestateTestEnvironment.advertisedUrl }
 
-        private fun unfinishedInvocations(): Long =
-            admin
-                .query(UNFINISHED_INVOCATIONS)
-                .single()["unfinished"]
-                .asLong()
+        private fun unfinishedInvocations(): Long = admin
+            .query(UNFINISHED_INVOCATIONS)
+            .single()["unfinished"]
+            .asLong()
 
         private companion object {
             const val UNFINISHED_INVOCATIONS = "SELECT count(*) AS unfinished FROM sys_invocation WHERE status <> 'completed'"

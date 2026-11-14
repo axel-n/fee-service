@@ -41,14 +41,13 @@ class RestatePropertiesBindingTest {
             Arguments.of(variable, value, setting, expected)
 
         @JvmStatic
-        fun overrides(): List<Arguments> =
-            listOf(
-                override("RESTATE_INGRESS_URL", "http://restate:8080", { it.ingressUrl }, "http://restate:8080"),
-                override("RESTATE_ADMIN_URL", "http://restate:9070", { it.adminUrl }, "http://restate:9070"),
-                override("RESTATE_ENDPOINT_PORT", "19080", { it.endpointPort }, 19080),
-                override("RESTATE_ADVERTISED_HOST", "dev", { it.advertisedHost }, "dev"),
-                override("RESTATE_ATTACH_TIMEOUT", "45s", { it.attachTimeout }, Duration.ofSeconds(45)),
-            )
+        fun overrides(): List<Arguments> = listOf(
+            override("RESTATE_INGRESS_URL", "http://restate:8080", { it.ingressUrl }, "http://restate:8080"),
+            override("RESTATE_ADMIN_URL", "http://restate:9070", { it.adminUrl }, "http://restate:9070"),
+            override("RESTATE_ENDPOINT_PORT", "19080", { it.endpointPort }, 19080),
+            override("RESTATE_ADVERTISED_HOST", "dev", { it.advertisedHost }, "dev"),
+            override("RESTATE_ATTACH_TIMEOUT", "45s", { it.attachTimeout }, Duration.ofSeconds(45)),
+        )
     }
 
     private fun bind(environment: ConfigurableEnvironment): RestateProperties =

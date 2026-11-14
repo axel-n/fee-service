@@ -43,17 +43,16 @@ class TestCoverageAuditTest {
         ProjectLayout.rootDir.resolve("$module/src/$sourceSet/kotlin/com/example/fee")
 
     // "<module>/<path>" of every Kotlin file of the source set ("main" or "test"), in every module
-    private fun kotlinFiles(sourceSet: String): List<String> =
-        modules
-            .flatMap { module ->
-                val root = sourceRoot(module, sourceSet)
-                Files.walk(root).use { paths ->
-                    paths
-                        .filter { it.isRegularFile() && it.toString().endsWith(".kt") }
-                        .map { "$module/" + it.relativeTo(root).invariantSeparatorsPathString }
-                        .toList()
-                }
-            }.sorted()
+    private fun kotlinFiles(sourceSet: String): List<String> = modules
+        .flatMap { module ->
+            val root = sourceRoot(module, sourceSet)
+            Files.walk(root).use { paths ->
+                paths
+                    .filter { it.isRegularFile() && it.toString().endsWith(".kt") }
+                    .map { "$module/" + it.relativeTo(root).invariantSeparatorsPathString }
+                    .toList()
+            }
+        }.sorted()
 
     private fun testFile(file: String): Path = sourceRoot(file.substringBefore('/'), "test").resolve(file.substringAfter('/'))
 

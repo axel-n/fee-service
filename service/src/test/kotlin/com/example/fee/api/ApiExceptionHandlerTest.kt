@@ -276,10 +276,9 @@ class ApiExceptionHandlerTest(
         }
     }
 
-    private fun properties(exception: FeeException): List<Any?> =
-        when (exception) {
-            is ValidationException -> listOf(exception.field, exception.value, exception.kind)
-            is WorkflowUnavailableException -> emptyList()
-            is WorkflowTimeoutException -> listOf(exception.transactionId)
-        }
+    private fun properties(exception: FeeException): List<Any?> = when (exception) {
+        is ValidationException -> listOf(exception.field, exception.value, exception.kind)
+        is WorkflowUnavailableException -> emptyList()
+        is WorkflowTimeoutException -> listOf(exception.transactionId)
+    }
 }

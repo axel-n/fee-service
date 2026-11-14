@@ -27,10 +27,9 @@ class PercentageWithMinimumFee(
         requireNonNegative("min", min)
     }
 
-    override fun calculate(transaction: Transaction): FeeQuote =
-        FeeQuote(
-            fee = (transaction.amount * rate).max(min).roundedFor(transaction.asset),
-            rate = rate,
-            description = description(transaction.asset),
-        )
+    override fun calculate(transaction: Transaction): FeeQuote = FeeQuote(
+        fee = (transaction.amount * rate).max(min).roundedFor(transaction.asset),
+        rate = rate,
+        description = description(transaction.asset),
+    )
 }

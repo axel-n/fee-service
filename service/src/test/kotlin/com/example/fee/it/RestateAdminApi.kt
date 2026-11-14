@@ -27,14 +27,13 @@ class RestateAdminApi(
         val services: Map<String, Int>,
     )
 
-    fun deployments(): List<Deployment> =
-        get("/deployments")["deployments"].map { deployment ->
-            Deployment(
-                id = deployment["id"].asText(),
-                uri = deployment["uri"]?.takeUnless { it.isNull }?.asText(),
-                services = deployment["services"].associate { it["name"].asText() to it["revision"].asInt() },
-            )
-        }
+    fun deployments(): List<Deployment> = get("/deployments")["deployments"].map { deployment ->
+        Deployment(
+            id = deployment["id"].asText(),
+            uri = deployment["uri"]?.takeUnless { it.isNull }?.asText(),
+            services = deployment["services"].associate { it["name"].asText() to it["revision"].asInt() },
+        )
+    }
 
     /**
      * Purges a completed invocation: its journal, output and, for a workflow, its state and key, as if retention had

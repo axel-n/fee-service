@@ -133,24 +133,22 @@ class PostgresFeeRecordRepository(
 
     override suspend fun findCharged(transactionId: String): FeeResponse? = find(transactionId)?.response
 
-    private suspend fun find(transactionId: String): FeeRecord? =
-        failingAs("Reading", transactionId) {
-            dsl
-                .selectFrom(FEE_RECORD)
-                .where(FEE_RECORD.TRANSACTION_ID.eq(transactionId))
-                .awaitFirstOrNull()
-        }?.let(::record)
+    private suspend fun find(transactionId: String): FeeRecord? = failingAs("Reading", transactionId) {
+        dsl
+            .selectFrom(FEE_RECORD)
+            .where(FEE_RECORD.TRANSACTION_ID.eq(transactionId))
+            .awaitFirstOrNull()
+    }?.let(::record)
 
     // jOOQ's message of a query that failed before it ran (no connection) is the whole statement with its values, over
     // many lines; Restate stores it as the invocation's failure and the log repeats it on every retry. The operation, the
     // id and the cause say what failed.
-    private inline fun <T> failingAs(operation: String, transactionId: String, query: () -> T): T =
-        try {
-            query()
-        } catch (failure: DataAccessException) {
-            val cause = failure.cause ?: failure
-            throw DataAccessException("$operation the fee record of '$transactionId' failed: ${cause.message}", cause)
-        }
+    private inline fun <T> failingAs(operation: String, transactionId: String, query: () -> T): T = try {
+        query()
+    } catch (failure: DataAccessException) {
+        val cause = failure.cause ?: failure
+        throw DataAccessException("$operation the fee record of '$transactionId' failed: ${cause.message}", cause)
+    }
 
     // The workflow, and the charged response once CHARGED
     private fun record(row: FeeRecordRecord): FeeRecord {

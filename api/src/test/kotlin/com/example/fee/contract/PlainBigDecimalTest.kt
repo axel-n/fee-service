@@ -77,39 +77,36 @@ class PlainBigDecimalTest {
             ContractMapper.entries.flatMap { mapper -> cases.map { Arguments.of(mapper, *it.toTypedArray()) } }
 
         @JvmStatic
-        fun plainNumbers(): List<Arguments> =
-            forEachMapper(
-                listOf("1E+3", "1000"),
-                listOf("1E-7", "0.0000001"),
-                listOf("1.50", "1.50"),
-                listOf("0.0015", "0.0015"),
-                listOf("-2.00", "-2.00"),
-                listOf("0", "0"),
-                listOf("0E-4", "0.0000"),
-                listOf("0E+3", "0"),
-                listOf("3000000000", "3000000000"),
-                listOf("3E+9", "3000000000"),
-                listOf("3000000000.01", "3000000000.01"),
-                listOf("-1E+10", "-10000000000"),
-            )
+        fun plainNumbers(): List<Arguments> = forEachMapper(
+            listOf("1E+3", "1000"),
+            listOf("1E-7", "0.0000001"),
+            listOf("1.50", "1.50"),
+            listOf("0.0015", "0.0015"),
+            listOf("-2.00", "-2.00"),
+            listOf("0", "0"),
+            listOf("0E-4", "0.0000"),
+            listOf("0E+3", "0"),
+            listOf("3000000000", "3000000000"),
+            listOf("3E+9", "3000000000"),
+            listOf("3000000000.01", "3000000000.01"),
+            listOf("-1E+10", "-10000000000"),
+        )
 
         @JvmStatic
-        fun scaleBounds(): List<Arguments> =
-            forEachMapper(
-                listOf("1E+9999", 10_000),
-                listOf("1E-9999", 10_001),
-                listOf("-1E+9999", 10_001),
-            )
+        fun scaleBounds(): List<Arguments> = forEachMapper(
+            listOf("1E+9999", 10_000),
+            listOf("1E-9999", 10_001),
+            listOf("-1E+9999", 10_001),
+        )
 
         @JvmStatic
-        fun extremeScales(): List<Arguments> =
-            forEachMapper(
-                listOf("1E+999999999"),
-                listOf("1E-10000"),
-                listOf("1E+10000"),
-                listOf("-1E+10000"),
-                listOf("1E-999999999"),
-                listOf("-1E-999999999"),
-            )
+        fun extremeScales(): List<Arguments> = forEachMapper(
+            listOf("1E+999999999"),
+            listOf("1E-10000"),
+            listOf("1E+10000"),
+            listOf("-1E+10000"),
+            listOf("1E-999999999"),
+            listOf("-1E-999999999"),
+        )
     }
 }

@@ -177,14 +177,13 @@ class RestateDeploymentsTest {
         assertThatThrownBy { unreachable.register("http://dev:9080") }.isInstanceOf(Exception::class.java)
     }
 
-    private fun properties(adminUrl: String) =
-        RestateProperties(
-            ingressUrl = "http://localhost:8080",
-            adminUrl = adminUrl,
-            endpointPort = 9_080,
-            advertisedHost = "dev",
-            attachTimeout = Duration.ofSeconds(10),
-        )
+    private fun properties(adminUrl: String) = RestateProperties(
+        ingressUrl = "http://localhost:8080",
+        adminUrl = adminUrl,
+        endpointPort = 9_080,
+        advertisedHost = "dev",
+        attachTimeout = Duration.ofSeconds(10),
+    )
 
     /** Restate's admin API on a free port: answers every request with the one configured answer and records it. */
     private class FakeAdminApi {

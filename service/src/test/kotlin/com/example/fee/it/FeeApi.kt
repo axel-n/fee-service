@@ -34,13 +34,12 @@ class FeeApi(
     private val mapper = ObjectMapper().enable(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS)
 
     /** `POST /transaction/fee` (or another [path] of the app) with [body] as the JSON request. */
-    fun submit(body: Map<String, Any?>, path: String = FEE_PATH): Response =
-        send(
-            HttpRequest
-                .newBuilder(URI("$root$path"))
-                .header("Content-Type", "application/json")
-                .POST(HttpRequest.BodyPublishers.ofString(mapper.writeValueAsString(body))),
-        )
+    fun submit(body: Map<String, Any?>, path: String = FEE_PATH): Response = send(
+        HttpRequest
+            .newBuilder(URI("$root$path"))
+            .header("Content-Type", "application/json")
+            .POST(HttpRequest.BodyPublishers.ofString(mapper.writeValueAsString(body))),
+    )
 
     private fun send(request: HttpRequest.Builder): Response {
         val response = http.send(request.timeout(timeout).build(), HttpResponse.BodyHandlers.ofString())

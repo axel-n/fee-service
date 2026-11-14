@@ -103,31 +103,28 @@ class EndpointRestartIT
                 .isEqualTo(calculations)
         }
 
-        private fun registeredDeploymentId(): String? =
-            RestateTestEnvironment.admin
-                .deployments()
-                .singleOrNull { it.uri?.removeSuffix("/") == RestateTestEnvironment.advertisedUrl }
-                ?.id
+        private fun registeredDeploymentId(): String? = RestateTestEnvironment.admin
+            .deployments()
+            .singleOrNull { it.uri?.removeSuffix("/") == RestateTestEnvironment.advertisedUrl }
+            ?.id
 
-        private fun bodyOf(request: FeeRequest): Map<String, Any?> =
-            mapOf(
-                "transaction_id" to request.transactionId,
-                "amount" to request.amount,
-                "asset" to request.asset,
-                "asset_type" to request.assetType,
-                "type" to request.type,
-                "state" to request.state,
-                "created_at" to request.createdAt,
-            )
+        private fun bodyOf(request: FeeRequest): Map<String, Any?> = mapOf(
+            "transaction_id" to request.transactionId,
+            "amount" to request.amount,
+            "asset" to request.asset,
+            "asset_type" to request.assetType,
+            "type" to request.type,
+            "state" to request.state,
+            "created_at" to request.createdAt,
+        )
 
-        private fun validRequest(transactionId: String) =
-            FeeRequest(
-                transactionId = transactionId,
-                amount = BigDecimal("1000"),
-                asset = "USD",
-                assetType = "FIAT",
-                type = "Mobile Top Up",
-                state = "SETTLED - PENDING FEE",
-                createdAt = "2023-08-30 15:42:17.610059",
-            )
+        private fun validRequest(transactionId: String) = FeeRequest(
+            transactionId = transactionId,
+            amount = BigDecimal("1000"),
+            asset = "USD",
+            assetType = "FIAT",
+            type = "Mobile Top Up",
+            state = "SETTLED - PENDING FEE",
+            createdAt = "2023-08-30 15:42:17.610059",
+        )
     }
