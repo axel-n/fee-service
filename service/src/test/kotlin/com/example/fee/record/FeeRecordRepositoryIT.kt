@@ -11,6 +11,7 @@ import com.example.fee.it.RestateIntegrationTest
 import com.example.fee.it.StoredFeeRecords
 import com.example.fee.it.StoredFeeRecords.StoredTimes
 import com.example.fee.it.TestClock
+import com.example.fee.it.awaitUntil
 import io.r2dbc.pool.ConnectionPool
 import io.r2dbc.spi.ConnectionFactory
 import kotlinx.coroutines.CompletableDeferred
@@ -23,14 +24,10 @@ import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.r2dbc.core.awaitRowsUpdated
-import org.springframework.transaction.reactive.TransactionCallback
-import org.springframework.transaction.reactive.TransactionalOperator
-import reactor.core.publisher.Flux
 import java.math.BigDecimal
 import java.time.Instant
 import java.time.LocalDateTime
 import java.util.UUID
-import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * [PostgresFeeRecordRepository] against the shared Postgres of the ITs, with the table the app created at startup.
@@ -40,11 +37,9 @@ class FeeRecordRepositoryIT
     @Autowired
     constructor(
         private val connectionFactory: ConnectionFactory,
-        private val transactionalOperator: TransactionalOperator,
     ) : RestateIntegrationTest() {
-        private val transactions = CountingTransactionalOperator(transactionalOperator)
         private val clock = TestClock().apply { pin(CLAIMED_AT) }
-        private val repository = PostgresFeeRecordRepository(connectionFactory, transactions, clock)
+        private val repository = PostgresFeeRecordRepository(connectionFactory, clock)
 
         @Test
         fun `the app's connections to Postgres come from a pool`() {
@@ -56,7 +51,7 @@ class FeeRecordRepositoryIT
         }
 
         @Test
-        fun `claiming a new transaction id inserts an IN_PROGRESS record with the token, in one transaction`() =
+        fun `claiming a new transaction id inserts an IN_PROGRESS record with the token`() =
             runBlocking<Unit> {
                 // given
                 val transactionId = newTransactionId()
@@ -67,7 +62,25 @@ class FeeRecordRepositoryIT
                 // then
                 assertThat(record).isEqualTo(FeeRecord.inProgress("token-a"))
                 assertThat(StoredFeeRecords.of(transactionId)).isEqualTo(record)
-                assertThat(transactions.count).describedAs("transactions opened").isEqualTo(1)
+            }
+
+        @Test
+        fun `a claim whose insert meets a row committed after its read returns that row, not a claim of its own`() =
+            runBlocking<Unit> {
+                // given: another claim's row, not committed yet, so the claim's read finds nothing and its insert waits
+                val transactionId = newTransactionId()
+                StoredFeeRecords.claimInOpenTransaction(transactionId).use { other ->
+                    val claim = async(Dispatchers.IO) { repository.claim(transactionFor(transactionId), "token-a") }
+                    awaitUntil("the claim's insert waits for the other claim") { other.blockedStatements() == 1L }
+
+                    // when
+                    other.commit()
+                    val record = claim.await()
+
+                    // then: the other claim's row, which stays as it was
+                    assertThat(record).isEqualTo(FeeRecord.inProgress(StoredFeeRecords.FOREIGN_TOKEN))
+                    assertThat(StoredFeeRecords.of(transactionId)).isEqualTo(record)
+                }
             }
 
         @Test
@@ -85,12 +98,11 @@ class FeeRecordRepositoryIT
             }
 
         @Test
-        fun `claiming an id that has a record opens no transaction and changes nothing, whatever the token or payload`() =
+        fun `claiming an id that has a record changes nothing, whatever the token or payload`() =
             runBlocking<Unit> {
                 // given
                 val transactionId = newTransactionId()
                 repository.claim(transactionFor(transactionId), "token-a")
-                val opened = transactions.count
 
                 // when
                 val again = repository.claim(transactionFor(transactionId), "token-a")
@@ -100,7 +112,6 @@ class FeeRecordRepositoryIT
                 assertThat(listOf(again, other)).containsOnly(FeeRecord.inProgress("token-a"))
                 assertThat(StoredFeeRecords.of(transactionId)).isEqualTo(FeeRecord.inProgress("token-a"))
                 assertThat(StoredFeeRecords.transactionOf(transactionId)).isEqualTo(transactionFor(transactionId))
-                assertThat(transactions.count - opened).describedAs("transactions opened").isZero()
             }
 
         @Test
@@ -208,14 +219,12 @@ class FeeRecordRepositoryIT
                 val unknown = newTransactionId()
                 val inProgress = newTransactionId()
                 repository.claim(transactionFor(inProgress), "token-a")
-                val opened = transactions.count
 
                 // when
                 val found = listOf(repository.findCharged(unknown), repository.findCharged(inProgress))
 
                 // then
                 assertThat(found).containsOnlyNulls()
-                assertThat(transactions.count - opened).describedAs("transactions opened").isZero()
             }
 
         @Test
@@ -275,20 +284,6 @@ class FeeRecordRepositoryIT
                 rate = BigDecimal("0.0015"),
                 description = "Standard fee rate of 0.15%",
             )
-
-        /** The app's [TransactionalOperator], counting the transactions it opens. */
-        private class CountingTransactionalOperator(
-            private val delegate: TransactionalOperator,
-        ) : TransactionalOperator by delegate {
-            private val opened = AtomicInteger()
-
-            val count: Int get() = opened.get()
-
-            override fun <T : Any> execute(action: TransactionCallback<T>): Flux<T> {
-                opened.incrementAndGet()
-                return delegate.execute(action)
-            }
-        }
 
         private companion object {
             const val CONCURRENT_CLAIMS = 10

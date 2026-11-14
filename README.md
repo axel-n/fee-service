@@ -79,10 +79,11 @@ FeeWorkflow.run(request)                                                        
 - **The `fee_record` table in PostgreSQL** holds the permanent fee record of each `transaction_id`: every field of the
   request, the charge, and when it was claimed and charged. A charged id is not charged again even after Restate has
   dropped the finished run. Old records are deleted by the indexed `claimed_at`, never by the client's `created_at` (see
-  `docs/design.md`: a deleted record no longer protects its id). A Postgres transaction is opened only to write: at CLAIM,
-  after validation passed and only for an id that has no record yet, and at RECORD. The primary key lets one claim win, and
-  only the claim's token can record the charge. The lookup of a charged id waits at most `fee-cache.lookup-timeout` for
-  Postgres, then leaves the answer to Restate, so a database that hangs can't hold requests up.
+  `docs/design.md`: a deleted record no longer protects its id). Postgres is written only at CLAIM, after validation
+  passed and only for an id that has no record yet, and at RECORD, with one statement each. The primary key lets one
+  claim win, and only the claim's token can record the charge. The lookup of a charged id waits at most
+  `fee-cache.lookup-timeout` for Postgres, then leaves the answer to Restate, so a database that hangs can't hold
+  requests up.
 - Everything non-deterministic or with side effects (the clock in validation, the fee numbers, the claim token, Postgres)
   runs inside a journaled step (Restate's `runBlock`), so its result is journaled and replayed, never recomputed.
 
@@ -337,7 +338,7 @@ What the recovery tests prove (each counts the **CALCULATE executions**, not jus
 | Test | Proves |
 |------|--------|
 | `CrashRecoveryIT`, `workflow_recovery.feature` | A crash before or after any step boundary is retried by Restate, and the journaled steps are replayed, not run again (validation and calculation closures each run once): one fee, record `COMPLETED`. A crash right after the CLAIM or RECORD write committed, before Restate journaled it: the step runs again and finds its own write, still one record |
-| `FeeRecordRepositoryIT` | Against Postgres: a claim inserts only an id without a record, in one transaction, and a claim of an existing id opens none; 10 claims of one id at once leave one, and only its token can complete it; completing with another token rolls back; every value keeps its scale |
+| `FeeRecordRepositoryIT` | Against Postgres: a claim inserts only an id without a record, and a claim of an existing id changes nothing; a claim whose insert meets a row committed after its read returns that row; 10 claims of one id at once leave one, and only its token can complete it; completing with another token changes nothing; every value keeps its scale |
 | `DatabaseStartupIT` | With Postgres unreachable, or its `fee_record` table lacking a column, the app doesn't start, and its Restate endpoint never starts or registers |
 | `EndpointRestartIT`, `workflow_recovery.feature` | Stopping and restarting the endpoint in the middle of CALCULATE keeps its deployment and completes the workflow with one fee record |
 | `EndpointRegistrationIT` | The app registers itself at its advertised URL at startup, and a stop with nothing unfinished removes the registration |

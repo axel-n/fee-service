@@ -32,10 +32,11 @@ object PostgresTestEnvironment {
     /** The R2DBC URL of the database, as the app's `spring.r2dbc.url`. */
     val url: String = "r2dbc:postgresql://${container.host}:${container.getMappedPort(PORT)}/$DATABASE"
 
+    /** [url] with the credentials, for the tests' own connections. */
+    val urlWithCredentials: String = url.replace("r2dbc:postgresql://", "r2dbc:postgresql://$USERNAME:$PASSWORD@")
+
     /** The tests' own connection, past the app, to read and write `fee_record` rows directly. */
-    val client: DatabaseClient by lazy {
-        DatabaseClient.create(ConnectionFactories.get(url.replace("r2dbc:postgresql://", "r2dbc:postgresql://$USERNAME:$PASSWORD@")))
-    }
+    val client: DatabaseClient by lazy { DatabaseClient.create(ConnectionFactories.get(urlWithCredentials)) }
 
     /**
      * The `spring.r2dbc.*` settings of an app under test. Set through `@DynamicPropertySource`, which wins over

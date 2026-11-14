@@ -61,9 +61,9 @@ Approach:
   runs **externally** in Docker. The root `pom.xml` overrides Boot's Kotlin, coroutines and Jackson 2 versions where Boot
   pins older ones than the SDK is built against; check them whenever `restate.version` or the Boot version changes
 - **PostgreSQL** for the fee records, reached non-blocking through **R2DBC** (`spring-boot-starter-r2dbc`, `r2dbc-postgresql`,
-  and `r2dbc-pool`, Boot's connection pool at its default size):
-  `DatabaseClient` and `TransactionalOperator` with their coroutine extensions. The schema is `schema.sql`, run at every
-  start (`spring.sql.init.mode: always`); there is no migration tool. Postgres runs **externally** in Docker, like Restate
+  and `r2dbc-pool`, Boot's connection pool at its default size): `DatabaseClient` with its coroutine extensions. The
+  schema is `schema.sql`, run at every start (`spring.sql.init.mode: always`); there is no migration tool. Postgres runs
+  **externally** in Docker, like Restate
 - **Caffeine** for the local cache of charged fees in `FeeService` (`ChargedFees`)
 - Tests: JUnit 6, Mockito, Testcontainers 2, Cucumber 8
 - Formatting: ktlint through `ktlint-maven-plugin` (root `pom.xml`), with its default `ktlint_official` style. The root
@@ -111,11 +111,12 @@ Follow the call graph in `docs/design.md`:
   holds only the ingress URL, the admin URL, the endpoint port, the advertised host and the attach timeout. Don't add
   Restate settings or admin calls without asking.
 - Postgres is reached only through `FeeRecordRepository` (its `PostgresFeeRecordRepository`), which the tests fake: by
-  `FeeWorkflow` inside journaled steps, and by `ChargedFees` to read a charge. **A transaction is opened only to write**: at
-  CLAIM, after validation passed and only for an id a plain read didn't find (one `INSERT … ON CONFLICT DO NOTHING` plus the
-  read back), and at RECORD (one `UPDATE` guarded by the run's claim token). Reads open none. Each write is one
-  `TransactionalOperator.executeAndAwait { }`; READ COMMITTED is enough, because the primary key serializes concurrent
-  claims and the token check sits in the `UPDATE` itself.
+  `FeeWorkflow` inside journaled steps, and by `ChargedFees` to read a charge. **Every write is one statement, atomic on its
+  own (no explicit transaction), and its row count decides**: at CLAIM, after validation passed and only for an id a plain
+  read didn't find, one `INSERT … ON CONFLICT DO NOTHING` (1 row: this run's claim, known without a read; 0 rows: a concurrent
+  claim's row, read to decide from it), and at RECORD one `UPDATE` guarded by the run's claim token, which must update 1
+  row. READ COMMITTED is enough, because the primary key serializes concurrent claims and the token check sits in the
+  `UPDATE` itself.
 - The endpoint is started and stopped only by `RestateEndpointLifecycle`, which registers it at start and, at stop, removes
   its deployment only when no unfinished invocation needs it: a removed deployment strands its invocations for good. Never
   remove it unconditionally. Don't add Actuator until that's approved.

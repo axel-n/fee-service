@@ -115,13 +115,16 @@ description, `charged_at`) all set when the record is `COMPLETED` and all empty 
   no longer protects its id: once Restate has dropped the run too, the same `transaction_id` sent again is charged again.
   So delete only records older than any client could still resend.
 
-- **A transaction is opened only to write**, and only after the request passed validation (the gateway validates before
-  its lookup, and VALIDATE comes before CLAIM, so a rejected request never touches Postgres). CLAIM first reads the id
-  without a transaction; a row exists → it decides from that row. No row → one transaction: `INSERT … ON CONFLICT (transaction_id) DO NOTHING`, then the read back. RECORD is
-  one transaction with one `UPDATE … WHERE transaction_id = ? AND claim_token = ?`; any other row count than 1 throws, rolls
-  back, and Restate retries. Reads (the gateway's lookup, CLAIM's first read) open none.
+- **Every write is one statement, and its row count decides**, only after the request passed validation (the gateway
+  validates before its lookup, and VALIDATE comes before CLAIM, so a rejected request never touches Postgres). Postgres
+  runs a single statement as one transaction of its own, so no write opens an explicit one. CLAIM first reads the id; a
+  row exists → it decides from that row. No row → one `INSERT … ON CONFLICT (transaction_id) DO NOTHING`: 1 row → the
+  row is this run's claim (`New`), known without a read; 0 rows → a concurrent claim committed its row between the read
+  and the insert, and CLAIM reads that row to decide from it. RECORD is one
+  `UPDATE … WHERE transaction_id = ? AND claim_token = ?`; any other row count than 1 means nothing was written: it
+  throws, and Restate retries.
 - **READ COMMITTED is enough.** The primary key serializes concurrent inserts of one id: an insert that meets a row being
-  inserted waits for that transaction, then does nothing, and the read back sees the winner's row (another token →
+  inserted waits for that transaction, then does nothing, and the read after it sees the winner's row (another token →
   `InProgress`). Only the token's holder can complete a row, and that check sits in the `UPDATE` itself.
 - **The claim token makes the writes safe to repeat.** Restate runs a journaled step again when the app crashed after the
   step's commit but before its journal entry. The token is journaled before CLAIM, so the CLAIM run again finds its own
@@ -276,8 +279,8 @@ com.example.fee
 │   ├── FeeRecordRepository.kt          FeeRecordRepository: suspend claim(transaction, token): FeeRecord (stores every request
 │   │                                   field), complete(id, token, response), findCharged(id): FeeResponse?; an interface, faked
 │   │                                   in unit tests + PostgresFeeRecordRepository, the @Repository over R2DBC (DatabaseClient,
-│   │                                   TransactionalOperator, Clock for claimed_at/charged_at; its SQL in const vals):
-│   │                                   transactions only to write, see "The fee records in Postgres"
+│   │                                   Clock for claimed_at/charged_at; its SQL in const vals): one statement per write,
+│   │                                   see "The fee records in Postgres"
 │   ├── FeeRecord.kt                    a row: FeeRecord (status, claimToken, response) + FeeRecordStatus (IN_PROGRESS / COMPLETED)
 │   └── ClaimDecider.kt                 pure function (FeeRecord, token) → ClaimResult (unit-testable without Restate or Postgres)
 │                                       + ClaimResult (sealed: New, AlreadyCompleted(response), InProgress), journaled by CLAIM
@@ -311,7 +314,7 @@ com.example.fee
   (a stateless bean too) reads it from there. The SDK binds the bean by reflection, with no code generation, and runs the
   handlers on `Dispatchers.Default`. Postgres is reached with R2DBC inside journaled steps: the handler suspends, it
   doesn't hold a thread. The connections come from Boot's R2DBC pool (`r2dbc-pool`, at Boot's default size), so a
-  statement or transaction doesn't open a new connection.
+  statement doesn't open a new connection.
 - The Restate clients are proxies the SDK generates at runtime by subclassing the handler class (Byte Buddy). Spring's
   Kotlin plugin opens `@Component` classes, which keeps that possible.
 - Everything that crosses Restate's serde (handler inputs and outputs, journaled results, workflow state) is part of the

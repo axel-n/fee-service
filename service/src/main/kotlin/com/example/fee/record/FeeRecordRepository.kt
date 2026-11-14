@@ -8,8 +8,6 @@ import org.springframework.r2dbc.core.DatabaseClient
 import org.springframework.r2dbc.core.awaitOneOrNull
 import org.springframework.r2dbc.core.awaitRowsUpdated
 import org.springframework.stereotype.Repository
-import org.springframework.transaction.reactive.TransactionalOperator
-import org.springframework.transaction.reactive.executeAndAwait
 import java.math.BigDecimal
 import java.time.Clock
 
@@ -18,8 +16,9 @@ import java.time.Clock
  * claims and completes them inside journaled steps, `ChargedFees` reads the charged ones. An interface, so the workflow
  * and the gateway are tested with in-memory fakes.
  *
- * A transaction is opened only to write: for an id a plain read didn't find ([claim]), and to complete the row a run
- * claimed ([complete]). Both run after validation, which comes first in the workflow. Reads open none.
+ * Each write is one statement, atomic on its own, and its row count decides: the insert of an id a plain read didn't
+ * find ([claim]), and the update of the row a run claimed ([complete]). Both run after validation, which comes first in
+ * the workflow.
  */
 interface FeeRecordRepository {
     /**
@@ -45,9 +44,11 @@ interface FeeRecordRepository {
 /**
  * [FeeRecordRepository] over R2DBC: non-blocking, so callers suspend instead of holding a thread.
  *
- * READ COMMITTED (Postgres' default) is enough. The primary key serializes concurrent inserts of one id: an insert that
- * meets a row being inserted waits for that transaction, then does nothing (`ON CONFLICT DO NOTHING`), and the next
- * statement sees the committed row. The token check of [complete] sits in its `UPDATE` statement itself.
+ * No explicit transaction: each write is a single statement, which Postgres runs as one transaction of its own, and
+ * its row count tells what happened. READ COMMITTED (Postgres' default) is enough. The primary key serializes
+ * concurrent inserts of one id: an insert that meets a row being inserted waits for that transaction, then does nothing
+ * (`ON CONFLICT DO NOTHING`), and the next statement sees the committed row. The token check of [complete] sits in its
+ * `UPDATE` statement itself.
  *
  * `claimed_at` and `charged_at` come from [clock]. A write run again after a crash keeps the first time: the insert does
  * nothing for an existing row, and the update keeps a `charged_at` that is already set.
@@ -55,14 +56,14 @@ interface FeeRecordRepository {
 @Repository
 class PostgresFeeRecordRepository(
     connectionFactory: ConnectionFactory,
-    private val transactions: TransactionalOperator,
     private val clock: Clock,
 ) : FeeRecordRepository {
     private val client = DatabaseClient.create(connectionFactory)
 
     override suspend fun claim(transaction: Transaction, claimToken: String): FeeRecord {
         val transactionId = transaction.transactionId
-        return find(transactionId) ?: transactions.executeAndAwait {
+        find(transactionId)?.let { return it }
+        val inserted =
             client
                 .sql(INSERT_CLAIM)
                 .bind("id", transactionId)
@@ -77,32 +78,30 @@ class PostgresFeeRecordRepository(
                 .bind("claimedAt", clock.instant())
                 .fetch()
                 .awaitRowsUpdated()
-            // ours, or the one a concurrent claim committed in between
-            checkNotNull(find(transactionId)) { "Fee record '$transactionId' is missing right after it was claimed" }
-        }
+        if (inserted == 1L) return FeeRecord.inProgress(claimToken)
+        // A concurrent claim committed its row between the read and the insert: decide from that row
+        return checkNotNull(find(transactionId)) { "Fee record '$transactionId' is missing although its insert met it" }
     }
 
     override suspend fun complete(transactionId: String, claimToken: String, response: FeeResponse) {
         require(response.transactionId == transactionId) {
             "The response of transaction '${response.transactionId}' can't complete the fee record of '$transactionId'"
         }
-        transactions.executeAndAwait {
-            val updated =
-                client
-                    .sql(UPDATE_COMPLETE)
-                    .bind("status", FeeRecordStatus.COMPLETED.name)
-                    .bind("fee", response.fee)
-                    .bind("rate", response.rate)
-                    .bind("description", response.description)
-                    .bind("chargedAt", clock.instant())
-                    .bind("id", transactionId)
-                    .bind("token", claimToken)
-                    .fetch()
-                    .awaitRowsUpdated()
-            // Only the run that claimed the id completes it, so anything else is a bug: rolled back, and Restate retries
-            // until it pauses the invocation, which can be resumed once the bug is fixed.
-            check(updated == 1L) { "Fee record '$transactionId' is not claimed by token $claimToken, so it can't be completed" }
-        }
+        val updated =
+            client
+                .sql(UPDATE_COMPLETE)
+                .bind("status", FeeRecordStatus.COMPLETED.name)
+                .bind("fee", response.fee)
+                .bind("rate", response.rate)
+                .bind("description", response.description)
+                .bind("chargedAt", clock.instant())
+                .bind("id", transactionId)
+                .bind("token", claimToken)
+                .fetch()
+                .awaitRowsUpdated()
+        // Only the run that claimed the id completes it, so anything else is a bug: nothing was written, and Restate
+        // retries until it pauses the invocation, which can be resumed once the bug is fixed.
+        check(updated == 1L) { "Fee record '$transactionId' is not claimed by token $claimToken, so it can't be completed" }
     }
 
     override suspend fun findCharged(transactionId: String): FeeResponse? = find(transactionId)?.response

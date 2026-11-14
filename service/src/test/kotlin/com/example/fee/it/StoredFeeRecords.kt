@@ -9,6 +9,9 @@ import com.example.fee.domain.TransactionType
 import com.example.fee.record.FeeRecord
 import com.example.fee.record.FeeRecordStatus
 import kotlinx.coroutines.runBlocking
+import org.springframework.r2dbc.connection.SingleConnectionFactory
+import org.springframework.r2dbc.core.DatabaseClient
+import org.springframework.r2dbc.core.await
 import org.springframework.r2dbc.core.awaitOneOrNull
 import org.springframework.r2dbc.core.awaitRowsUpdated
 import org.springframework.r2dbc.core.awaitSingle
@@ -21,7 +24,7 @@ import java.time.LocalDateTime
  * so a test sees what is stored rather than what the app reports.
  */
 object StoredFeeRecords {
-    /** The token of [claimByARunThatNeverFinished]: no workflow run of the app ever holds it. */
+    /** The token of [claimByARunThatNeverFinished] and [claimInOpenTransaction]: no workflow run of the app ever holds it. */
     const val FOREIGN_TOKEN = "a-run-that-never-finished"
 
     private const val SELECT_RECORD = """
@@ -48,6 +51,11 @@ object StoredFeeRecords {
             (:id, 1000, 'USD', 'FIAT', 'Mobile Top Up', 'SETTLED - PENDING FEE', '2023-08-30 15:42:17.610059',
              'IN_PROGRESS', :token, now())
     """
+
+    private const val BEGIN = "BEGIN"
+    private const val COMMIT = "COMMIT"
+    private const val SELECT_BACKEND_PID = "SELECT pg_backend_pid() AS pid"
+    private const val COUNT_BLOCKED_BY = "SELECT count(*) AS blocked FROM pg_stat_activity WHERE :pid = ANY(pg_blocking_pids(pid))"
 
     /** The record of [transactionId], or `null` if the id was never claimed. */
     fun of(transactionId: String): FeeRecord? =
@@ -133,6 +141,69 @@ object StoredFeeRecords {
                     .fetch()
                     .awaitRowsUpdated()
             check(inserted == 1L) { "the record of $transactionId was not inserted" }
+        }
+    }
+
+    /**
+     * Inserts an `IN_PROGRESS` record of [transactionId] under [FOREIGN_TOKEN], as [claimByARunThatNeverFinished] does,
+     * but in a transaction left open on a connection of its own: other connections don't see the record until
+     * [OpenClaim.commit], and an insert of the same id waits for it. A claim that loses a race, made deterministic.
+     */
+    fun claimInOpenTransaction(transactionId: String): OpenClaim {
+        // suppressClose: every statement runs on the one connection, so the transaction stays open between them
+        val connection = SingleConnectionFactory(PostgresTestEnvironment.urlWithCredentials, true)
+        val client = DatabaseClient.create(connection)
+        try {
+            return runBlocking {
+                val backendPid =
+                    client
+                        .sql(SELECT_BACKEND_PID)
+                        .map { row -> checkNotNull(row.get("pid", Int::class.javaObjectType)) }
+                        .awaitSingle()
+                client.sql(BEGIN).await()
+                val inserted =
+                    client
+                        .sql(INSERT_FOREIGN_CLAIM)
+                        .bind("id", transactionId)
+                        .bind("token", FOREIGN_TOKEN)
+                        .fetch()
+                        .awaitRowsUpdated()
+                check(inserted == 1L) { "the record of $transactionId was not inserted" }
+                OpenClaim(client, connection, backendPid)
+            }
+        } catch (failure: Exception) {
+            // an open transaction would hold its row, and its lock on fee_record, until the JVM exits
+            connection.destroy()
+            throw failure
+        }
+    }
+
+    /**
+     * The open transaction of [claimInOpenTransaction], on the connection of Postgres backend [backendPid]. Closing the
+     * connection without [commit] rolls it back, so a statement waiting for it goes on.
+     */
+    class OpenClaim(
+        private val client: DatabaseClient,
+        private val connection: SingleConnectionFactory,
+        private val backendPid: Int,
+    ) : AutoCloseable {
+        /** How many statements of other connections wait for this transaction, such as an insert of the same id. */
+        fun blockedStatements(): Long =
+            runBlocking {
+                PostgresTestEnvironment.client
+                    .sql(COUNT_BLOCKED_BY)
+                    .bind("pid", backendPid)
+                    .map { row -> checkNotNull(row.get("blocked", Long::class.javaObjectType)) }
+                    .awaitSingle()
+            }
+
+        /** Commits the record: every connection sees it from now on. */
+        fun commit() {
+            runBlocking { client.sql(COMMIT).await() }
+        }
+
+        override fun close() {
+            connection.destroy()
         }
     }
 

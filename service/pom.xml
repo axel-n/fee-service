@@ -46,8 +46,8 @@
             <groupId>dev.restate</groupId>
             <artifactId>sdk-serde-jackson</artifactId>
         </dependency>
-        <!-- The fee records in PostgreSQL, non-blocking: DatabaseClient and TransactionalOperator with their coroutine
-             extensions, and schema.sql run at every start -->
+        <!-- The fee records in PostgreSQL, non-blocking: DatabaseClient with its coroutine extensions, and schema.sql run
+             at every start -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-r2dbc</artifactId>
@@ -58,7 +58,7 @@
             <scope>runtime</scope>
         </dependency>
         <!-- The connection pool: Boot pools R2DBC connections only when it is on the classpath, otherwise every
-             statement and transaction opens a new connection to Postgres -->
+             statement opens a new connection to Postgres -->
         <dependency>
             <groupId>io.r2dbc</groupId>
             <artifactId>r2dbc-pool</artifactId>
