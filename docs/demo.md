@@ -1,3 +1,10 @@
+## prepartions
+podman compose up -d --force-recreate restate
+
+### if idea does not work:
+java -jar service/target/fee-service-0.0.1-SNAPSHOT.jar --spring.profiles.active=local --server.port=8082
+
+
 ## 1. Happy path: the sample transaction from `requirements.md`
 
 Tested by: `HappyPathIT`; `fee_calculation.feature`, "The sample transaction from the requirements …"
@@ -47,7 +54,7 @@ curl -i -X POST localhost:8082/transaction/fee -H 'Content-Type: application/jso
 ### 3b. Merchant Payment
 
 ```bash
-curl -i ' -X POST localhost:8082/transaction/fee -H 'Content-Type: application/json' -d '{
+curl -i -X POST localhost:8082/transaction/fee -H 'Content-Type: application/json' -d '{
   "transaction_id": "txn_003",
   "amount": 1000,
   "asset": "USD",
