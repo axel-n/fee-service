@@ -163,7 +163,7 @@
                                     <binding>com.example.fee.record.ZoneFreeLocalDateTimeBinding</binding>
                                     <includeTypes>(?i:TIMESTAMP(\ WITHOUT\ TIME\ ZONE)?)</includeTypes>
                                 </forcedType>
-                                <!-- started_at and charged_at, the app's Clock: Instant, as Clock.instant() gives it -->
+                                <!-- charged_at, the app's Clock: Instant, as Clock.instant() gives it -->
                                 <forcedType>
                                     <name>INSTANT</name>
                                     <includeTypes>(?i:TIMESTAMP\ WITH\ TIME\ ZONE)</includeTypes>

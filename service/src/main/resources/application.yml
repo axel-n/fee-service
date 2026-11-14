@@ -54,7 +54,7 @@ fee-cache:
   maximum-size: ${FEE_CACHE_MAXIMUM_SIZE:1000}
   # How long a charged fee stays after it was put there
   expire-after-write: ${FEE_CACHE_EXPIRE_AFTER_WRITE:1d}
-  # How long FeeService waits for each Postgres call (the lookup of a cache miss, the start of a fee record). Past it,
+  # How long FeeService waits for Postgres when a transaction_id is not in the cache (the lookup of its charge). Past it,
   # the request gets 503: a database that hangs (a network partition) can't hold requests up
   lookup-timeout: ${FEE_CACHE_LOOKUP_TIMEOUT:1s}
 

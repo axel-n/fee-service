@@ -1,7 +1,6 @@
 package com.example.fee.it
 
 import com.example.fee.contract.FeeRequest
-import com.example.fee.record.FeeRecordStatus
 import com.example.fee.workflow.WorkflowStep
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
@@ -15,9 +14,9 @@ import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
 /**
- * Duplicates end to end. A `transaction_id` gets one fee record, and with it one `workflow_id`, so Restate runs one
- * workflow per id and every caller of that id attaches to that run, whatever valid payload it sends: the first run's
- * result is the answer, and the record holds the payload that run charged. An invalid payload is rejected by the gateway
+ * Duplicates end to end. The workflow key is the `transaction_id`, so Restate runs one workflow per id and every caller
+ * of that id attaches to that run, whatever valid payload it sends: the first run's result is the answer, and the record
+ * holds the payload that run charged. An invalid payload is rejected by the gateway
  * before it reaches Postgres or Restate, so it never joins the run. Idempotency is asserted by the number of CALCULATE
  * executions, not just by the response. Once charged, the id is answered from the app's cache or Postgres, and Postgres
  * holds exactly one record for it, the accepted payload's charge.
@@ -87,7 +86,6 @@ class DuplicatesIT
             assertThat(second.body["amount"].decimalValue()).isEqualByComparingTo(BigDecimal("1000"))
 
             // then: the one workflow of the id, which ran for the original payload
-            assertThat(StoredWorkflows.keyOf(changed)).isEqualTo(StoredWorkflows.keyOf(original))
             assertThat(StoredWorkflows.step(changed)).isEqualTo(WorkflowStep.DONE)
             assertThat(StoredWorkflows.response(changed)?.amount).isEqualByComparingTo(BigDecimal("1000"))
 
@@ -115,7 +113,7 @@ class DuplicatesIT
             val winner = requests.single { checkNotNull(it.amount).compareTo(charged["amount"].decimalValue()) == 0 }
             assertChargedOnce(winner)
             assertThat(StoredFeeRecords.count(transactionId)).describedAs("fee records of the id").isEqualTo(1)
-            assertThat(StoredFeeRecords.of(transactionId)?.response?.fee).isEqualByComparingTo(charged["fee"].decimalValue())
+            assertThat(StoredFeeRecords.of(transactionId)?.fee).isEqualByComparingTo(charged["fee"].decimalValue())
         }
 
         @Test
@@ -149,33 +147,13 @@ class DuplicatesIT
             assertThat(StoredFeeRecords.count(transactionId)).describedAs("fee records of the id").isEqualTo(1)
         }
 
-        @Test
-        fun `a transaction_id whose record has no workflow in Restate goes to the record's workflow id and is charged once`() {
-            // given: a pending record whose workflow Restate doesn't know: the app died between the insert and the
-            // submit, or Restate dropped a run that never charged it
-            val request = validRequest(newTransactionId())
-            val transactionId = checkNotNull(request.transactionId)
-            val workflowId = StoredFeeRecords.startWithoutWorkflow(transactionId)
-
-            // when
-            val response = api.submit(bodyOf(request))
-
-            // then: charged by a workflow under the record's own workflow id
-            assertThat(response.status).describedAs("POST status, body %s", response.body).isEqualTo(200)
-            assertThat(response.body["fee"].decimalValue()).isEqualByComparingTo(BigDecimal("1.50"))
-            assertThat(StoredFeeRecords.of(transactionId)?.workflowId).isEqualTo(workflowId)
-            assertThat(StoredWorkflows.step(request)).isEqualTo(WorkflowStep.DONE)
-            assertChargedOnce(request)
-        }
-
         private fun assertChargedOnce(request: FeeRequest) {
             val transactionId = checkNotNull(request.transactionId)
             assertThat(calculator.count(transactionId)).describedAs("CALCULATE executions").isEqualTo(1)
 
-            val record = StoredFeeRecords.of(transactionId)
-            assertThat(record?.status).isEqualTo(FeeRecordStatus.CHARGED)
-            assertThat(record?.response?.amount).isEqualByComparingTo(request.amount)
-            assertThat(record?.response?.fee).isEqualByComparingTo(expectedFee(request))
+            val charge = StoredFeeRecords.of(transactionId)
+            assertThat(charge?.amount).isEqualByComparingTo(request.amount)
+            assertThat(charge?.fee).isEqualByComparingTo(expectedFee(request))
         }
 
         // Mobile Top Up at the packaged 0.15%, rounded HALF_EVEN to 2 decimals

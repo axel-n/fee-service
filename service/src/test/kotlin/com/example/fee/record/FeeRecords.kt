@@ -20,43 +20,35 @@ object FeeRecords {
 }
 
 /**
- * The fee records in memory, with the rules of `PostgresFeeRecordRepository`: a start inserts only an id without a
- * record and otherwise returns the record that is there, and only the record's own workflow can charge it. Every call is
- * recorded in [calls]; a call whose name is in [failing] throws that exception instead, and one in [hanging] never
- * returns (a database that doesn't answer), both before they change anything.
+ * The fee records in memory, with the rules of `PostgresFeeRecordRepository`: a charge stores the response only for an
+ * id without a record, and returns the charge the record then holds. [charges] maps each charged id to its response.
+ * Every call is recorded in [calls]; a call whose name is in [failing] throws that exception instead, and one in
+ * [hanging] never returns (a database that doesn't answer), both before they change anything.
  */
 class InMemoryFeeRecordRepository(
-    vararg stored: Pair<String, FeeRecord>,
+    vararg stored: FeeResponse,
     private val failing: Map<String, Exception> = emptyMap(),
     private val hanging: Set<String> = emptySet(),
 ) : FeeRecordRepository {
-    val records = mutableMapOf(*stored)
+    val charges = stored.associateBy { it.transactionId }.toMutableMap()
     val calls = mutableListOf<Call>()
 
-    /** A call the code under test made: [name] is `start` (with [transaction]), `charge` (with both) or `findCharged`. */
+    /** A call the code under test made: [name] is `charge` (with [response] and [transaction]) or `findCharged`. */
     data class Call(
         val name: String,
         val transactionId: String,
-        val workflowId: String? = null,
         val response: FeeResponse? = null,
         val transaction: Transaction? = null,
     )
 
-    override suspend fun start(transaction: Transaction, workflowId: String): FeeRecord {
-        record(Call("start", transaction.transactionId, workflowId, transaction = transaction))
-        return records.getOrPut(transaction.transactionId) { FeeRecord.pending(workflowId) }
-    }
-
-    override suspend fun charge(transaction: Transaction, workflowId: String, response: FeeResponse) {
-        val transactionId = transaction.transactionId
-        record(Call("charge", transactionId, workflowId, response, transaction))
-        val record = checkNotNull(records[transactionId]?.takeIf { it.workflowId == workflowId }) { "not started for $workflowId" }
-        records[transactionId] = record.charge(response)
+    override suspend fun charge(transaction: Transaction, response: FeeResponse): FeeResponse {
+        record(Call("charge", transaction.transactionId, response, transaction))
+        return charges.getOrPut(transaction.transactionId) { response }
     }
 
     override suspend fun findCharged(transactionId: String): FeeResponse? {
         record(Call("findCharged", transactionId))
-        return records[transactionId]?.response
+        return charges[transactionId]
     }
 
     private suspend fun record(call: Call) {

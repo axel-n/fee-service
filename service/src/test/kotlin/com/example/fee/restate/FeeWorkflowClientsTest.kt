@@ -54,18 +54,18 @@ class FeeWorkflowClientsTest {
     }
 
     @Test
-    fun `submits the request to the run handler of the FeeWorkflow keyed by the workflow id`() = runBlocking<Unit> {
+    fun `submits the request to the run handler of the FeeWorkflow keyed by the transaction id`() = runBlocking<Unit> {
         // given
         val client = ingressAnswering(SendResponse.SendStatus.ACCEPTED, response)
         val clients = IngressFeeWorkflowClients(client)
 
         // when
-        clients.submit(WORKFLOW_ID, request)
+        clients.submit(TRANSACTION_ID, request)
 
         // then
         val sent = sentRequest(client)
         assertThat(sent.target.service).isEqualTo("FeeWorkflow")
-        assertThat(sent.target.key).isEqualTo(WORKFLOW_ID)
+        assertThat(sent.target.key).isEqualTo(TRANSACTION_ID)
         assertThat(sent.target.handler).isEqualTo("run")
         assertThat(sent.request).isEqualTo(request)
     }
@@ -74,7 +74,7 @@ class FeeWorkflowClientsTest {
     fun `attaching returns the charged response of the run Restate acknowledged`() = runBlocking<Unit> {
         // given
         val client = ingressAnswering(SendResponse.SendStatus.ACCEPTED, response)
-        val run = IngressFeeWorkflowClients(client).submit(WORKFLOW_ID, request)
+        val run = IngressFeeWorkflowClients(client).submit(TRANSACTION_ID, request)
 
         // when
         val outcome = run.attach()
@@ -84,10 +84,10 @@ class FeeWorkflowClientsTest {
     }
 
     @Test
-    fun `a workflow id submitted before attaches to the first run, whatever the new payload`() = runBlocking<Unit> {
+    fun `a transaction id submitted before attaches to the first run, whatever the new payload`() = runBlocking<Unit> {
         // given: Restate already has a run for the key, so it ignores the payload and names that run
         val client = ingressAnswering(SendResponse.SendStatus.PREVIOUSLY_ACCEPTED, response)
-        val run = IngressFeeWorkflowClients(client).submit(WORKFLOW_ID, request.copy(asset = "EUR"))
+        val run = IngressFeeWorkflowClients(client).submit(TRANSACTION_ID, request.copy(asset = "EUR"))
 
         // when
         val outcome = run.attach()
@@ -100,7 +100,7 @@ class FeeWorkflowClientsTest {
     fun `a run Restate answers 470 for, not ready, has no output yet`() = runBlocking<Unit> {
         // given
         val client = ingressAnswering(SendResponse.SendStatus.ACCEPTED, response, Output.notReady())
-        val run = IngressFeeWorkflowClients(client).submit(WORKFLOW_ID, request)
+        val run = IngressFeeWorkflowClients(client).submit(TRANSACTION_ID, request)
 
         // when
         val output = run.output()
@@ -113,7 +113,7 @@ class FeeWorkflowClientsTest {
     fun `the output of a finished run is its charged response`() = runBlocking<Unit> {
         // given
         val client = ingressAnswering(SendResponse.SendStatus.PREVIOUSLY_ACCEPTED, response)
-        val run = IngressFeeWorkflowClients(client).submit(WORKFLOW_ID, request)
+        val run = IngressFeeWorkflowClients(client).submit(TRANSACTION_ID, request)
 
         // when
         val output = run.output()
@@ -123,6 +123,6 @@ class FeeWorkflowClientsTest {
     }
 
     private companion object {
-        const val WORKFLOW_ID = "0b5c3d4e-1f2a-4b3c-8d9e-0f1a2b3c4d5e"
+        const val TRANSACTION_ID = "txn_001"
     }
 }

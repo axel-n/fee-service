@@ -1,7 +1,6 @@
 package com.example.fee.it
 
 import com.example.fee.contract.FeeRequest
-import com.example.fee.record.FeeRecordStatus
 import com.example.fee.workflow.WorkflowStep
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.AfterEach
@@ -15,9 +14,8 @@ import java.util.concurrent.TimeUnit
 
 /**
  * A `POST` that outlasts `restate.attach-timeout` while its workflow is held inside its CALCULATE journaled step: Restate
- * answers 470 (not ready) for the run's output, so the `POST` answers 504 `WORKFLOW_TIMEOUT`, and the record `FeeService`
- * started is `PENDING`. Once the calculation is let go, resending the same payload returns the charged fee,
- * calculated once.
+ * answers 470 (not ready) for the run's output, so the `POST` answers 504 `WORKFLOW_TIMEOUT`, and the id has no record
+ * yet. Once the calculation is let go, resending the same payload returns the charged fee, calculated once.
  */
 class AttachTimeoutIT
     @Autowired
@@ -48,12 +46,12 @@ class AttachTimeoutIT
             // when: the POST outlasts the attach timeout while CALCULATE is still blocked
             val timedOut = post.get(2, TimeUnit.MINUTES)
 
-            // then: a 504 problem naming the transaction, and no fee yet; the record is started
+            // then: a 504 problem naming the transaction, and no fee yet: nothing is recorded before the charge
             assertThat(timedOut.status).describedAs("POST status, body %s", timedOut.body).isEqualTo(504)
             assertThat(timedOut.body["code"].asText()).isEqualTo("WORKFLOW_TIMEOUT")
             assertThat(timedOut.body["transaction_id"].asText()).isEqualTo(transactionId)
             assertThat(timedOut.body.has("fee")).describedAs("fee present in %s", timedOut.body).isFalse()
-            assertThat(StoredFeeRecords.of(transactionId)?.status).isEqualTo(FeeRecordStatus.PENDING)
+            assertThat(StoredFeeRecords.count(transactionId)).describedAs("fee records").isZero()
 
             // when: the calculation is let go, the workflow finishes, and the same payload is sent again
             calculator.release(transactionId)
@@ -78,7 +76,7 @@ class AttachTimeoutIT
 
             // then: calculated once, and the record agrees
             assertThat(calculator.count(transactionId)).describedAs("CALCULATE executions").isEqualTo(1)
-            assertThat(StoredFeeRecords.of(transactionId)?.status).isEqualTo(FeeRecordStatus.CHARGED)
+            assertThat(StoredFeeRecords.of(transactionId)?.fee).isEqualByComparingTo(BigDecimal("1.50"))
         }
 
         private fun bodyOf(request: FeeRequest): Map<String, Any?> = mapOf(

@@ -1,7 +1,6 @@
 package com.example.fee.it
 
 import com.example.fee.contract.FeeRequest
-import com.example.fee.record.FeeRecordStatus
 import com.example.fee.restate.RestateEndpointLifecycle
 import com.example.fee.workflow.WorkflowStep
 import org.assertj.core.api.Assertions.assertThat
@@ -48,7 +47,7 @@ class EndpointRestartIT
             val firstPost = CompletableFuture.supplyAsync { api.submit(bodyOf(request)) }
             awaitUntil("CALCULATE has started") { calculator.count(transactionId) == 1 }
             assertThat(StoredWorkflows.step(request)).isEqualTo(WorkflowStep.CALCULATE)
-            assertThat(StoredFeeRecords.of(transactionId)?.status).isEqualTo(FeeRecordStatus.PENDING)
+            assertThat(StoredFeeRecords.count(transactionId)).describedAs("fee records").isZero()
 
             // when: the endpoint restarts while CALCULATE is blocked
             val deploymentBefore = registeredDeploymentId()
@@ -67,7 +66,7 @@ class EndpointRestartIT
 
             // then: Restate retried the invocation on the restarted endpoint, and CALCULATE (not journaled) runs again
             awaitUntil("Restate runs CALCULATE again on the restarted endpoint") { calculator.count(transactionId) >= 2 }
-            assertThat(StoredFeeRecords.of(transactionId)?.status).isEqualTo(FeeRecordStatus.PENDING)
+            assertThat(StoredFeeRecords.count(transactionId)).describedAs("fee records").isZero()
 
             // when: both calls go on
             calculator.release(transactionId)
@@ -87,8 +86,7 @@ class EndpointRestartIT
 
             // then: the record is charged with the fee
             val record = StoredFeeRecords.of(transactionId)
-            assertThat(record?.status).isEqualTo(FeeRecordStatus.CHARGED)
-            assertThat(record?.response?.fee).isEqualByComparingTo(BigDecimal("1.50"))
+            assertThat(record?.fee).isEqualByComparingTo(BigDecimal("1.50"))
 
             // when: the same payload is sent again
             val calculations = calculator.count(transactionId)

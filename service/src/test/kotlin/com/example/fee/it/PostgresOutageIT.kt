@@ -2,7 +2,6 @@ package com.example.fee.it
 
 import com.example.fee.contract.FeeRequest
 import com.example.fee.contract.FeeResponse
-import com.example.fee.record.FeeRecordStatus
 import com.example.fee.workflow.WorkflowStep
 import com.github.benmanes.caffeine.cache.Cache
 import io.r2dbc.spi.Connection
@@ -27,14 +26,14 @@ import kotlin.time.Duration.Companion.seconds
 
 /**
  * Postgres goes away while the app runs, and comes back ([PostgresTestEnvironment.goDown]: open connections are cut, new
- * ones refused). `FeeService` needs Postgres to give a new transaction its `workflow_id`, so without it a request is
- * answered 503 before anything reaches Restate, and sending it again once Postgres is back is safe. A run already in
- * Restate waits in its retries at CHARGE, so a fee is charged exactly once, and only after its record is written. What
- * needs no database (a charge still cached, a rejection, which the gateway answers before any call to Postgres or
- * Restate) is answered during the outage.
+ * ones refused). `FeeService` needs Postgres to tell whether an id it hasn't cached is charged already, so without it
+ * such a request is answered 503 before anything reaches Restate, and sending it again once Postgres is back is safe. A
+ * run already in Restate waits in its retries at CHARGE, so a fee is charged exactly once, and only once its record is
+ * written. What needs no database (a charge still cached, a rejection, which the gateway answers before any call to
+ * Postgres or Restate) is answered during the outage.
  *
  * Postgres also hangs ([PostgresTestEnvironment.freeze]: connections open, nothing answers, as in a network partition).
- * Each of `FeeService`'s calls then gives up after `fee-cache.lookup-timeout`, so a request doesn't wait for the database.
+ * `FeeService`'s lookup then gives up after `fee-cache.lookup-timeout`, so a request doesn't wait for the database.
  */
 class PostgresOutageIT
     @Autowired
@@ -95,9 +94,10 @@ class PostgresOutageIT
             // when
             val response = api.submit(bodyOf(request))
 
-            // then: the record can't be started, so nothing went to Restate
+            // then: the lookup failed, so nothing went to Restate
             assertThat(response.status).describedAs("POST status, body %s", response.body).isEqualTo(503)
             assertThat(response.body["code"].asText()).isEqualTo("WORKFLOW_UNAVAILABLE")
+            assertThat(StoredWorkflows.step(request)).describedAs("workflow step").isNull()
             assertThat(calculator.count(transactionIdOf(request))).isZero()
 
             // when: Postgres is back, and the same request is sent again until the app's pool has replaced the cut
@@ -113,24 +113,23 @@ class PostgresOutageIT
 
         @Test
         fun `Postgres going down during CALCULATE charges nothing until the record is written, then charges once`() {
-            // given: the record is started, and the run is held in CALCULATE
+            // given: the run is held in CALCULATE, and the id has no record yet
             val request = validRequest(newTransactionId())
             val transactionId = transactionIdOf(request)
             calculator.block(transactionId)
             blockedIds += transactionId
             val post = CompletableFuture.supplyAsync { api.submit(bodyOf(request)) }
             awaitUntil("CALCULATE has started") { calculator.count(transactionId) == 1 }
-            assertThat(StoredFeeRecords.of(transactionId)?.status).isEqualTo(FeeRecordStatus.PENDING)
-            val workflowId = checkNotNull(StoredWorkflows.keyOf(transactionId))
+            assertThat(StoredFeeRecords.count(transactionId)).describedAs("fee records").isZero()
 
             // when: Postgres goes down, and CALCULATE finishes during the outage
             PostgresTestEnvironment.goDown()
             calculator.release(transactionId)
-            awaitUntil("Restate retries the run") { retries(workflowId) >= 1 }
+            awaitUntil("Restate retries the run") { retries(transactionId) >= 1 }
 
             // then: the run waits at CHARGE with no response: nothing is reported charged before the record is written
-            assertThat(StoredWorkflows.stepOf(workflowId)).isEqualTo(WorkflowStep.CHARGE)
-            assertThat(StoredWorkflows.responseOf(workflowId)).isNull()
+            assertThat(StoredWorkflows.step(transactionId)).isEqualTo(WorkflowStep.CHARGE)
+            assertThat(StoredWorkflows.response(transactionId)).isNull()
             assertThat(post).isNotDone
 
             // when
@@ -140,7 +139,7 @@ class PostgresOutageIT
             val response = post.get(2, TimeUnit.MINUTES)
             assertThat(response.status).describedAs("POST status, body %s", response.body).isEqualTo(200)
             assertThat(response.body["fee"].decimalValue()).isEqualByComparingTo(FEE)
-            assertThat(StoredWorkflows.responseOf(workflowId)?.fee).isEqualByComparingTo(FEE)
+            assertThat(StoredWorkflows.response(transactionId)?.fee).isEqualByComparingTo(FEE)
             assertChargedOnce(request)
         }
 
@@ -163,7 +162,7 @@ class PostgresOutageIT
             chargedFeesCache.invalidate(transactionIdOf(request))
             val uncached = api.submit(bodyOf(request))
 
-            // then: without Postgres the app can't tell its workflow, so it asks to send it again later
+            // then: without Postgres the app can't tell whether it is charged, so it asks to send it again later
             assertThat(uncached.status).describedAs("uncached POST status, body %s", uncached.body).isEqualTo(503)
 
             // when: Postgres is back, and the request is sent again until the app's pool has replaced the cut connections
@@ -210,7 +209,7 @@ class PostgresOutageIT
             val again = api.submit(bodyOf(request))
             val took = Duration.ofNanos(System.nanoTime() - started)
 
-            // then: the lookup and the start each gave up after fee-cache.lookup-timeout (1 s)
+            // then: the lookup gave up after fee-cache.lookup-timeout (1 s), and Restate was not asked
             assertThat(again.status).describedAs("POST status, body %s", again.body).isEqualTo(503)
             assertThat(took).describedAs("answered in").isLessThan(HANG_BOUND)
             assertThat(calculator.count(transactionIdOf(request))).describedAs("calculations").isEqualTo(1)
@@ -246,17 +245,15 @@ class PostgresOutageIT
         }
 
         // Restate's own count of failed attempts of the run
-        private fun retries(workflowId: String): Long = RestateTestEnvironment.admin
-            .query("$RETRY_COUNT 'FeeWorkflow/$workflowId/run'")
+        private fun retries(transactionId: String): Long = RestateTestEnvironment.admin
+            .query("$RETRY_COUNT 'FeeWorkflow/$transactionId/run'")
             .singleOrNull()
             ?.get("retry_count")
             ?.asLong() ?: 0
 
         private fun assertChargedOnce(request: FeeRequest) {
             val transactionId = transactionIdOf(request)
-            val record = StoredFeeRecords.of(transactionId)
-            assertThat(record?.status).isEqualTo(FeeRecordStatus.CHARGED)
-            assertThat(record?.response?.fee).isEqualByComparingTo(FEE)
+            assertThat(StoredFeeRecords.of(transactionId)?.fee).isEqualByComparingTo(FEE)
             assertThat(StoredFeeRecords.count(transactionId)).isEqualTo(1)
             assertThat(calculator.count(transactionId)).describedAs("calculations").isEqualTo(1)
         }
@@ -288,7 +285,7 @@ class PostgresOutageIT
         private companion object {
             val FEE = BigDecimal("1.50")
 
-            // well above the two 1 s database timeouts, far below FeeApi's own 60 s: a call that waited for the database fails it
+            // well above the 1 s lookup timeout, far below FeeApi's own 60 s: a call that waited for the database fails it
             val HANG_BOUND: Duration = Duration.ofSeconds(10)
 
             // Restate's query API takes no parameters: the run's target is appended, quoted

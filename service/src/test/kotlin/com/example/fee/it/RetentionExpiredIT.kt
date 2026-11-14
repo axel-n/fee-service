@@ -2,8 +2,6 @@ package com.example.fee.it
 
 import com.example.fee.contract.FeeRequest
 import com.example.fee.contract.FeeResponse
-import com.example.fee.record.FeeRecord
-import com.example.fee.record.FeeRecordStatus
 import com.github.benmanes.caffeine.cache.Cache
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
@@ -64,36 +62,30 @@ class RetentionExpiredIT
             assertThat(second.status).describedAs("second POST status, body %s", second.body).isEqualTo(200)
             assertThat(second.body).isEqualTo(first.body)
             assertThat(StoredWorkflows.step(request)).isNull()
-            assertThat(chargedFeesCache.getIfPresent(transactionIdOf(request))).isEqualTo(recorded.response)
+            assertThat(chargedFeesCache.getIfPresent(transactionIdOf(request))).isEqualTo(recorded)
             assertChargedOnce(request)
         }
 
-        private fun chargedRecord(request: FeeRequest): FeeRecord {
-            val record = checkNotNull(StoredFeeRecords.of(transactionIdOf(request))) { "no record for ${request.transactionId}" }
-            assertThat(record.status).isEqualTo(FeeRecordStatus.CHARGED)
-            return record
-        }
+        private fun chargedRecord(request: FeeRequest): FeeResponse =
+            checkNotNull(StoredFeeRecords.of(transactionIdOf(request))) { "no record for ${request.transactionId}" }
 
         private fun purgeRunOf(request: FeeRequest) {
             RestateTestEnvironment.admin.purgeInvocation(invocationIdOf(request))
-            awaitUntil("the purged workflow ${StoredWorkflows.keyOf(request)} is forgotten") {
+            awaitUntil("the purged workflow ${request.transactionId} is forgotten") {
                 StoredWorkflows.step(request) == null
             }
         }
 
         // The id of the workflow's run, from Restate's own invocation table
-        private fun invocationIdOf(request: FeeRequest): String {
-            val workflowId = checkNotNull(StoredWorkflows.keyOf(request)) { "no record for ${request.transactionId}" }
-            return RestateTestEnvironment.admin
-                .query("$INVOCATION_ID 'FeeWorkflow/$workflowId/run'")
-                .single()["id"]
-                .asText()
-        }
+        private fun invocationIdOf(request: FeeRequest): String = RestateTestEnvironment.admin
+            .query("$INVOCATION_ID 'FeeWorkflow/${transactionIdOf(request)}/run'")
+            .single()["id"]
+            .asText()
 
         private fun assertChargedOnce(request: FeeRequest) {
             assertThat(calculator.count(transactionIdOf(request))).describedAs("CALCULATE executions").isEqualTo(1)
             assertThat(StoredFeeRecords.count(transactionIdOf(request))).describedAs("fee records").isEqualTo(1)
-            assertThat(StoredFeeRecords.of(transactionIdOf(request))?.response?.fee).isEqualByComparingTo(BigDecimal("1.50"))
+            assertThat(StoredFeeRecords.of(transactionIdOf(request))?.fee).isEqualByComparingTo(BigDecimal("1.50"))
         }
 
         private fun transactionIdOf(request: FeeRequest): String = checkNotNull(request.transactionId)

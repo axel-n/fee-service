@@ -1,7 +1,6 @@
 package com.example.fee.it
 
 import com.example.fee.contract.FeeRequest
-import com.example.fee.record.FeeRecordStatus
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
@@ -82,7 +81,7 @@ class RejectedIT
             assertThat(corrected.body["fee"].decimalValue()).isEqualByComparingTo(BigDecimal("1.50"))
             assertThat(StoredWorkflows.response(valid)?.fee).isEqualByComparingTo(BigDecimal("1.50"))
             assertThat(calculator.count(transactionId)).describedAs("CALCULATE executions").isEqualTo(1)
-            assertThat(StoredFeeRecords.of(transactionId)?.status).isEqualTo(FeeRecordStatus.CHARGED)
+            assertThat(StoredFeeRecords.of(transactionId)?.fee).isEqualByComparingTo(BigDecimal("1.50"))
         }
 
         @Test

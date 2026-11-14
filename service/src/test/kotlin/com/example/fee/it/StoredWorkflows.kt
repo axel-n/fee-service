@@ -9,34 +9,24 @@ import dev.restate.client.kotlin.workflowHandle
 import kotlinx.coroutines.runBlocking
 
 /**
- * Reads `FeeWorkflow` runs straight from the shared Restate's ingress, by the `workflow_id` `FeeService` stored on the
- * transaction's fee record, so a test sees what the workflow itself returned. The lookups by transaction read that
- * record in Postgres; while Postgres is down, a test reads by the workflow id it noted before.
+ * Reads `FeeWorkflow` runs straight from the shared Restate's ingress, by their key, the `transaction_id`, so a test
+ * sees what the workflow itself returned. Needs no Postgres, so it works during a Postgres outage too.
  */
 object StoredWorkflows {
-    /** The workflow key of the transaction of [request]: its record's `workflow_id`, `null` while it has no record. */
-    fun keyOf(request: FeeRequest): String? = keyOf(checkNotNull(request.transactionId))
-
-    /** The workflow key of [transactionId]: its record's `workflow_id`, `null` while it has no record. */
-    fun keyOf(transactionId: String): String? = StoredFeeRecords.of(transactionId)?.workflowId
-
     /** The step the workflow of [request] is at, `DONE` once it returned, `null` if it never started. */
     fun step(request: FeeRequest): WorkflowStep? = step(checkNotNull(request.transactionId))
 
     /** The step the workflow of [transactionId] is at, `DONE` once it returned, `null` if it never started. */
-    fun step(transactionId: String): WorkflowStep? = keyOf(transactionId)?.let(::stepOf)
-
-    /** The step of the workflow [workflowId], `DONE` once it returned, `null` if it never started. */
-    fun stepOf(workflowId: String): WorkflowStep? = runBlocking { TestIngress.client.workflow<FeeWorkflow>(workflowId).status() }
+    fun step(transactionId: String): WorkflowStep? = runBlocking { TestIngress.client.workflow<FeeWorkflow>(transactionId).status() }
 
     /** The response the workflow of [request] returned, or `null` while it has none yet. */
-    fun response(request: FeeRequest): FeeResponse? = keyOf(request)?.let(::responseOf)
+    fun response(request: FeeRequest): FeeResponse? = response(checkNotNull(request.transactionId))
 
-    /** The response the workflow [workflowId] returned, or `null` while it has none yet. */
-    fun responseOf(workflowId: String): FeeResponse? {
+    /** The response the workflow of [transactionId] returned, or `null` while it has none yet. */
+    fun response(transactionId: String): FeeResponse? {
         val output =
             TestIngress.client
-                .workflowHandle<FeeResponse>("FeeWorkflow", workflowId)
+                .workflowHandle<FeeResponse>("FeeWorkflow", transactionId)
                 .getOutput()
                 .response()
         return if (output.isReady) output.value else null

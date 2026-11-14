@@ -1,6 +1,5 @@
 package com.example.fee.it
 
-import com.example.fee.record.FeeRecordStatus
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
@@ -98,14 +97,13 @@ class HappyPathIT
             assertThat(body["rate"].decimalValue()).isEqualByComparingTo(rate)
             assertThat(body["description"].asText()).isEqualTo(description)
 
-            // then: Postgres holds the record as CHARGED with that response
+            // then: Postgres holds the record with that charge
             val record = StoredFeeRecords.of(transactionId)
             assertThat(record).isNotNull
-            assertThat(record?.status).isEqualTo(FeeRecordStatus.CHARGED)
-            assertThat(record?.response?.transactionId).isEqualTo(transactionId)
-            assertThat(record?.response?.fee).isEqualByComparingTo(fee)
-            assertThat(record?.response?.rate).isEqualByComparingTo(rate)
-            assertThat(record?.response?.description).isEqualTo(description)
+            assertThat(record?.transactionId).isEqualTo(transactionId)
+            assertThat(record?.fee).isEqualByComparingTo(fee)
+            assertThat(record?.rate).isEqualByComparingTo(rate)
+            assertThat(record?.description).isEqualTo(description)
 
             // then: the fee was calculated once
             assertThat(calculator.count(transactionId)).describedAs("CALCULATE executions").isEqualTo(1)

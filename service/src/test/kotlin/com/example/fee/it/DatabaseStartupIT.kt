@@ -80,8 +80,7 @@ class DatabaseStartupIT {
         // every column the index needs, but not the request's asset_type, state and created_at
         const val OUTDATED_TABLE = """
             CREATE TABLE fee_record (
-                transaction_id TEXT PRIMARY KEY, status TEXT NOT NULL, workflow_id TEXT NOT NULL,
-                started_at TIMESTAMPTZ NOT NULL, amount NUMERIC, asset TEXT, type TEXT, fee NUMERIC, rate NUMERIC,
+                transaction_id TEXT PRIMARY KEY, amount NUMERIC, asset TEXT, type TEXT, fee NUMERIC, rate NUMERIC,
                 description TEXT, charged_at TIMESTAMPTZ
             )
         """

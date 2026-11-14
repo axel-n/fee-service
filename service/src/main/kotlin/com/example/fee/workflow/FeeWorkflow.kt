@@ -15,16 +15,15 @@ import dev.restate.sdk.common.StateKey
 import dev.restate.sdk.kotlin.context
 import dev.restate.sdk.kotlin.state
 import dev.restate.sdk.kotlin.stateKey
-import dev.restate.sdk.kotlin.workflowKey
 import dev.restate.serde.TypeTag
 import dev.restate.serde.kotlinx.typeTag
 import org.springframework.stereotype.Component
 
 /**
  * Calculates and charges the fee of one transaction: CALCULATE → CHARGE, each a journaled step wrapped by [StepHook].
- * The workflow key is the transaction's `workflow_id`, the UUID `FeeService` stored on its fee record before it
- * submitted the run. CHARGE charges the fee by recording it on that record in Postgres. On a retry Restate replays the
- * journaled steps instead of running them again.
+ * The workflow key is the `transaction_id`, so an id has one run, which every request of it joins. CHARGE charges the
+ * fee by inserting the transaction's record in Postgres, and the run returns the charge that record holds. On a retry
+ * Restate replays the journaled steps instead of running them again.
  *
  * Only `FeeService` starts a run, after it validated the request, so the workflow doesn't validate again. The handlers
  * are deterministic: the fee numbers and Postgres are only reached inside [FeeWorkflowContext.journaled]. They reach
@@ -45,7 +44,8 @@ class FeeWorkflow(
     private val context: FeeWorkflowContext,
 ) {
     /**
-     * Calculates, then charges the fee of [request], exactly as the client sent it, and returns the charged response.
+     * Calculates, then charges the fee of [request], exactly as the client sent it, and returns the charged response:
+     * the one the record holds, so a charge recorded earlier for the id (by a run Restate has since forgotten) stands.
      * The request is journaled as the workflow input.
      */
     @Workflow
@@ -67,11 +67,9 @@ class FeeWorkflow(
                 context.journaled("calculate", typeTag<FeeQuote>()) { feeCalculator.calculate(transaction) }
             }
         val response = response(transaction, quote)
-        val workflowId = context.key()
-        step(WorkflowStep.CHARGE, transaction.transactionId) {
-            context.journaled("charge", typeTag<Unit>()) { feeRecords.charge(transaction, workflowId, response) }
+        return step(WorkflowStep.CHARGE, transaction.transactionId) {
+            context.journaled("charge", typeTag<FeeResponse>()) { feeRecords.charge(transaction, response) }
         }
-        return response
     }
 
     // The state write and the hooks run on every replay too: the write is deterministic, and a hook that throws is how
@@ -102,13 +100,10 @@ class FeeWorkflow(
 }
 
 /**
- * What [FeeWorkflow] needs from Restate: its key, journaled actions and the current step in its state. The handlers
- * reach Restate only through this, so tests replace it with an in-memory fake.
+ * What [FeeWorkflow] needs from Restate: journaled actions and the current step in its state. The handlers reach
+ * Restate only through this, so tests replace it with an in-memory fake.
  */
 interface FeeWorkflowContext {
-    /** The workflow key: the transaction's `workflow_id`. */
-    suspend fun key(): String
-
     /**
      * Runs [action] once and journals its result as [name], serialized as [type]; a replay returns the journaled
      * result without running [action]. For anything non-deterministic or with side effects, such as the fee numbers or
@@ -130,8 +125,6 @@ interface FeeWorkflowContext {
  */
 @Component
 class RestateFeeWorkflowContext : FeeWorkflowContext {
-    override suspend fun key(): String = workflowKey()
-
     // context(), not the top-level runBlock: that one takes only non-null results, and this interface is generic over
     // any result type.
     @Suppress("DEPRECATION")

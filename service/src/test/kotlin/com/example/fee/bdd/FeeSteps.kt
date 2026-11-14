@@ -7,7 +7,6 @@ import com.example.fee.it.FeeApi
 import com.example.fee.it.StoredFeeRecords
 import com.example.fee.it.StoredWorkflows
 import com.example.fee.it.TestClock
-import com.example.fee.record.FeeRecordStatus
 import io.cucumber.datatable.DataTable
 import io.cucumber.java.After
 import io.cucumber.java.en.Given
@@ -207,7 +206,7 @@ class FeeSteps(
     fun theFeeWasChargedExactlyOnce() {
         val transactionId = submittedTransactionId()
         assertThat(calculator.count(transactionId)).describedAs("CALCULATE executions").isEqualTo(1)
-        assertThat(StoredFeeRecords.of(transactionId)?.response?.fee)
+        assertThat(StoredFeeRecords.of(transactionId)?.fee)
             .isEqualByComparingTo(chargedResponse().body["fee"].decimalValue())
     }
 
@@ -242,12 +241,11 @@ class FeeSteps(
         assertThat(StoredFeeRecords.count(submittedTransactionId())).describedAs("fee records").isEqualTo(1)
         val record = StoredFeeRecords.of(submittedTransactionId())
         val charged = chargedResponse().body
-        assertThat(record?.status).isEqualTo(FeeRecordStatus.CHARGED)
-        assertThat(record?.response?.fee).isEqualByComparingTo(charged["fee"].decimalValue())
-        assertThat(record?.response?.amount).isEqualByComparingTo(charged["amount"].decimalValue())
+        assertThat(record?.fee).isEqualByComparingTo(charged["fee"].decimalValue())
+        assertThat(record?.amount).isEqualByComparingTo(charged["amount"].decimalValue())
     }
 
-    /** Read from Postgres itself: the record holds every field of the request as sent, and when it was started and charged. */
+    /** Read from Postgres itself: the record holds every field of the request as sent, and when it was charged. */
     @Then("the request is stored with the fee record")
     fun theRequestIsStoredWithTheFeeRecord() {
         val sent = checkNotNull(request) { "No transaction request was given" }
@@ -258,8 +256,7 @@ class FeeSteps(
         assertThat(stored.type.value).isEqualTo(sent["type"])
         assertThat(stored.state.value).isEqualTo(sent["state"])
         assertThat(stored.createdAt).isEqualTo(CreatedAtFormat.parseOrNull(sent["created_at"] as String))
-        val times = checkNotNull(StoredFeeRecords.timesOf(submittedTransactionId()))
-        assertThat(times.chargedAt).isNotNull().isAfterOrEqualTo(times.startedAt)
+        assertThat(StoredFeeRecords.chargedAtOf(submittedTransactionId())).describedAs("charged_at").isNotNull()
     }
 
     /** The response of the scenario's latest submission, waiting for it if it is still in flight. */

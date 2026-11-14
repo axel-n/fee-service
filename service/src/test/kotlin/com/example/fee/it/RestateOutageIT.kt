@@ -1,7 +1,6 @@
 package com.example.fee.it
 
 import com.example.fee.contract.FeeRequest
-import com.example.fee.record.FeeRecordStatus
 import com.example.fee.workflow.WorkflowStep
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.AfterEach
@@ -73,8 +72,7 @@ class RestateOutageIT
 
             // then: the record is charged with the fee
             val record = StoredFeeRecords.of(transactionId)
-            assertThat(record?.status).isEqualTo(FeeRecordStatus.CHARGED)
-            assertThat(record?.response?.fee).isEqualByComparingTo(BigDecimal("1.50"))
+            assertThat(record?.fee).isEqualByComparingTo(BigDecimal("1.50"))
         }
 
         // A frozen Restate doesn't answer its admin API: the freeze really happened

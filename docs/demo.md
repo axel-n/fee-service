@@ -1,10 +1,3 @@
-## preparations
-podman compose up -d --force-recreate restate
-
-### if IDEA does not work:
-java -jar service/target/fee-service-0.0.1-SNAPSHOT.jar --spring.profiles.active=local --server.port=8082
-
-
 ## 1. Happy path: the sample transaction from `requirements.md`
 
 Tested by: `HappyPathIT`; `fee_calculation.feature`, "The sample transaction from the requirements …"

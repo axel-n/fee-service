@@ -25,7 +25,7 @@ class FeeCacheProperties(
         requireNotNull(expireAfterWrite) { "$PREFIX.expire-after-write is missing; set it in application.yml" }
             .also { require(it.isPositive) { "$PREFIX.expire-after-write must be positive, was $it" } }
 
-    /** How long `FeeService` waits for each Postgres call (the lookup of a cache miss, the start of a record); then 503. */
+    /** How long `FeeService` waits for Postgres to look up the charge of an id the cache misses; then 503. */
     val lookupTimeout: Duration =
         requireNotNull(lookupTimeout) { "$PREFIX.lookup-timeout is missing; set it in application.yml" }
             .also { require(it.isPositive) { "$PREFIX.lookup-timeout must be positive, was $it" } }

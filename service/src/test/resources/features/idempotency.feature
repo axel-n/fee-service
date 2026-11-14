@@ -1,6 +1,6 @@
 Feature: Idempotency
-  A transaction_id has one fee record, and with it one workflow_id, so Restate runs one workflow per transaction_id, and
-  every submission of that id, one call after the other or by several callers at once, attaches to that run. The first
+  The transaction_id is the workflow key, so Restate runs one workflow per transaction_id, and every submission of that
+  id, one call after the other or by several callers at once, attaches to that run. The first
   payload Restate receives is the one processed and charged, once, and every caller gets that run's response, whatever
   valid payload it sent. Once charged, the id is answered from the app's cache or Postgres without Restate, with the same
   response, and Postgres holds one fee record per id. An invalid payload is rejected by the app before it reaches Restate

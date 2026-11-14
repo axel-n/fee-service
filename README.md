@@ -14,27 +14,26 @@ TransactionFeeController                HTTP only
 FeeService
   ├─ 1. RequestValidator ─────────────► invalid: 400 / 422, no Postgres or Restate call
   ├─ 2. ChargedFees ──────────────────► already charged: 200, no Restate call
-  │       Caffeine cache, then Postgres
-  ├─ 3. FeeRecordRepository.start       fee_record row: transaction_id → new workflow_id (UUID)
-  │                                     (a repeated id reuses the row's workflow_id)
-  └─ 4. FeeWorkflowClients              submit FeeWorkflow/<workflow_id>, wait for the result
+  │       Caffeine cache, then Postgres   (Postgres unreachable: 503, no Restate call)
+  └─ 3. FeeWorkflowClients              submit FeeWorkflow/<transaction_id>, wait for the result
           ▼
-        Restate                         journals every step, retries after a crash
+        Restate                         one run per transaction_id; journals every step, retries after a crash
           ▼
         FeeWorkflow
           CALCULATE  FeeCalculator: the FeeRule of the transaction type
-          CHARGE     FeeRecordRepository.charge: the row gets the fee and becomes CHARGED
+          CHARGE     FeeRecordRepository.charge: inserts the fee_record row with the request and the fee
           ▼
         200 with the fee
 ```
 
-- **Charged once:** a `transaction_id` has a single `fee_record` row, and so a single workflow. Sending it again
-  returns the first result.
+- **Charged once:** the `transaction_id` is the workflow key, so Restate runs one workflow per id, and every request
+  of the id gets that run's result. The charge is one `INSERT … ON CONFLICT DO NOTHING` on the `fee_record` primary key,
+  so an id is charged once even after Restate has forgotten its run, and a charged id is answered from the cache or
+  Postgres.
 - **Survives failure:** after a crash, Restate replays the steps that already finished from its journal instead of
-  running them again.
-- **Traceable:** `fee_record.workflow_id` is the Restate workflow key, and the app logs
-  `Transaction <id> is processed by workflow <workflow_id>`. You can look the transaction up in the Restate UI
-  (`localhost:9070`).
+  running them again. A CHARGE that runs again finds its own row and returns the stored charge.
+- **Traceable:** the Restate workflow key is the `transaction_id`, so you can look a transaction up in the Restate UI
+  (`localhost:9070`) by its id.
 - **Extensible:** a new transaction type is an enum value, one `FeeRule` class with its `*FeeProperties` and its fee
   numbers in `application.yml`; a new check is one `TransactionValidator` class.
 
@@ -73,11 +72,11 @@ To run the app on the host (JDK 25 and Maven 3.9+), with only Restate and Postgr
 
 ```bash
 cd dev-setup && podman compose up -d restate postgres && cd ..
-mvn spring-boot:run -Dspring-boot.run.profiles=local
+mvn clean package
+java -jar service/target/fee-service-0.0.1-SNAPSHOT.jar --spring.profiles.active=local --server.port=8081
 ```
 
 Either way the API is at `localhost:8081`. On startup the app creates its table and registers itself with Restate.
-If the dev container is running too, it already holds port 8081, so start the host app with `SERVER_PORT=8082`.
 Every setting, fees included, is in [`application.yml`](service/src/main/resources/application.yml) together with its
 environment variable. A restart applies a change.
 
@@ -106,8 +105,8 @@ mvn verify   # + integration tests and Cucumber features against Testcontainers 
 ```
 
 Every build needs a container engine, because it generates the jOOQ classes from a throwaway Postgres. The recovery
-tests crash the app at every step and right after every Postgres write, restart its endpoint, freeze Restate and take
-Postgres down. Each test counts the **CALCULATE executions** to prove that a transaction is calculated and charged
+tests crash the app at every step and right after the charge is written to Postgres, restart its endpoint, freeze
+Restate and take Postgres down. Each test counts the **CALCULATE executions** to prove that a transaction is calculated and charged
 exactly once.
 
 ## Assumptions

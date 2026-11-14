@@ -11,7 +11,7 @@ enum class WorkflowStep {
     /** `FeeCalculator` in a journaled step, because the fee numbers come from configuration. */
     CALCULATE,
 
-    /** `FeeRecordRepository.charge` in a journaled step: the fee is charged by recording it on the transaction's row. */
+    /** `FeeRecordRepository.charge` in a journaled step: the fee is charged by inserting the transaction's record. */
     CHARGE,
 
     /** The workflow returned the charged response. */
