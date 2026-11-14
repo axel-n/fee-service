@@ -16,6 +16,9 @@ import kotlin.time.toKotlinDuration
  * responses are found and kept. They never change, so an entry can't go stale on any instance, and the cache's size and
  * expiry only bound its memory. Rejections, conflicts and runs still in progress are left to Restate.
  */
+
+private val log = LoggerFactory.getLogger(ChargedFees::class.java)
+
 @Component
 class ChargedFees(
     private val cache: Cache<String, FeeResponse>,
@@ -46,8 +49,4 @@ class ChargedFees(
             log.warn("Reading the fee record of {} failed, asking Restate: {}", transactionId, e.toString())
             null
         }
-
-    private companion object {
-        private val log = LoggerFactory.getLogger(ChargedFees::class.java)
-    }
 }

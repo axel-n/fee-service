@@ -14,6 +14,8 @@ it runs on.
 
 - **The design is the source of truth:** `docs/design.md` (goal, fee table, how Restate is used, class design, wiring,
   call graph, extension points, recovery guarantees). Read it before starting any work.
+- **How code is written:** `docs/code-style.md` (money, Kotlin, Spring and time, SQL, layout, JSON, errors). Read it
+  before writing code.
 - If a change conflicts with the design or these rules, stop and ask; don't silently deviate. When the design changes,
   update `docs/design.md` in the same change.
 
@@ -77,8 +79,7 @@ Approach:
 2. **Fee records live in PostgreSQL, the workflow's journal and step in Restate, and nothing anywhere else.** The `fee_record`
    table is the system of record of every claim and charge. The Caffeine cache holds only copies of charged fees, which never
    change, and is never a system of record. No files, no other database or store.
-3. **Money is `BigDecimal`.** Never `Double`/`Float`. Create values with `BigDecimal("0.0015")`, never `BigDecimal(0.0015)`. Round only with
-   `RoundingMode.HALF_EVEN` at the asset's decimals. Compare with `compareTo`, not `==`.
+3. **Money is `BigDecimal`, never `Double`/`Float`.** How it is created, rounded and compared: Money in `docs/code-style.md`.
 4. **Only `SETTLED - PENDING FEE` is processed. Only `USD` and `EUR` (`FIAT`) are supported.**
 5. **Don't install software** or run Docker commands that change the user's environment. The user runs Restate and Postgres.
 6. **Don't commit or push** unless the user asks.
@@ -160,39 +161,13 @@ Follow the call graph in `docs/design.md`:
 
 ## Code style
 
-- Code is ktlint-clean. Run `mvn ktlint:format`, then fix by hand what it can't, e.g. a file must be named after its
-  single class (a test class takes its file's name, `FeeRuleTest`), and a KDoc can't be followed by a `//` comment.
-- Idiomatic Kotlin: `val` over `var`, data classes for values, sealed types for closed hierarchies, no `!!`, no `lateinit`
-  in production code.
-- Number literals of 1000 or more are grouped by thousands with underscores, in main and test code: `1_000`, `65_535`,
-  `3_000_000_000L`. Strings can't take underscores (JSON, `BigDecimal("…")`), so a whole `BigDecimal` constant is written
-  `3_000_000_000.toBigDecimal()`; a fraction stays `BigDecimal("0.0015")`. Ports are grouped too (`9_080`); only a year
-  in a date stays as written (`LocalDateTime.of(2023, 8, 30, …)`).
-- Constructor injection only (no field injection). Every dependency should be mockable or replaceable.
-- Inject `Clock` instead of calling `LocalDateTime.now()` / `Instant.now()` directly.
-- Tunable values (fee numbers, URLs, ports, timeouts) come from `application.yml` through `@ConfigurationProperties` classes and are
-  never hardcoded. Defaults live only in the packaged `application.yml`. Renaming a key breaks existing override files and
-  environment variables; call it out.
-- **Every `@Configuration` and every `@ConfigurationProperties` class lives in `config`**, never next to the bean it defines
-  or that uses it. Properties classes: one file per top-level section of `application.yml`.
-- **SQL is a named constant**: each statement is a `private const val` (a raw string for more than one line) in the
-  companion object of the class that runs it, with named bind parameters (`:id`), never a string glued together at the
-  call. Only where an API takes no parameters (Restate's query API) is a quoted value appended to a constant prefix.
-- Package and file layout: a package holds one kind of class, and an extension point's implementations get a sub-package
-  (`fee.rule`, `fee.formula`, `validation.rule`). A file holds one main type plus the small types and helpers that exist only to
-  serve it (its result and field types, its default implementation, internal helpers). Don't create a file for a lone data class,
-  enum or helper function that belongs to another type. A test file mirrors its production file, one test class per production class.
-- JSON uses snake_case through `@JsonProperty` on DTOs; a `BigDecimal` property carries `@PlainBigDecimal` (a plain number).
-  Durable and contract types use only `com.fasterxml.jackson.annotation`, which both Jackson generations read. A databind
-  annotation (`@JsonSerialize`, …) is read by one generation only, so it goes into a bundle for both, as `@PlainBigDecimal` does.
-- Errors are subclasses of the sealed `FeeException` (api module, each with a `FeeErrorCode`) and are mapped to `ProblemDetail`
-  in `ApiExceptionHandler`. A new property of an error goes into `FeeProblem` too, so clients can read it.
-- Small classes with one responsibility. Comment only *why*, not *what*. Add KDoc to public extension points (`FeeRule`, `TransactionValidator`).
+In [`docs/code-style.md`](docs/code-style.md).
 
 ## Testing
 
 - Every production class gets a test. Test names describe behaviour, e.g.
   ``fun `rejects state PENDING with readable message`()``.
+- Every test runs: never disable or skip one (`@Disabled`, an assumption) to get green. The Stop hook (below) fails on a skipped test.
 - Structure each test as `// given` / `// when` / `// then`.
 - Unit tests (`*Test`, Surefire): no Spring context unless it is a `@WebMvcTest` slice. Use plain constructors, Mockito mocks and
   `Clock.fixed(...)`.
@@ -229,9 +204,9 @@ Follow the call graph in `docs/design.md`:
 mvn ktlint:format    # reformats main and test sources; every build fails while ktlint reports a problem
 mvn test             # unit tests only (fast, no Docker)
 mvn verify           # + Testcontainers and Cucumber (needs Docker)
+mvn clean verify     # the gate; in Claude Code the Stop hook runs it (below)
 mvn spring-boot:run      # from the root: starts the app (service module); it registers its endpoint with Restate (README, "Run")
 mvn -pl api -am install  # puts fee-service-api (and the parent pom it needs) in the local repository for other services
-scripts/check.sh     # the gate: rules + mvn clean verify, every test must actually run (--fast, --unit: see --help)
 ```
 
 Settings change without a rebuild: environment variables (`RESTATE_INGRESS_URL=…`) or a `config/application.yml` in the working
@@ -240,13 +215,17 @@ directory (see Configuration in `docs/design.md`).
 The dev environment is described in `dev-setup/README.md`: `podman compose` starts the dev Restate, the dev Postgres and the dev container, which
 has nested podman so Testcontainers runs inside it.
 
-Run `scripts/check.sh` before reporting a change as done. Without a container engine run `scripts/check.sh --unit`, and say
-explicitly that the ITs didn't run.
+**The gate:** a change is done when `mvn clean verify` passes with every test run and none skipped (a module whose tests
+didn't run fails the build). In Claude Code a Stop hook (`.claude/settings.json`, `.claude/hooks/verify.sh`) runs it
+when the session ends a turn and a source (pom, `.editorconfig`, anything under `src/`) changed since its last run,
+whoever changed it, and keeps the session working while the build is red or a test was skipped. It needs a container
+engine for the ITs. While working, run `mvn test` or the ITs you need, and leave `mvn clean verify` to the hook: a
+`clean` of your own only makes the hook build everything again.
 
 ## Workflow for agents
 
 1. Implement the change with tests, keeping it small and focused.
-2. Run `scripts/check.sh` and report the results honestly, including failures.
+2. Let the gate pass (in Claude Code the Stop hook runs it) and report its result honestly, including failures.
 3. Update `docs/design.md` (and the README) when the design or the behaviour changes, following Documentation below.
 4. Commits (only when asked): imperative subject ≤ 72 chars, one change per commit where practical.
 

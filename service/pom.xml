@@ -113,7 +113,8 @@
 
     <build>
         <plugins>
-            <!-- Integration and BDD tests (*IT), mvn verify. Boot's parent binds integration-test and verify -->
+            <!-- Integration and BDD tests (*IT), mvn verify. Boot's parent binds integration-test and verify. No IT run
+                 fails the build instead of passing empty -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-failsafe-plugin</artifactId>
@@ -121,6 +122,7 @@
                     <includes>
                         <include>**/*IT.java</include>
                     </includes>
+                    <failIfNoTests>true</failIfNoTests>
                 </configuration>
             </plugin>
             <!-- The Restate SDK loads its native state machine: java -jar grants it native access through the manifest,

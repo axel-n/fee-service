@@ -6,18 +6,20 @@ and what a person decides. Design: [`design.md`](design.md). Agent rules: [`../A
 ## In short
 
 A person and an AI assistant (Claude, through Claude Code) agree on the design in writing, and AI sessions write the code
-and its tests against it. A change counts as done only when `scripts/check.sh` passes: the rule checks, then the full build
-with every unit, integration and BDD test actually run. A person owns the stack, the dependencies, the scope and the commits.
+and its tests against it. A change counts as done only when `mvn clean verify` passes with every unit, integration and
+BDD test actually run, and a Claude Code hook runs that build itself before a session finishes. A person owns the stack,
+the dependencies, the scope and the commits.
 
 ## The context every session reads
 
 A coding session starts with no memory. Whatever isn't written down gets made up again, and differently each time. So
-the plan lives in three files, and every session reads them before it changes anything:
+the plan lives in four files, and every session reads them before it changes anything:
 
 | File | Role for the AI |
 |------|-----------------|
 | [`AGENTS.md`](../AGENTS.md) | The rules: priorities and approach (KISS, YAGNI, DRY, SOLID), the fixed stack, the hard rules (no new dependencies, fee records only in Postgres and nothing stored anywhere else, money is `BigDecimal`, …), the architecture and call graph rules, Restate determinism, tests, and "stop and ask instead of guessing" |
 | [`docs/design.md`](design.md) | What is built: fee table, how Restate is used, classes, wiring, call graph, extension points, configuration, recovery guarantees |
+| [`docs/code-style.md`](code-style.md) | How code is written: money as `BigDecimal`, idiomatic Kotlin, constructor injection, an injected `Clock`, configuration, SQL, layout, JSON, errors |
 | [`requirements.md`](../requirements.md) | The scope: nothing beyond it without asking |
 
 These files describe **only the current state**. History (old plans, task lists, superseded decisions) is left out: a
@@ -27,12 +29,14 @@ session reads every line as an instruction, and an outdated line is a wrong one.
 ## How a change is made
 
 1. A person describes the change.
-2. The session reads `AGENTS.md` and `docs/design.md`. It stops and asks when the change conflicts with them, needs a new
-   dependency, or goes beyond `requirements.md`.
+2. The session reads `AGENTS.md`, `docs/design.md` and `docs/code-style.md`. It stops and asks when the change conflicts
+   with them, needs a new dependency, or goes beyond `requirements.md`.
 3. It makes the change with its tests, keeping it small, and updates `docs/design.md` and the README when the design or
    the behaviour changes.
-4. It runs `scripts/check.sh` and reports the result as it is, failures included. Without a container engine it runs
-   `scripts/check.sh --unit` and says that the integration tests didn't run.
+4. The gate is `mvn clean verify`, and the session doesn't run it itself: a Stop hook (`.claude/hooks/verify.sh`) does,
+   when the session ends a turn and a source changed since the last build. While the build is red or a test was
+   skipped, the session can't finish; if it stops without changing anything more, the person is told the build is red.
+   The session reports the result as it is, failures included.
 5. The person reviews the change and commits it. Agents commit only when asked.
 
 ## What keeps AI-written code honest
@@ -41,12 +45,12 @@ These guards target the ways an AI agent tends to go wrong:
 
 | Risk | Guard |
 |------|-------|
-| "Done" without proof | `scripts/check.sh` must pass, and its last line states what ran: `check: OK unit=<n> it=<n>` |
-| Dropping a test to get green | `check.sh` fails on a disabled or skipped test, and on a module whose tests didn't run |
+| "Done" without proof | A Claude Code Stop hook runs `mvn clean verify` when a session ends a turn and a source changed since the last build. While the build is red the session can't finish, and the person sees the outcome: green with the number of tests run, or red |
+| Dropping a test to get green | The hook treats a skipped test (`@Disabled`, a failed assumption) as red, and Surefire and Failsafe fail a module whose tests didn't run |
 | A production class without a test | `TestCoverageAuditTest` fails for any file in `api/src/main/kotlin` or `service/src/main/kotlin` without its own test or a justified entry |
-| Quietly adding a library | Hard rule 1; `check.sh` fails on the dependencies `AGENTS.md` rules out |
-| Eroding the architecture | `check.sh` rules: pure packages import no Restate, the api module imports no Spring and nothing of the service, nothing outside `api` imports `api`, constructor injection only, `Clock` injected, no `!!` or `lateinit` |
-| Money as floating point | `check.sh` rules: no `Double`/`Float` in code that handles money, `BigDecimal` only from a `String` |
+| Quietly adding a library | Hard rule 1: only a person approves a new dependency |
+| Eroding the architecture | `AGENTS.md`'s architecture rules and [`code-style.md`](code-style.md), checked in review. The compiler refuses a Spring, Restate or service import in the api module's main code, whose compile scope has none of them |
+| Money as floating point | Hard rule 3 and Money in [`code-style.md`](code-style.md); the fee tests assert exact amounts with `compareTo` |
 | Plausible but untested claims about recovery | Crash at every step boundary and right after a Postgres write, endpoint restart, Restate outage, Postgres down or hanging, each counting the **CALCULATE executions** (README, "Tests") |
 | Mocking the library instead of testing it | Integration and BDD tests run against a real Restate and a real Postgres (Testcontainers) |
 | Non-deterministic workflow code | `AGENTS.md`'s Restate rules (clock and fee numbers only inside a journaled step), checked by `DeterminismIT` and the crash tests |
@@ -67,7 +71,7 @@ These guards target the ways an AI agent tends to go wrong:
 
 - **Plan in writing, then code.** The person's effort goes into the design, the rules and the reviews. A session is only
   as good as what it reads.
-- **Small changes, green every time.** Every change leaves `check.sh` passing, so a bad one is easy to spot and undo.
-- **Trust the gate, not the session's report.** "Done" counts only after `scripts/check.sh` passes.
+- **Small changes, green every time.** Every change leaves `mvn clean verify` passing, so a bad one is easy to spot and undo.
+- **Trust the gate, not the session's report.** "Done" counts only after `mvn clean verify` passes, and the hook runs it, not the session.
 - **Test against the real thing.** What the design assumes about Restate is proven by tests against a real Restate server.
 - **Docs hold the current state.** One fact in one place, rewritten when it changes, never appended to.

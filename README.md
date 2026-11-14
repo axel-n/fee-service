@@ -11,6 +11,7 @@ POST /transaction/fee          → 200 with the fee (or 504 when it is not charg
 - [Design](docs/design.md): goal, fee table, how Restate is used, class design, wiring, call graph, guarantees
 - [Demo](docs/demo.md): curl commands with their expected responses: the requirements' sample, the same id again,
   the other transaction types, an unknown type
+- [Code style](docs/code-style.md): money, Kotlin, Spring and time, configuration, SQL, layout, JSON, errors
 - [Dev environment](dev-setup/README.md): the dev Restate, the dev Postgres and the dev container (`podman compose`)
 - [How AI is used](docs/ai-usage.md): what every session reads, the gate, what a person decides
 
@@ -311,8 +312,12 @@ when (val failure = problem.toException()) {
 mvn ktlint:format     # formats the Kotlin sources: every build runs the ktlint check first and fails on a problem
 mvn test              # unit tests: no Docker, no Spring context except @WebMvcTest slices
 mvn verify            # + integration tests (Testcontainers Restate 1.8.1, Postgres 18.7) and Cucumber features; needs a container engine
-scripts/check.sh      # the project's gate: rule checks + mvn clean verify, and every test must actually run
+mvn clean verify      # the project's gate
 ```
+
+A module whose tests didn't run fails the build. Claude Code sessions on this repository run the gate themselves when
+they finish a turn and a source changed since the last build (a Stop hook, [`.claude/settings.json`](.claude/settings.json)), and keep
+working while it is red or a test was skipped.
 
 - **Unit tests** (`*Test`) cover every production class: each validator and its messages, each fee rule and building
   block (rounding, minimums, `BigDecimal` comparisons), the claim rules, the serde of every durable type, the cache of
