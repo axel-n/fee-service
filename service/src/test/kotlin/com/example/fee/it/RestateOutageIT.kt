@@ -2,7 +2,6 @@ package com.example.fee.it
 
 import com.example.fee.contract.FeeRequest
 import com.example.fee.record.FeeRecordStatus
-import com.example.fee.workflow.FeeOutcome
 import com.example.fee.workflow.WorkflowStep
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.AfterEach
@@ -59,11 +58,10 @@ class RestateOutageIT
             // when
             restate.thaw()
 
-            // then: the workflow completes as Charged
-            awaitUntil("the workflow has returned", timeout = Duration.ofSeconds(90)) { StoredWorkflows.outcome(request) != null }
-            val outcome = StoredWorkflows.outcome(request)
-            assertThat(outcome).isInstanceOf(FeeOutcome.Charged::class.java)
-            assertThat((outcome as FeeOutcome.Charged).response.fee).isEqualByComparingTo(BigDecimal("1.50"))
+            // then: the workflow completes with the charged fee
+            awaitUntil("the workflow has returned", timeout = Duration.ofSeconds(90)) { StoredWorkflows.response(request) != null }
+            val charged = StoredWorkflows.response(request)
+            assertThat(charged?.fee).isEqualByComparingTo(BigDecimal("1.50"))
             assertThat(StoredWorkflows.step(request)).isEqualTo(WorkflowStep.DONE)
 
             // then: the caller got the result, or a 504 if the outage outlasted the attach timeout
@@ -73,9 +71,9 @@ class RestateOutageIT
                 assertThat(response.body["fee"].decimalValue()).isEqualByComparingTo(BigDecimal("1.50"))
             }
 
-            // then: the record is completed with the fee
+            // then: the record is charged with the fee
             val record = StoredFeeRecords.of(transactionId)
-            assertThat(record?.status).isEqualTo(FeeRecordStatus.COMPLETED)
+            assertThat(record?.status).isEqualTo(FeeRecordStatus.CHARGED)
             assertThat(record?.response?.fee).isEqualByComparingTo(BigDecimal("1.50"))
         }
 

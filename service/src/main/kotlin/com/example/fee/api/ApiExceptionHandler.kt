@@ -1,6 +1,5 @@
 package com.example.fee.api
 
-import com.example.fee.contract.error.DuplicateTransactionException
 import com.example.fee.contract.error.FeeException
 import com.example.fee.contract.error.ValidationException
 import com.example.fee.contract.error.WorkflowTimeoutException
@@ -35,10 +34,6 @@ class ApiExceptionHandler : ResponseEntityExceptionHandler() {
             setProperty(VALUE, exception.value)
             setProperty(MESSAGE, exception.message)
         }
-
-    @ExceptionHandler(DuplicateTransactionException::class)
-    fun handleDuplicate(exception: DuplicateTransactionException): ProblemDetail =
-        problem(exception).apply { setProperty(TRANSACTION_ID, exception.transactionId) }
 
     /** A run Restate reports as not finished (470) after `restate.attach-timeout`: 504, naming the transaction to resend. */
     @ExceptionHandler(WorkflowTimeoutException::class)

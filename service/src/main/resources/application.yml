@@ -1,5 +1,5 @@
 # The packaged defaults: the only place they are written down. Override them with environment variables, a
-# config/application.yml in the working directory, or command-line arguments (docs/design.md, "Configuration").
+# config/application.yml in the working directory, or command-line arguments.
 # Renaming a key or a variable breaks existing override files and environments.
 
 spring:
@@ -47,15 +47,15 @@ restate:
   # as not finished (470)
   attach-timeout: ${RESTATE_ATTACH_TIMEOUT:30s}
 
-# The local cache of charged fees: FeeService answers a charged transaction_id from it, then from Postgres, before it
-# asks Restate. Charged fees never change, so the size and expiry only bound its memory
+# The local cache of charged fees: FeeService answers a charged transaction_id from it, then from Postgres, without
+# Restate. Charged fees never change, so the size and expiry only bound its memory
 fee-cache:
   # How many charged fees it holds at most
   maximum-size: ${FEE_CACHE_MAXIMUM_SIZE:1000}
   # How long a charged fee stays after it was put there
   expire-after-write: ${FEE_CACHE_EXPIRE_AFTER_WRITE:1d}
-  # How long FeeService waits for Postgres on a cache miss. Past it, as on a failed read, it asks Restate, which answers
-  # every transaction_id correctly: a database that hangs (a network partition) can't hold requests up
+  # How long FeeService waits for each Postgres call (the lookup of a cache miss, the start of a fee record). Past it,
+  # the request gets 503: a database that hangs (a network partition) can't hold requests up
   lookup-timeout: ${FEE_CACHE_LOOKUP_TIMEOUT:1s}
 
 # Fee numbers per transaction type, read by the *FeeProperties classes; descriptions are built from them.

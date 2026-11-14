@@ -20,7 +20,7 @@ private val log = LoggerFactory.getLogger(RestateEndpointLifecycle::class.java)
  *
  * Start listens, then registers the endpoint as `http://<restate.advertised-host>:<port>`. Registering the same URL again
  * after a restart keeps its deployment, so invocations pinned to it resume. A failed registration fails the start: an app
- * Restate can't reach would only ever answer 202.
+ * Restate can't reach would never finish a run, so every request would end in a 504.
  *
  * Stop closes the endpoint, then removes its deployment from Restate unless invocations that haven't finished still need
  * it. Removing it would strand them: Restate never resumes an invocation whose deployment is gone, not even at the same

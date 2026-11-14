@@ -12,15 +12,16 @@ import java.util.concurrent.atomic.AtomicInteger
  * The fee records of the shared IT app (it replaces `PostgresFeeRecordRepository` as the injected repository, see
  * [IntegrationTestBeans]): every call goes to Postgres, and is counted per `transaction_id` ([callCount]). A test arms
  * it for one `transaction_id` with [crashAfterCommitOnce]; the first time that write commits, it throws [SimulatedCrash]
- * right after, before Restate can journal the step's result. That is a crash between the commit and the journal entry:
- * Restate runs the step again, and the write must find what it committed the first time. Unarmed, it only counts, so
+ * right after. After a CHARGE that is a crash between the commit and Restate's journal entry: Restate runs the step
+ * again, and the write must find what it committed the first time. After a START it is the app dying between the insert
+ * and the submit: the request fails, and the next one of the id must reuse the record. Unarmed, it only counts, so
  * other ITs are unaffected.
  */
 class FaultInjectingFeeRecordRepository(
     private val postgres: PostgresFeeRecordRepository,
 ) : FeeRecordRepository {
     /** The writes a crash can follow. */
-    enum class Write { CLAIM, COMPLETE }
+    enum class Write { START, CHARGE }
 
     private val armed = ConcurrentHashMap<String, Write>()
     private val crashes = ConcurrentHashMap<String, AtomicInteger>()
@@ -34,18 +35,19 @@ class FaultInjectingFeeRecordRepository(
     /** How many crashes were injected after the writes of [transactionId]. */
     fun crashCount(transactionId: String): Int = crashes[transactionId]?.get() ?: 0
 
-    /** How many times the app asked Postgres about [transactionId]: lookups, claims and completions, failed ones too. */
+    /** How many times the app asked Postgres about [transactionId]: lookups, starts and charges, failed ones too. */
     fun callCount(transactionId: String): Int = calls.count(transactionId)
 
-    override suspend fun claim(transaction: Transaction, claimToken: String): FeeRecord {
+    override suspend fun start(transaction: Transaction, workflowId: String): FeeRecord {
         calls.increment(transaction.transactionId)
-        return postgres.claim(transaction, claimToken).also { crashIfArmed(transaction.transactionId, Write.CLAIM) }
+        return postgres.start(transaction, workflowId).also { crashIfArmed(transaction.transactionId, Write.START) }
     }
 
-    override suspend fun complete(transactionId: String, claimToken: String, response: FeeResponse) {
+    override suspend fun charge(transaction: Transaction, workflowId: String, response: FeeResponse) {
+        val transactionId = transaction.transactionId
         calls.increment(transactionId)
-        postgres.complete(transactionId, claimToken, response)
-        crashIfArmed(transactionId, Write.COMPLETE)
+        postgres.charge(transaction, workflowId, response)
+        crashIfArmed(transactionId, Write.CHARGE)
     }
 
     override suspend fun findCharged(transactionId: String): FeeResponse? {

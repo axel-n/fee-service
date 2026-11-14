@@ -24,32 +24,32 @@ import java.time.Clock
 import java.time.LocalDateTime
 
 /**
- * The fee records in PostgreSQL (the `fee_record` table, `schema.sql`): one row per `transaction_id`. `FeeWorkflow`
- * claims and completes them inside journaled steps, `ChargedFees` reads the charged ones. An interface, so the workflow
- * and the gateway are tested with in-memory fakes.
+ * The fee records in PostgreSQL (the `fee_record` table, `schema.sql`): one row per `transaction_id`. `FeeService`
+ * starts them and `ChargedFees` reads the charged ones; `FeeWorkflow` charges them inside a journaled step. An interface,
+ * so the workflow and the gateway are tested with in-memory fakes.
  *
- * Each write is one statement, atomic on its own, and its row count decides: the insert of an id a plain read didn't
- * find ([claim]), and the update of the row a run claimed ([complete]). Both run after validation, which comes first in
- * the workflow.
+ * Each write is one statement, atomic on its own, and its row count decides: the insert that starts a record ([start]),
+ * and the update that charges it ([charge]).
  */
 interface FeeRecordRepository {
     /**
-     * Claims the `transaction_id` of [transaction] for the run holding [claimToken] and returns its record as it then
-     * stands: a new `IN_PROGRESS` record with [claimToken] and every field of [transaction], or the record that was
-     * already there, unchanged (`ClaimDecider` decides from it). Calling it again with the same token returns the same
-     * record, so a step run again after a crash is safe.
+     * Starts the record of [transaction] for the workflow [workflowId] and returns the record as it then stands: a new
+     * `PENDING` record with [workflowId] and every field of [transaction], or the record of the `transaction_id` that was
+     * already there, unchanged, with the `workflow_id` of the request that started it. So every request of one id gets
+     * one `workflow_id`, whatever runs at the same time.
      */
-    suspend fun claim(transaction: Transaction, claimToken: String): FeeRecord
+    suspend fun start(transaction: Transaction, workflowId: String): FeeRecord
 
     /**
-     * Charges the fee by recording the fee, rate and description of [response] on the record of [transactionId]: it
-     * becomes `COMPLETED`. Its amount, asset and type are the transaction's, stored by [claim]. Only the run holding
-     * [claimToken] can; anything else throws and changes nothing. Recording the same response again changes nothing
-     * either.
+     * Charges the fee of [transaction] by recording the fee, rate and description of [response] on its record: it
+     * becomes `CHARGED`. The request fields are written again from [transaction], the payload the workflow charged: a
+     * request of the same id sent at the same time may have started the record with another payload. Only the workflow
+     * [workflowId] the record was started for can; anything else throws and changes nothing. Charging the same response
+     * again changes nothing either, so a step run again after a crash is safe.
      */
-    suspend fun complete(transactionId: String, claimToken: String, response: FeeResponse)
+    suspend fun charge(transaction: Transaction, workflowId: String, response: FeeResponse)
 
-    /** The charged response of [transactionId], or `null` when it isn't charged (no record, or `IN_PROGRESS`). */
+    /** The charged response of [transactionId], or `null` when it isn't charged (no record, or `PENDING`). */
     suspend fun findCharged(transactionId: String): FeeResponse?
 }
 
@@ -62,11 +62,11 @@ interface FeeRecordRepository {
  * No explicit transaction: each write is a single statement, which Postgres runs as one transaction of its own, and
  * its row count tells what happened. READ COMMITTED (Postgres' default) is enough. The primary key serializes
  * concurrent inserts of one id: an insert that meets a row being inserted waits for that transaction, then does nothing
- * (`ON CONFLICT DO NOTHING`), and the next statement sees the committed row. The token check of [complete] sits in its
- * `UPDATE` statement itself.
+ * (`ON CONFLICT DO NOTHING`), and the next statement sees the committed row. The `workflow_id` check of [charge] sits in
+ * its `UPDATE` statement itself.
  *
- * `claimed_at` and `charged_at` come from [clock]. A write run again after a crash keeps the first time: the insert does
- * nothing for an existing row, and the update keeps a `charged_at` that is already set.
+ * `started_at` and `charged_at` come from [clock]. A write run again keeps the first time: the insert does nothing for
+ * an existing row, and the update keeps a `charged_at` that is already set.
  */
 @Repository
 class PostgresFeeRecordRepository(
@@ -75,12 +75,11 @@ class PostgresFeeRecordRepository(
 ) : FeeRecordRepository {
     private val dsl = DSL.using(connectionFactory, SQLDialect.POSTGRES)
 
-    override suspend fun claim(transaction: Transaction, claimToken: String): FeeRecord {
+    override suspend fun start(transaction: Transaction, workflowId: String): FeeRecord {
         val transactionId = transaction.transactionId
-        find(transactionId)?.let { return it }
-        // A new IN_PROGRESS record with every field of the request; an existing record of the id is left as it is
+        // A new PENDING record with every field of the request; an existing record of the id is left as it is
         val inserted =
-            failingAs("Claiming", transactionId) {
+            failingAs("Starting", transactionId) {
                 dsl
                     .insertInto(FEE_RECORD)
                     .set(FEE_RECORD.TRANSACTION_ID, transactionId)
@@ -90,39 +89,46 @@ class PostgresFeeRecordRepository(
                     .set(FEE_RECORD.TYPE, transaction.type.value)
                     .set(FEE_RECORD.STATE, transaction.state.value)
                     .set(FEE_RECORD.CREATED_AT, transaction.createdAt)
-                    .set(FEE_RECORD.STATUS, FeeRecordStatus.IN_PROGRESS.name)
-                    .set(FEE_RECORD.CLAIM_TOKEN, claimToken)
-                    .set(FEE_RECORD.CLAIMED_AT, clock.instant())
+                    .set(FEE_RECORD.STATUS, FeeRecordStatus.PENDING.name)
+                    .set(FEE_RECORD.WORKFLOW_ID, workflowId)
+                    .set(FEE_RECORD.STARTED_AT, clock.instant())
                     .onConflict(FEE_RECORD.TRANSACTION_ID)
                     .doNothing()
                     .awaitSingle()
             }
-        if (inserted == 1) return FeeRecord.inProgress(claimToken)
-        // A concurrent claim committed its row between the read and the insert: decide from that row
+        if (inserted == 1) return FeeRecord.pending(workflowId)
+        // The id already has a record, from an earlier request or one running at the same time: it decides
         return checkNotNull(find(transactionId)) { "Fee record '$transactionId' is missing although its insert met it" }
     }
 
-    override suspend fun complete(transactionId: String, claimToken: String, response: FeeResponse) {
+    override suspend fun charge(transaction: Transaction, workflowId: String, response: FeeResponse) {
+        val transactionId = transaction.transactionId
         require(response.transactionId == transactionId) {
-            "The response of transaction '${response.transactionId}' can't complete the fee record of '$transactionId'"
+            "The response of transaction '${response.transactionId}' can't charge the fee record of '$transactionId'"
         }
-        // The charge, by the claim token's holder only; a charged_at already set is kept
+        // The charged payload and its fee, by the record's own workflow only; a charged_at already set is kept
         val updated =
-            failingAs("Completing", transactionId) {
+            failingAs("Charging", transactionId) {
                 dsl
                     .update(FEE_RECORD)
-                    .set(FEE_RECORD.STATUS, FeeRecordStatus.COMPLETED.name)
+                    .set(FEE_RECORD.AMOUNT, transaction.amount)
+                    .set(FEE_RECORD.ASSET, transaction.asset.value)
+                    .set(FEE_RECORD.ASSET_TYPE, transaction.assetType.value)
+                    .set(FEE_RECORD.TYPE, transaction.type.value)
+                    .set(FEE_RECORD.STATE, transaction.state.value)
+                    .set(FEE_RECORD.CREATED_AT, transaction.createdAt)
+                    .set(FEE_RECORD.STATUS, FeeRecordStatus.CHARGED.name)
                     .set(FEE_RECORD.FEE, response.fee)
                     .set(FEE_RECORD.RATE, response.rate)
                     .set(FEE_RECORD.DESCRIPTION, response.description)
                     .set(FEE_RECORD.CHARGED_AT, coalesce(FEE_RECORD.CHARGED_AT, value(clock.instant(), FEE_RECORD.CHARGED_AT)))
                     .where(FEE_RECORD.TRANSACTION_ID.eq(transactionId))
-                    .and(FEE_RECORD.CLAIM_TOKEN.eq(claimToken))
+                    .and(FEE_RECORD.WORKFLOW_ID.eq(workflowId))
                     .awaitSingle()
             }
-        // Only the run that claimed the id completes it, so anything else is a bug: nothing was written, and Restate
-        // retries until it pauses the invocation, which can be resumed once the bug is fixed.
-        check(updated == 1) { "Fee record '$transactionId' is not claimed by token $claimToken, so it can't be completed" }
+        // FeeService starts the record before it submits the workflow, so anything else is a bug: nothing was written,
+        // and Restate retries until it pauses the invocation, which can be resumed once the bug is fixed.
+        check(updated == 1) { "Fee record '$transactionId' was not started for workflow $workflowId, so it can't be charged" }
     }
 
     override suspend fun findCharged(transactionId: String): FeeResponse? = find(transactionId)?.response
@@ -146,10 +152,10 @@ class PostgresFeeRecordRepository(
             throw DataAccessException("$operation the fee record of '$transactionId' failed: ${cause.message}", cause)
         }
 
-    // The claim, and the charged response once COMPLETED
+    // The workflow, and the charged response once CHARGED
     private fun record(row: FeeRecordRecord): FeeRecord {
         val status = FeeRecordStatus.valueOf(row.status)
-        if (status != FeeRecordStatus.COMPLETED) return FeeRecord(status, row.claimToken)
+        if (status != FeeRecordStatus.CHARGED) return FeeRecord(status, row.workflowId)
         val response =
             FeeResponse(
                 transactionId = row.transactionId,
@@ -160,7 +166,7 @@ class PostgresFeeRecordRepository(
                 rate = required(row.rate, FEE_RECORD.RATE),
                 description = required(row.description, FEE_RECORD.DESCRIPTION),
             )
-        return FeeRecord(status, row.claimToken, response)
+        return FeeRecord(status, row.workflowId, response)
     }
 
     private fun <T : Any> required(value: T?, column: Field<*>): T = checkNotNull(value) { "fee_record.${column.name} is null" }

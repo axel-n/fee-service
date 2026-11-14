@@ -4,17 +4,17 @@ import com.example.fee.config.FeeCacheProperties
 import com.example.fee.config.RestateProperties
 import com.example.fee.contract.FeeRequest
 import com.example.fee.contract.FeeResponse
-import com.example.fee.contract.error.DuplicateTransactionException
 import com.example.fee.contract.error.ValidationException
 import com.example.fee.contract.error.WorkflowTimeoutException
 import com.example.fee.contract.error.WorkflowUnavailableException
+import com.example.fee.domain.TransactionMapper
 import com.example.fee.record.FeeRecord
+import com.example.fee.record.FeeRecordRepository
+import com.example.fee.record.FeeRecordStatus
 import com.example.fee.record.InMemoryFeeRecordRepository
 import com.example.fee.restate.FeeWorkflowClients
 import com.example.fee.restate.FeeWorkflowRun
-import com.example.fee.validation.ValidationError
 import com.example.fee.validation.allChecksRequestValidator
-import com.example.fee.workflow.FeeOutcome
 import com.github.benmanes.caffeine.cache.Cache
 import com.github.benmanes.caffeine.cache.Caffeine
 import dev.restate.client.IngressException
@@ -36,6 +36,7 @@ import java.time.Clock
 import java.time.Duration
 import java.time.Instant
 import java.time.ZoneOffset
+import java.util.UUID
 import kotlin.coroutines.cancellation.CancellationException
 
 class FeeServiceTest {
@@ -72,15 +73,25 @@ class FeeServiceTest {
     // Every production check, against a clock after the request's created_at
     private val requestValidator = allChecksRequestValidator(Clock.fixed(Instant.parse("2023-08-30T16:00:00Z"), ZoneOffset.UTC))
 
-    private fun service(clients: FeeWorkflowClients, attachTimeout: Duration = Duration.ofSeconds(5)) =
-        FeeService(
+    private fun service(
+        clients: FeeWorkflowClients,
+        attachTimeout: Duration = Duration.ofSeconds(5),
+        feeRecords: InMemoryFeeRecordRepository = records,
+        databaseTimeout: Duration = Duration.ofSeconds(1),
+    ): FeeService {
+        val cacheProperties = cacheProperties(databaseTimeout)
+        return FeeService(
             requestValidator,
-            ChargedFees(cache, records, cacheProperties()),
+            TransactionMapper(),
+            ChargedFees(cache, feeRecords, cacheProperties),
+            feeRecords,
             clients,
             restateProperties(attachTimeout),
+            cacheProperties,
         )
+    }
 
-    private fun restateProperties(attachTimeout: Duration = Duration.ofSeconds(5)) =
+    private fun restateProperties(attachTimeout: Duration) =
         RestateProperties(
             ingressUrl = "http://localhost:8080",
             adminUrl = "http://localhost:9070",
@@ -89,7 +100,7 @@ class FeeServiceTest {
             attachTimeout = attachTimeout,
         )
 
-    private fun cacheProperties(lookupTimeout: Duration = Duration.ofSeconds(1)) =
+    private fun cacheProperties(lookupTimeout: Duration) =
         FeeCacheProperties(maximumSize = 1_000, expireAfterWrite = Duration.ofDays(1), lookupTimeout = lookupTimeout)
 
     private fun ingressDown(): IngressException =
@@ -98,11 +109,14 @@ class FeeServiceTest {
     // Runs submit in a coroutine; a failure comes back as the exception, so assertThatThrownBy can inspect it
     private fun submitting(service: FeeService, request: FeeRequest) = ThrowingCallable { runBlocking { service.submit(request) } }
 
+    // The workflow id the record of txn_001 was started with
+    private fun workflowId(): String = checkNotNull(records.records["txn_001"]).workflowId
+
     @Test
-    fun `a charged outcome answers the workflow's response with the fee as in the requirements' sample`() =
+    fun `a charged response answers the workflow's response with the fee as in the requirements' sample`() =
         runBlocking<Unit> {
             // given
-            val clients = FakeClients(attach = { FeeOutcome.Charged(response) })
+            val clients = FakeClients(attach = { response })
 
             // when
             val submission = service(clients).submit(request)
@@ -116,7 +130,7 @@ class FeeServiceTest {
     fun `answers the charged fee without trailing zeros, at the same value`(stored: BigDecimal, expected: String) =
         runBlocking<Unit> {
             // given
-            val clients = FakeClients(attach = { FeeOutcome.Charged(response.copy(fee = stored)) })
+            val clients = FakeClients(attach = { response.copy(fee = stored) })
 
             // when
             val fee = service(clients).submit(request).fee
@@ -127,31 +141,86 @@ class FeeServiceTest {
         }
 
     @Test
-    fun `submits the request as sent to the workflow keyed by its transaction id`() =
+    fun `a new transaction id gets a fee record with a fresh workflow id, then its workflow under that id`() =
         runBlocking<Unit> {
             // given
-            val clients = FakeClients(attach = { FeeOutcome.Charged(response) })
+            val clients = FakeClients(attach = { response })
 
             // when
             service(clients).submit(request)
 
-            // then
-            assertThat(clients.submitted).containsExactly("txn_001" to request)
+            // then: the record is started before the workflow, with every request field
+            val workflowId = workflowId()
+            assertThat(UUID.fromString(workflowId).toString()).isEqualTo(workflowId)
+            assertThat(records.calls.map { it.name }).containsExactly("findCharged", "start")
+            assertThat(records.calls.last().transaction).isEqualTo(TransactionMapper().toTransaction(request))
+            assertThat(records.records["txn_001"]?.status).isEqualTo(FeeRecordStatus.PENDING)
+            assertThat(clients.submitted).containsExactly(workflowId to request)
         }
 
     @Test
-    fun `a changed payload with the same transaction id that isn't charged goes to the same workflow`() {
-        // given: the first run ended without a charge
-        val clients = FakeClients(attach = { FeeOutcome.Conflict("txn_001") })
-        val service = service(clients)
+    fun `every new transaction id gets its own workflow id`() =
+        runBlocking<Unit> {
+            // given
+            val clients = FakeClients(attach = { response })
+            val service = service(clients)
 
-        // when
-        runCatching { runBlocking { service.submit(request) } }
-        runCatching { runBlocking { service.submit(request.copy(amount = BigDecimal("2000"))) } }
+            // when
+            service.submit(request)
+            service.submit(request.copy(transactionId = "txn_002"))
 
-        // then
-        assertThat(clients.submitted.map { it.first }).containsExactly("txn_001", "txn_001")
-    }
+            // then
+            val workflowIds = clients.submitted.map { it.first }
+            assertThat(workflowIds).doesNotHaveDuplicates().hasSize(2)
+        }
+
+    @Test
+    fun `a transaction id whose record was started earlier goes to that record's workflow, whatever its payload`() =
+        runBlocking<Unit> {
+            // given: an earlier request started the record, and its workflow is still running
+            records.records["txn_001"] = FeeRecord.pending("earlier-workflow")
+            val clients = FakeClients(attach = { response })
+            val changed = request.copy(amount = BigDecimal("2000"))
+
+            // when
+            val submission = service(clients).submit(changed)
+
+            // then
+            assertThat(submission).isEqualTo(answered)
+            assertThat(clients.submitted).containsExactly("earlier-workflow" to changed)
+            assertThat(records.records["txn_001"]).isEqualTo(FeeRecord.pending("earlier-workflow"))
+        }
+
+    @Test
+    fun `a record charged between the lookup and the start is answered without Restate, and cached`() =
+        runBlocking<Unit> {
+            // given: the lookup finds nothing charged, then the start meets the record another request just charged
+            val racing =
+                object : FeeRecordRepository by records {
+                    override suspend fun findCharged(transactionId: String): FeeResponse? = null
+                }
+            records.records["txn_001"] = FeeRecord.pending("earlier-workflow").charge(response)
+            val clients = FakeClients(attach = { error("Restate must not be called") })
+            val cacheProperties = cacheProperties(Duration.ofSeconds(1))
+            val service =
+                FeeService(
+                    requestValidator,
+                    TransactionMapper(),
+                    ChargedFees(cache, racing, cacheProperties),
+                    racing,
+                    clients,
+                    restateProperties(Duration.ofSeconds(5)),
+                    cacheProperties,
+                )
+
+            // when
+            val submission = service.submit(request)
+
+            // then
+            assertThat(submission).isEqualTo(answered)
+            assertThat(clients.submitted).isEmpty()
+            assertThat(cache.getIfPresent("txn_001")).isEqualTo(response)
+        }
 
     @Test
     fun `a malformed request is a 400 naming the field before Postgres or Restate is asked`() {
@@ -232,7 +301,7 @@ class FeeServiceTest {
     fun `a charged transaction id missing from the cache is answered from Postgres without Restate, and cached`() =
         runBlocking<Unit> {
             // given: charged earlier, by this instance before a restart or by another one
-            records.records["txn_001"] = FeeRecord.inProgress("earlier-run").complete(response)
+            records.records["txn_001"] = FeeRecord.pending("earlier-workflow").charge(response)
             val clients = FakeClients(attach = { error("Restate must not be called") })
 
             // when
@@ -240,30 +309,16 @@ class FeeServiceTest {
 
             // then
             assertThat(submission).isEqualTo(answered)
+            assertThat(records.calls.map { it.name }).containsExactly("findCharged")
             assertThat(clients.submitted).isEmpty()
             assertThat(cache.getIfPresent("txn_001")).isEqualTo(response)
-        }
-
-    @Test
-    fun `a transaction id claimed but not charged yet goes to Restate`() =
-        runBlocking<Unit> {
-            // given: a run holds the claim and is still going
-            records.records["txn_001"] = FeeRecord.inProgress("running")
-            val clients = FakeClients(attach = { FeeOutcome.Charged(response) })
-
-            // when
-            val submission = service(clients).submit(request)
-
-            // then
-            assertThat(submission).isEqualTo(answered)
-            assertThat(clients.submitted).containsExactly("txn_001" to request)
         }
 
     @Test
     fun `a charge from Restate is remembered, so the same transaction id sent again doesn't reach Restate`() =
         runBlocking<Unit> {
             // given
-            val clients = FakeClients(attach = { FeeOutcome.Charged(response) })
+            val clients = FakeClients(attach = { response })
             val service = service(clients)
             service.submit(request)
 
@@ -277,145 +332,67 @@ class FeeServiceTest {
         }
 
     @Test
-    fun `a conflict is not remembered`() {
-        // given
-        val clients = FakeClients(attach = { FeeOutcome.Conflict("txn_001") })
-
-        // when
-        runCatching { runBlocking { service(clients).submit(request) } }
-
-        // then
-        assertThat(cache.asMap()).isEmpty()
-    }
-
-    @Test
     fun `a run not finished in time is not remembered`() {
         // given
         val clients = FakeClients(attach = { awaitCancellation() }, output = { null })
 
-        // when
-        runCatching { runBlocking { service(clients, attachTimeout = Duration.ofMillis(50)).submit(request) } }
-
-        // then
+        // when / then: a 504, and nothing cached
+        assertThatThrownBy(submitting(service(clients, attachTimeout = Duration.ofMillis(50)), request))
+            .isInstanceOf(WorkflowTimeoutException::class.java)
         assertThat(cache.asMap()).isEmpty()
     }
 
     @Test
-    fun `a rejection is not remembered`() {
-        // given
-        val error = ValidationError("state", "PENDING", "Unsupported state 'PENDING'", ValidationError.Kind.UNSUPPORTED)
-        val clients = FakeClients(attach = { FeeOutcome.Rejected(error) })
-
-        // when
-        runCatching { runBlocking { service(clients).submit(request) } }
-
-        // then
-        assertThat(cache.asMap()).isEmpty()
-    }
-
-    @Test
-    fun `a failed Postgres lookup leaves the answer to Restate`() =
+    fun `a failed Postgres lookup leaves the decision to the start of the record`() =
         runBlocking<Unit> {
-            // given
-            val failingRecords =
-                InMemoryFeeRecordRepository(failing = mapOf("findCharged" to IllegalStateException("database unreachable")))
-            val clients = FakeClients(attach = { FeeOutcome.Charged(response) })
-            val service =
-                FeeService(requestValidator, ChargedFees(cache, failingRecords, cacheProperties()), clients, restateProperties())
+            // given: the read fails once, the insert works
+            val flaky = InMemoryFeeRecordRepository(failing = mapOf("findCharged" to IllegalStateException("database unreachable")))
+            val clients = FakeClients(attach = { response })
 
             // when
-            val submission = service.submit(request)
+            val submission = service(clients, feeRecords = flaky).submit(request)
 
             // then
             assertThat(submission).isEqualTo(answered)
-            assertThat(clients.submitted).containsExactly("txn_001" to request)
+            assertThat(flaky.calls.map { it.name }).containsExactly("findCharged", "start")
+            assertThat(clients.submitted.map { it.first }).containsExactly(flaky.records["txn_001"]?.workflowId)
         }
+
+    @Test
+    fun `a failed start of the record is a 503, and Restate is not asked`() {
+        // given
+        val outage = IllegalStateException("database unreachable")
+        val failing = InMemoryFeeRecordRepository(failing = mapOf("start" to outage))
+        val clients = FakeClients(attach = { error("Restate must not be called") })
+
+        // when / then
+        assertThatThrownBy(submitting(service(clients, feeRecords = failing), request))
+            .isInstanceOfSatisfying(WorkflowUnavailableException::class.java) {
+                assertThat(it.status).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE.value())
+                // the same failure; coroutines may hand over a copy with the stack trace across the timeout
+                assertThat(it.cause).isInstanceOf(IllegalStateException::class.java).hasMessage(outage.message)
+            }
+        assertThat(clients.submitted).isEmpty()
+    }
 
     @Test
     @Timeout(10)
-    fun `a Postgres lookup that hangs leaves the answer to Restate once the lookup timeout passed`() =
-        runBlocking<Unit> {
-            // given: a database that never answers
-            val hangingRecords = InMemoryFeeRecordRepository(hanging = setOf("findCharged"))
-            val clients = FakeClients(attach = { FeeOutcome.Charged(response) })
-            val chargedFees = ChargedFees(cache, hangingRecords, cacheProperties(lookupTimeout = Duration.ofMillis(50)))
-            val service = FeeService(requestValidator, chargedFees, clients, restateProperties())
-
-            // when
-            val submission = service.submit(request)
-
-            // then
-            assertThat(submission).isEqualTo(answered)
-            assertThat(clients.submitted).containsExactly("txn_001" to request)
-        }
-
-    @Test
-    fun `attaches to the run Restate returns, so a transaction id sent again gets the first run's result`() =
-        runBlocking<Unit> {
-            // given: Restate hands back the first run for a known key
-            val clients = FakeClients(attach = { FeeOutcome.Charged(response) })
-
-            // when
-            val submission = service(clients).submit(request.copy(amount = BigDecimal("2000")))
-
-            // then
-            assertThat(submission).isEqualTo(answered)
-            assertThat(clients.attaches).isEqualTo(1)
-        }
-
-    @Test
-    fun `a malformed rejection returned by the workflow is a 400 validation exception`() {
-        // given: the request passes here, but the run it attached to rejected (one started past the app, say)
-        val error = ValidationError("amount", "-5", "Amount -5 must be greater than 0", ValidationError.Kind.INVALID)
-        val clients = FakeClients(attach = { FeeOutcome.Rejected(error) })
+    fun `a Postgres that hangs is a 503 once the database timeout passed, and Restate is not asked`() {
+        // given: a database that never answers
+        val hanging = InMemoryFeeRecordRepository(hanging = setOf("findCharged", "start"))
+        val clients = FakeClients(attach = { error("Restate must not be called") })
 
         // when / then
-        assertThatThrownBy(submitting(service(clients), request))
-            .isInstanceOfSatisfying(ValidationException::class.java) {
-                assertThat(listOf(it.field, it.value, it.message)).containsExactly(error.field, error.value, error.message)
-                assertThat(it.kind).isEqualTo(ValidationException.Kind.INVALID)
-                assertThat(it.status).isEqualTo(HttpStatus.BAD_REQUEST.value())
-            }
-    }
-
-    @Test
-    fun `an unsupported rejection returned by the workflow is a 422 validation exception`() {
-        // given: the request passes here, but the run it attached to rejected (one started past the app, say)
-        val error =
-            ValidationError(
-                "state",
-                "PENDING",
-                "Unsupported state 'PENDING'. Supported: 'SETTLED - PENDING FEE'",
-                ValidationError.Kind.UNSUPPORTED,
-            )
-        val clients = FakeClients(attach = { FeeOutcome.Rejected(error) })
-
-        // when / then
-        assertThatThrownBy(submitting(service(clients), request))
-            .isInstanceOfSatisfying(ValidationException::class.java) {
-                assertThat(listOf(it.field, it.value, it.message)).containsExactly(error.field, error.value, error.message)
-                assertThat(it.kind).isEqualTo(ValidationException.Kind.UNSUPPORTED)
-                assertThat(it.status).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT.value())
-            }
-    }
-
-    @Test
-    fun `a conflict is a 409 duplicate transaction exception`() {
-        // given
-        val clients = FakeClients(attach = { FeeOutcome.Conflict("txn_001") })
-
-        // when / then
-        assertThatThrownBy(submitting(service(clients), request))
-            .isInstanceOfSatisfying(DuplicateTransactionException::class.java) {
-                assertThat(it.transactionId).isEqualTo("txn_001")
-                assertThat(it.status).isEqualTo(HttpStatus.CONFLICT.value())
-            }
+        assertThatThrownBy(submitting(service(clients, feeRecords = hanging, databaseTimeout = Duration.ofMillis(50)), request))
+            .isInstanceOf(WorkflowUnavailableException::class.java)
+        assertThat(hanging.calls.map { it.name }).containsExactly("findCharged", "start")
+        assertThat(clients.submitted).isEmpty()
     }
 
     @Test
     fun `a missing transaction id is a 400 before Postgres or Restate is asked`() {
         // given
-        val clients = FakeClients(attach = { FeeOutcome.Charged(response) })
+        val clients = FakeClients(attach = { response })
 
         // when / then
         assertThatThrownBy(submitting(service(clients), request.copy(transactionId = null)))
@@ -428,9 +405,9 @@ class FeeServiceTest {
     }
 
     @Test
-    fun `a transaction id that can't be a workflow key is a 400 naming the value before Postgres or Restate is asked`() {
+    fun `a transaction id that is not a plain identifier is a 400 naming the value before Postgres or Restate is asked`() {
         // given
-        val clients = FakeClients(attach = { FeeOutcome.Charged(response) })
+        val clients = FakeClients(attach = { response })
 
         // when / then
         assertThatThrownBy(submitting(service(clients), request.copy(transactionId = "txn:001")))
@@ -444,10 +421,10 @@ class FeeServiceTest {
     }
 
     @Test
-    fun `an unreachable ingress on submit is a 503`() {
+    fun `an unreachable ingress on submit is a 503, and the started record stays for the next request`() {
         // given
         val down = ingressDown()
-        val clients = FakeClients(submit = { throw down }, attach = { FeeOutcome.Charged(response) })
+        val clients = FakeClients(submit = { throw down }, attach = { response })
 
         // when / then
         assertThatThrownBy(submitting(service(clients), request))
@@ -456,6 +433,7 @@ class FeeServiceTest {
                 assertThat(it.cause).isSameAs(down)
             }
         assertThat(clients.attaches).isZero()
+        assertThat(records.records["txn_001"]).isEqualTo(FeeRecord.pending(workflowId()))
     }
 
     @Test
@@ -486,10 +464,10 @@ class FeeServiceTest {
     }
 
     @Test
-    fun `a run that finished just after the attach timeout answers its outcome, not 504`() =
+    fun `a run that finished just after the attach timeout answers its response, not 504`() =
         runBlocking<Unit> {
             // given: the attach outlasts the timeout, but Restate already has the output when asked
-            val clients = FakeClients(attach = { awaitCancellation() }, output = { FeeOutcome.Charged(response) })
+            val clients = FakeClients(attach = { awaitCancellation() }, output = { response })
 
             // when
             val submission = service(clients, attachTimeout = Duration.ofMillis(50)).submit(request)
@@ -515,7 +493,7 @@ class FeeServiceTest {
     fun `a run that finishes within the attach timeout never asks Restate for its output`() =
         runBlocking<Unit> {
             // given
-            val clients = FakeClients(attach = { FeeOutcome.Charged(response) })
+            val clients = FakeClients(attach = { response })
 
             // when
             service(clients).submit(request)
@@ -541,14 +519,14 @@ class FeeServiceTest {
         }
 
     /**
-     * The ingress in memory: [submit] runs on every submission, which the fake records, and [attach] answers the run's
-     * outcome, or suspends until cancelled, as a run that never finishes does. [output] answers Restate's one-off
-     * output request: `null` is Restate's 470 (not ready).
+     * The ingress in memory: [submit] runs on every submission, which the fake records with its workflow id, and
+     * [attach] answers the run's charged response, or suspends until cancelled, as a run that never finishes does.
+     * [output] answers Restate's one-off output request: `null` is Restate's 470 (not ready).
      */
     private class FakeClients(
         private val submit: suspend () -> Unit = {},
-        private val attach: suspend () -> FeeOutcome,
-        private val output: suspend () -> FeeOutcome? = { null },
+        private val attach: suspend () -> FeeResponse,
+        private val output: suspend () -> FeeResponse? = { null },
     ) : FeeWorkflowClients {
         val submitted = mutableListOf<Pair<String, FeeRequest>>()
         var attaches = 0
@@ -559,17 +537,17 @@ class FeeServiceTest {
         /** Completed once an attach started waiting. */
         val attaching = CompletableDeferred<Unit>()
 
-        override suspend fun submit(transactionId: String, request: FeeRequest): FeeWorkflowRun {
-            submitted += transactionId to request
+        override suspend fun submit(workflowId: String, request: FeeRequest): FeeWorkflowRun {
+            submitted += workflowId to request
             submit()
             return object : FeeWorkflowRun {
-                override suspend fun attach(): FeeOutcome {
+                override suspend fun attach(): FeeResponse {
                     attaches++
                     attaching.complete(Unit)
                     return this@FakeClients.attach()
                 }
 
-                override suspend fun output(): FeeOutcome? {
+                override suspend fun output(): FeeResponse? {
                     outputs++
                     return this@FakeClients.output()
                 }

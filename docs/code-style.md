@@ -1,7 +1,7 @@
 # fee-service — Code style
 
 How the code is written. What is built, and the rules it follows (hard rules, architecture, Restate, tests), is in
-[`../AGENTS.md`](../AGENTS.md) and [`design.md`](design.md). Only formatting is checked by a tool (ktlint, in every
+[`../AGENTS.md`](../AGENTS.md) and the [README](../README.md). Only formatting is checked by a tool (ktlint, in every
 build). Everything else here is followed by whoever writes the code, and checked in review.
 
 ## Money

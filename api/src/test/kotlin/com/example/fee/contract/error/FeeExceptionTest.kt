@@ -50,22 +50,7 @@ class FeeExceptionTest {
     }
 
     @Test
-    fun `a transaction id claimed by an unfinished run is a 409 naming the id`() {
-        // given
-        val transactionId = "txn_001"
-
-        // when
-        val exception = DuplicateTransactionException(transactionId)
-
-        // then
-        assertThat(exception.status).isEqualTo(409)
-        assertThat(exception.code).isEqualTo(FeeErrorCode.DUPLICATE_TRANSACTION)
-        assertThat(exception.transactionId).isEqualTo("txn_001")
-        assertThat(exception.message).contains("'txn_001'").contains("has not finished")
-    }
-
-    @Test
-    fun `an unreachable Restate is a 503 that keeps the cause and asks for a retry`() {
+    fun `an unreachable Postgres or Restate is a 503 that keeps the cause and asks for a retry`() {
         // given
         val cause = ConnectException("Connection refused")
 
@@ -101,7 +86,6 @@ class FeeExceptionTest {
             listOf(
                 ValidationException("amount", "-5", "Amount -5 must be greater than 0", ValidationException.Kind.INVALID),
                 ValidationException("state", "PENDING", "Unsupported state 'PENDING'", ValidationException.Kind.UNSUPPORTED),
-                DuplicateTransactionException("txn_001"),
                 WorkflowUnavailableException(),
                 WorkflowTimeoutException("txn_001"),
             )
@@ -111,7 +95,7 @@ class FeeExceptionTest {
 
         // then
         assertThat(codes).containsExactlyElementsOf(FeeErrorCode.entries)
-        assertThat(exceptions.map { it.status }).containsExactly(400, 422, 409, 503, 504)
+        assertThat(exceptions.map { it.status }).containsExactly(400, 422, 503, 504)
         assertThat(exceptions).allSatisfy { assertThat(it).isInstanceOf(RuntimeException::class.java) }
     }
 
@@ -127,7 +111,6 @@ class FeeExceptionTest {
         assertThat(byName).containsExactly(
             entry("INVALID_REQUEST", 400),
             entry("UNSUPPORTED_REQUEST", 422),
-            entry("DUPLICATE_TRANSACTION", 409),
             entry("WORKFLOW_UNAVAILABLE", 503),
             entry("WORKFLOW_TIMEOUT", 504),
         )

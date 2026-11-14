@@ -7,40 +7,40 @@ import org.junit.jupiter.api.Test
 
 class FeeRecordTest {
     @Test
-    fun `a new claim is in progress with its token and without a response`() {
+    fun `a new record is pending with its workflow id and without a response`() {
         // when
-        val record = FeeRecord.inProgress("token-a")
+        val record = FeeRecord.pending("workflow-a")
 
         // then
-        assertThat(record).isEqualTo(FeeRecord(FeeRecordStatus.IN_PROGRESS, "token-a", response = null))
+        assertThat(record).isEqualTo(FeeRecord(FeeRecordStatus.PENDING, "workflow-a", response = null))
     }
 
     @Test
-    fun `completing stores the response and keeps the claim token`() {
+    fun `charging stores the response and keeps the workflow id`() {
         // given
-        val record = FeeRecord.inProgress("token-a")
+        val record = FeeRecord.pending("workflow-a")
 
         // when
-        val completed = record.complete(response)
+        val charged = record.charge(response)
 
         // then
-        assertThat(completed).isEqualTo(FeeRecord(FeeRecordStatus.COMPLETED, "token-a", response = response))
+        assertThat(charged).isEqualTo(FeeRecord(FeeRecordStatus.CHARGED, "workflow-a", response = response))
     }
 
     @Test
-    fun `rejects a completed record without a response`() {
+    fun `rejects a charged record without a response`() {
         // when / then
-        assertThatThrownBy { FeeRecord(FeeRecordStatus.COMPLETED, "token-a") }
+        assertThatThrownBy { FeeRecord(FeeRecordStatus.CHARGED, "workflow-a") }
             .isInstanceOf(IllegalArgumentException::class.java)
-            .hasMessageContaining("COMPLETED")
+            .hasMessageContaining("CHARGED")
     }
 
     @Test
-    fun `rejects a response on a record that is not completed`() {
+    fun `rejects a response on a record that is not charged`() {
         // when / then
-        assertThatThrownBy { FeeRecord(FeeRecordStatus.IN_PROGRESS, "token-a", response = response) }
+        assertThatThrownBy { FeeRecord(FeeRecordStatus.PENDING, "workflow-a", response = response) }
             .isInstanceOf(IllegalArgumentException::class.java)
-            .hasMessageContaining("IN_PROGRESS")
+            .hasMessageContaining("PENDING")
     }
 }
 
@@ -48,7 +48,7 @@ class FeeRecordStatusTest {
     @Test
     fun `lists exactly the two stored statuses by name, as the table's check allows them`() {
         // given
-        val stored = listOf("IN_PROGRESS", "COMPLETED")
+        val stored = listOf("PENDING", "CHARGED")
 
         // when
         val names = FeeRecordStatus.entries.map { it.name }

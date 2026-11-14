@@ -13,7 +13,7 @@ import java.util.UUID
 /**
  * The happy path end to end: the requirements' sample request gets exactly their expected response payload, and every
  * transaction type in every supported asset goes through the real app and the shared
- * Restate (VALIDATE → MAP → CLAIM → CALCULATE → RECORD) and comes back charged with the packaged fees.
+ * Restate (CALCULATE → CHARGE) and comes back charged with the packaged fees.
  */
 class HappyPathIT
     @Autowired
@@ -98,10 +98,10 @@ class HappyPathIT
             assertThat(body["rate"].decimalValue()).isEqualByComparingTo(rate)
             assertThat(body["description"].asText()).isEqualTo(description)
 
-            // then: Restate holds the record as COMPLETED with that response
+            // then: Postgres holds the record as CHARGED with that response
             val record = StoredFeeRecords.of(transactionId)
             assertThat(record).isNotNull
-            assertThat(record?.status).isEqualTo(FeeRecordStatus.COMPLETED)
+            assertThat(record?.status).isEqualTo(FeeRecordStatus.CHARGED)
             assertThat(record?.response?.transactionId).isEqualTo(transactionId)
             assertThat(record?.response?.fee).isEqualByComparingTo(fee)
             assertThat(record?.response?.rate).isEqualByComparingTo(rate)

@@ -9,8 +9,8 @@ import org.springframework.core.annotation.Order
 import org.springframework.stereotype.Component
 
 /**
- * `transaction_id` must be 1 to [MAX_LENGTH] ASCII letters, digits, `_` or `-` (400). It becomes the workflow key, which
- * Restate puts in URL paths, so `/`, `:` and whitespace are out. Relies on [RequiredFieldsValidator] for presence.
+ * `transaction_id` must be 1 to [MAX_LENGTH] ASCII letters, digits, `_` or `-` (400): a plain identifier, safe in logs,
+ * URLs and the fee record's key, so `/`, `:` and whitespace are out. Relies on [RequiredFieldsValidator] for presence.
  */
 @Component
 @Order(ValidationOrder.TRANSACTION_ID)

@@ -4,10 +4,7 @@ import com.example.fee.contract.FeeRequest
 import com.example.fee.contract.FeeResponse
 import com.example.fee.record.FeeRecord
 import com.example.fee.record.FeeRecordStatus
-import com.example.fee.workflow.FeeOutcome
-import com.example.fee.workflow.WorkflowStep
 import com.github.benmanes.caffeine.cache.Cache
-import dev.restate.client.SendResponse
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
@@ -17,9 +14,7 @@ import java.util.UUID
 
 /**
  * A `transaction_id` after Restate forgot its run (workflow retention, 1 day on 1.8.1). A charged id is answered by
- * `FeeService` from its cache or from Postgres, so no new run starts. A run that starts anyway, sent past the app, is
- * stopped at CLAIM by the permanent record: `AlreadyCompleted` → the stored response, no second charge. An id rejected by
- * a run sent past the app has no record, so it is processed normally then.
+ * `FeeService` from its cache or from Postgres, so no new run starts: the record outlives the run.
  *
  * Waiting a day is not an option, so the tests purge the old run through the admin API, as retention would.
  */
@@ -38,7 +33,7 @@ class RetentionExpiredIT
             val request = validRequest(newTransactionId())
             val first = api.submit(bodyOf(request))
             assertThat(first.status).describedAs("first POST status, body %s", first.body).isEqualTo(200)
-            val recorded = completedRecord(request)
+            val recorded = chargedRecord(request)
             purgeRunOf(request)
 
             // when
@@ -58,7 +53,7 @@ class RetentionExpiredIT
             val request = validRequest(newTransactionId())
             val first = api.submit(bodyOf(request))
             assertThat(first.status).describedAs("first POST status, body %s", first.body).isEqualTo(200)
-            val recorded = completedRecord(request)
+            val recorded = chargedRecord(request)
             purgeRunOf(request)
             chargedFeesCache.invalidate(transactionIdOf(request))
 
@@ -73,61 +68,9 @@ class RetentionExpiredIT
             assertChargedOnce(request)
         }
 
-        @Test
-        fun `a run sent past the app for a charged transaction_id is stopped at CLAIM with the stored response`() {
-            // given: the payload charged through the API, then its run purged as retention would
-            val request = validRequest(newTransactionId())
-            val first = api.submit(bodyOf(request))
-            assertThat(first.status).describedAs("first POST status, body %s", first.body).isEqualTo(200)
-            val recorded = completedRecord(request)
-            purgeRunOf(request)
-
-            // when: a new run under the same key, straight through the ingress
-            val sent = StoredWorkflows.submit(request)
-            awaitUntil("the new run of ${StoredWorkflows.keyOf(request)} has finished") { StoredWorkflows.outcome(request) != null }
-
-            // then: a new run, which CLAIM answered from the record. A workflow's invocation id is derived from its key,
-            // so it is the same for both runs and proves nothing.
-            assertThat(sent.sendStatus()).isEqualTo(SendResponse.SendStatus.ACCEPTED)
-            assertThat(StoredWorkflows.step(request)).isEqualTo(WorkflowStep.DONE)
-            assertThat(StoredWorkflows.outcome(request)).isEqualTo(FeeOutcome.Charged(checkNotNull(recorded.response)))
-
-            // then: no second charge, and the record is untouched
-            assertThat(StoredFeeRecords.of(transactionIdOf(request))).isEqualTo(recorded)
-            assertChargedOnce(request)
-        }
-
-        @Test
-        fun `a transaction_id rejected by a run sent past the app is charged with a corrected payload once its run was purged`() {
-            // given: the id rejected by a run sent straight through the ingress (the API rejects before Restate)
-            val valid = validRequest(newTransactionId())
-            val rejected = valid.copy(state = "PENDING")
-            StoredWorkflows.submit(rejected)
-            awaitUntil("the run of ${StoredWorkflows.keyOf(rejected)} has finished") { StoredWorkflows.outcome(rejected) != null }
-            assertThat(StoredWorkflows.outcome(rejected)).isInstanceOf(FeeOutcome.Rejected::class.java)
-
-            // given: while Restate keeps that run, the corrected payload through the API attaches to it and gets its rejection
-            val attached = api.submit(bodyOf(valid))
-            assertThat(attached.status).describedAs("POST status, body %s", attached.body).isEqualTo(422)
-            assertThat(StoredFeeRecords.of(transactionIdOf(valid))).isNull()
-
-            // given: then the run is purged, as retention would
-            purgeRunOf(rejected)
-
-            // when
-            val corrected = api.submit(bodyOf(valid))
-
-            // then: a new run charged it, once
-            assertThat(corrected.status).describedAs("second POST status, body %s", corrected.body).isEqualTo(200)
-            assertThat(corrected.body["fee"].decimalValue()).isEqualByComparingTo(BigDecimal("1.50"))
-            assertThat(StoredWorkflows.outcome(valid)).isInstanceOf(FeeOutcome.Charged::class.java)
-            assertThat(completedRecord(valid).response?.amount).isEqualByComparingTo(valid.amount)
-            assertChargedOnce(valid)
-        }
-
-        private fun completedRecord(request: FeeRequest): FeeRecord {
+        private fun chargedRecord(request: FeeRequest): FeeRecord {
             val record = checkNotNull(StoredFeeRecords.of(transactionIdOf(request))) { "no record for ${request.transactionId}" }
-            assertThat(record.status).isEqualTo(FeeRecordStatus.COMPLETED)
+            assertThat(record.status).isEqualTo(FeeRecordStatus.CHARGED)
             return record
         }
 
@@ -138,11 +81,13 @@ class RetentionExpiredIT
             }
         }
 
-        // Resubmitting a known key is PREVIOUSLY_ACCEPTED with the run's id, its input ignored, so this starts nothing
+        // The id of the workflow's run, from Restate's own invocation table
         private fun invocationIdOf(request: FeeRequest): String {
-            val sent = StoredWorkflows.submit(request)
-            assertThat(sent.sendStatus()).isEqualTo(SendResponse.SendStatus.PREVIOUSLY_ACCEPTED)
-            return sent.invocationId()
+            val workflowId = checkNotNull(StoredWorkflows.keyOf(request)) { "no record for ${request.transactionId}" }
+            return RestateTestEnvironment.admin
+                .query("$INVOCATION_ID 'FeeWorkflow/$workflowId/run'")
+                .single()["id"]
+                .asText()
         }
 
         private fun assertChargedOnce(request: FeeRequest) {
@@ -167,6 +112,9 @@ class RetentionExpiredIT
             )
 
         private companion object {
+            // Restate's query API takes no parameters: the run's target is appended, quoted
+            const val INVOCATION_ID = "SELECT id FROM sys_invocation WHERE target ="
+
             fun validRequest(transactionId: String) =
                 FeeRequest(
                     transactionId = transactionId,

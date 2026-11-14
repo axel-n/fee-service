@@ -32,6 +32,10 @@ object PostgresTestEnvironment {
 
     private val container: GenericContainer<*> = postgresContainer().also { it.start() }
 
+    // The server processes [freeze] stopped, which [thaw] resumes
+    @Volatile
+    private var frozen: List<String> = emptyList()
+
     /** The R2DBC URL of the database, as the app's `spring.r2dbc.url`. */
     val url: String = "r2dbc:postgresql://${container.host}:${container.getMappedPort(PORT)}/$DATABASE"
 
@@ -66,11 +70,15 @@ object PostgresTestEnvironment {
 
     /**
      * A database that hangs, as in a network partition: every Postgres process is stopped (SIGSTOP), so connections stay
-     * open and new ones are accepted by the kernel, but nothing answers until [thaw].
+     * open and new ones are accepted by the kernel, but nothing answers until [thaw]. The backends of open connections
+     * stop too, so a connection the app already holds hangs like a new one.
      */
     fun freeze() {
+        // listed while the postmaster still forks the query's backend; stopped before the postmaster, which forks no more
+        val processes = serverProcesses()
+        signal(processes, "STOP")
+        frozen = processes
         signalMain("SIGSTOP")
-        signalOthers("STOP")
     }
 
     /** A new database next to the app's, set up with [ddl], and its R2DBC URL: for an app that must meet that schema. */
@@ -89,8 +97,9 @@ object PostgresTestEnvironment {
     /** Ends [freeze]; harmless when the database isn't frozen. The postmaster is resumed even if the rest failed. */
     fun thaw() {
         try {
-            signalOthers("CONT")
+            signal(frozen, "CONT")
         } finally {
+            frozen = emptyList()
             signalMain("SIGCONT")
         }
     }
@@ -105,10 +114,32 @@ object PostgresTestEnvironment {
             .exec()
     }
 
-    // Its backends, one per connection, and its helpers, all named `postgres`
-    private fun signalOthers(signal: String) {
-        val script = "for p in /proc/[0-9]*; do [ \"\$(cat \$p/comm 2>/dev/null)\" = postgres ] && kill -$signal \${p#/proc/}; done; true"
-        val result = container.execInContainer("sh", "-c", script)
+    // Every server process but the postmaster (backends, one per connection, and the helpers), as Postgres itself numbers
+    // them. Not read from /proc: under nested podman the container's /proc shows another PID namespace than its own
+    private fun serverProcesses(): List<String> {
+        val result =
+            container.execInContainer(
+                "psql",
+                "-U",
+                USERNAME,
+                "-d",
+                "postgres",
+                "-v",
+                "ON_ERROR_STOP=1",
+                "-At",
+                "-c",
+                SERVER_PROCESSES,
+            )
+        check(result.exitCode == 0) { "psql failed listing the server processes: ${result.stderr}" }
+        return result.stdout.lines().filter { it.isNotBlank() }
+    }
+
+    // As the user `postgres`, who owns them: root in a container without CAP_KILL can't signal them. A process that has
+    // exited meanwhile (a connection that closed) is fine; any other failure fails the call
+    private fun signal(processes: List<String>, signal: String) {
+        if (processes.isEmpty()) return
+        val script = "kill -$signal ${processes.joinToString(" ")} 2>&1 | grep -v 'No such process' >&2 && exit 1; true"
+        val result = container.execInContainerWithUser(POSTGRES_OS_USER, "sh", "-c", script)
         check(result.exitCode == 0) { "signalling the Postgres processes failed: ${result.stderr}" }
     }
 
@@ -120,9 +151,15 @@ object PostgresTestEnvironment {
         }
     }
 
+    // The operating system user that runs the Postgres processes in the image
+    private const val POSTGRES_OS_USER = "postgres"
+
     private const val REFUSE_CONNECTIONS = "ALTER DATABASE $DATABASE WITH ALLOW_CONNECTIONS false"
     private const val ACCEPT_CONNECTIONS = "ALTER DATABASE $DATABASE WITH ALLOW_CONNECTIONS true"
     private const val CUT_CONNECTIONS = "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '$DATABASE'"
+
+    // The listing's own backend is left out: it exits when psql does
+    private const val SERVER_PROCESSES = "SELECT pid FROM pg_stat_activity WHERE pid <> pg_backend_pid()"
 }
 
 /** jOOQ for the tests' own queries on a Postgres, past the app, over [connectionFactory]. */

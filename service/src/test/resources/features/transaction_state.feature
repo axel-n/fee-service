@@ -17,7 +17,7 @@ Feature: Transaction state
     Then the response status is 200
     And the fee is 1.5 with rate 0.0015 and description "Standard fee rate of 0.15%"
     And the fee was charged exactly once
-    And the fee is recorded as completed
+    And the fee is recorded as charged
 
     Examples: States of a transaction that is not ready for its fee
       | id      | state     | message                                                             |

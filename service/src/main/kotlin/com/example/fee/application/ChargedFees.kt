@@ -16,7 +16,7 @@ private val log = LoggerFactory.getLogger(ChargedFees::class.java)
 /**
  * The charged fees `FeeService` answers without Restate: first the local [cache], then Postgres. Only charged
  * responses are found and kept. They never change, so an entry can't go stale on any instance, and the cache's size and
- * expiry only bound its memory. Rejections, conflicts and runs still in progress are left to Restate.
+ * expiry only bound its memory. Ids that are not charged yet are left to `FeeService`, which starts or reuses their record.
  */
 @Component
 class ChargedFees(
@@ -29,7 +29,7 @@ class ChargedFees(
     /**
      * The charged response of [transactionId], or `null` when it isn't known to be charged. Postgres is asked only on a
      * cache miss, and its answer is cached. A Postgres read that fails, or that takes longer than `fee-cache.lookup-timeout`
-     * (a database that hangs), is `null` too: Restate answers every id correctly, so the lookup only saves a call to it.
+     * (a database that hangs), is `null` too: `FeeService` then starts the id's record, and that write decides.
      */
     suspend fun find(transactionId: String): FeeResponse? = cache.getIfPresent(transactionId) ?: charged(transactionId)?.also(::remember)
 
@@ -40,12 +40,12 @@ class ChargedFees(
         try {
             withTimeout(lookupTimeout.toKotlinDuration()) { feeRecords.findCharged(transactionId) }
         } catch (_: TimeoutCancellationException) {
-            log.warn("Reading the fee record of {} took longer than {}, asking Restate", transactionId, lookupTimeout)
+            log.warn("Reading the fee record of {} took longer than {}", transactionId, lookupTimeout)
             null
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            log.warn("Reading the fee record of {} failed, asking Restate: {}", transactionId, e.toString())
+            log.warn("Reading the fee record of {} failed: {}", transactionId, e.toString())
             null
         }
 }

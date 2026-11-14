@@ -38,7 +38,7 @@ class ChargedFeesTest {
     fun `finds a charge in Postgres on a cache miss and caches it`() =
         runBlocking<Unit> {
             // given
-            val records = InMemoryFeeRecordRepository("txn_001" to FeeRecord.inProgress("run").complete(response))
+            val records = InMemoryFeeRecordRepository("txn_001" to FeeRecord.pending("workflow").charge(response))
             val chargedFees = ChargedFees(cache, records, properties())
 
             // when
@@ -66,10 +66,10 @@ class ChargedFeesTest {
         }
 
     @Test
-    fun `finds nothing for a transaction claimed but not charged yet, and caches nothing`() =
+    fun `finds nothing for a transaction started but not charged yet, and caches nothing`() =
         runBlocking<Unit> {
             // given
-            val chargedFees = ChargedFees(cache, InMemoryFeeRecordRepository("txn_001" to FeeRecord.inProgress("run")), properties())
+            val chargedFees = ChargedFees(cache, InMemoryFeeRecordRepository("txn_001" to FeeRecord.pending("workflow")), properties())
 
             // when
             val found = chargedFees.find("txn_001")
@@ -80,7 +80,7 @@ class ChargedFeesTest {
         }
 
     @Test
-    fun `a failed Postgres read finds nothing, so Restate answers`() =
+    fun `a failed Postgres read finds nothing, so FeeService goes on to start the record`() =
         runBlocking<Unit> {
             // given
             val records = InMemoryFeeRecordRepository(failing = mapOf("findCharged" to IllegalStateException("database unreachable")))
@@ -94,7 +94,7 @@ class ChargedFeesTest {
 
     @Test
     @Timeout(10)
-    fun `a Postgres read that outlasts the lookup timeout finds nothing, so Restate answers`() =
+    fun `a Postgres read that outlasts the lookup timeout finds nothing, so FeeService goes on to start the record`() =
         runBlocking<Unit> {
             // given: a database that never answers
             val records = InMemoryFeeRecordRepository(hanging = setOf("findCharged"))

@@ -5,9 +5,9 @@ package com.example.fee.contract.error
  * (`application/problem+json`) whose `status` is [status] and whose `code` is [code]; a client reads that body as
  * [FeeProblem] and gets the exception back with [FeeProblem.toException].
  *
- * In the service, `FeeService` throws these at the gateway, built from the workflow's `FeeOutcome` or from a Restate
- * call that failed or didn't finish in time; the workflow itself never throws them. No Spring here: [status] is the plain HTTP status code,
- * so a consumer needs nothing but this module.
+ * In the service, `FeeService` throws these at the gateway: a rejected request, or a Postgres or Restate call that
+ * failed or didn't finish in time; the workflow itself never throws them. No Spring here: [status] is the plain HTTP
+ * status code, so a consumer needs nothing but this module.
  *
  * Not durable (they never cross Restate's serde), but published: other services compile against them, so renaming a
  * class or a [FeeErrorCode] breaks those clients.
@@ -32,9 +32,6 @@ enum class FeeErrorCode(
 
     /** A well-formed request the service doesn't support, e.g. state `PENDING` ([ValidationException]). */
     UNSUPPORTED_REQUEST(422),
-
-    /** The transaction id is claimed by an earlier run that never finished ([DuplicateTransactionException]). */
-    DUPLICATE_TRANSACTION(409),
 
     /** Fee processing can't be reached right now ([WorkflowUnavailableException]). */
     WORKFLOW_UNAVAILABLE(503),
@@ -64,18 +61,9 @@ class ValidationException(
     }
 }
 
-/** [transactionId] is claimed by an earlier run that never finished (one an operator killed, say): 409. */
-class DuplicateTransactionException(
-    val transactionId: String,
-) : FeeException(
-        "Transaction '$transactionId' is claimed by an earlier run that has not finished",
-    ) {
-    override val code: FeeErrorCode get() = FeeErrorCode.DUPLICATE_TRANSACTION
-}
-
 /**
- * Restate couldn't be reached or failed to accept the request, so nothing is known to be processed: 503. The [cause]
- * stays in the service's log; the response never shows it.
+ * Postgres or Restate couldn't be reached or failed to accept the request, so nothing is known to be processed: 503.
+ * The [cause] stays in the service's log; the response never shows it.
  */
 class WorkflowUnavailableException(
     cause: Throwable? = null,

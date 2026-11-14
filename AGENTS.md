@@ -5,19 +5,20 @@ Instructions for AI coding agents (and humans) working on **fee-service**.
 ## Project
 
 A Kotlin + Spring Boot service for a backend technology challenge (requirements: `requirements.md`).
-`POST /transaction/fee` validates the request, so an invalid one costs no Postgres or Restate call, and hands a valid one
-to a Restate workflow. The workflow validates again, then calculates, charges and records the fee as journaled steps, so
-processing survives crashes and restarts without charging twice. The result, the fee record, is persisted in PostgreSQL;
-an already charged `transaction_id` is answered from a local cache or Postgres without Restate. The app sends work
-through Restate's ingress, and registers its own endpoint with Restate's admin API at startup, at whatever host and port
-it runs on.
+`POST /transaction/fee` validates the request, so an invalid one costs no Postgres or Restate call. An already charged
+`transaction_id` is answered from a local cache or Postgres without Restate. Otherwise the app starts the id's fee
+record in PostgreSQL with a new `workflow_id` (a UUID) and hands the request to the Restate workflow keyed by that
+`workflow_id`, which calculates and charges the fee as journaled steps, so processing survives crashes and restarts
+without charging twice. The charge is recorded on that fee record. Only the app reaches Restate: it sends work through
+Restate's ingress, and registers its own endpoint with Restate's admin API at startup, at whatever host and port it runs
+on. Clients never reach Restate directly.
 
-- **The design is the source of truth:** `docs/design.md` (goal, fee table, how Restate is used, class design, wiring,
-  call graph, extension points, recovery guarantees). Read it before starting any work.
+- **The design:** the [README](README.md) (how a request is handled, the modules, fees, run, assumptions) and the rules
+  below. Read both before starting any work.
 - **How code is written:** `docs/code-style.md` (money, Kotlin, Spring and time, SQL, layout, JSON, errors). Read it
   before writing code.
 - If a change conflicts with the design or these rules, stop and ask; don't silently deviate. When the design changes,
-  update `docs/design.md` in the same change.
+  update the README and this file in the same change.
 
 ## Priorities and approach
 
@@ -36,10 +37,10 @@ When goals pull against each other, the earlier one wins:
 Approach:
 
 - **KISS:** the simplest design that meets the requirements. Fewer layers, classes and settings are better.
-- **YAGNI:** no features for a future nobody asked for. Ideas go to the README's Future work, not into the code.
+- **YAGNI:** no features for a future nobody asked for; an idea is raised with the user, not put into the code.
   Production practice (complete records, timestamps, indexes, pooling) is not a future feature: it belongs in the change.
-- **DRY:** each fact lives in one place: a default only in `application.yml`, a rule only in its class, the design only in
-  `docs/design.md` (the README summarises and links to it).
+- **DRY:** each fact lives in one place: a default only in `application.yml`, a rule only in its class, the overview for
+  people (request flow, modules, run) in the README, the rules and the design detail in this file.
 - **SOLID:** one responsibility per class; extension by adding a class, not by editing a central `when`; building blocks
   interchangeable behind their interface (`FeeRule`, `TransactionValidator`); small interfaces at the Restate and Postgres
   boundaries (`FeeWorkflowClients`, `FeeWorkflowContext`, `RestateDeployments`, `FeeRecordRepository`), injected through
@@ -84,8 +85,8 @@ Approach:
    Kotest, Lombok-like helpers, a validation starter, another database or a migration tool…). Prefer the JDK, Kotlin stdlib or
    Spring features already on the classpath.
 2. **Fee records live in PostgreSQL, the workflow's journal and step in Restate, and nothing anywhere else.** The `fee_record`
-   table is the system of record of every claim and charge. The Caffeine cache holds only copies of charged fees, which never
-   change, and is never a system of record. No files, no other database or store.
+   table is the system of record of every transaction's `workflow_id` and charge. The Caffeine cache holds only copies of
+   charged fees, which never change, and is never a system of record. No files, no other database or store.
 3. **Money is `BigDecimal`, never `Double`/`Float`.** How it is created, rounded and compared: Money in `docs/code-style.md`.
 4. **Only `SETTLED - PENDING FEE` is processed. Only `USD` and `EUR` (`FIAT`) are supported.**
 5. **Don't install software** or run Docker commands that change the user's environment. The user runs Restate and Postgres.
@@ -93,21 +94,22 @@ Approach:
 
 ## Architecture rules
 
-Follow the call graph in `docs/design.md`:
+Follow this call graph (the diagram in the README):
 
 - `TransactionFeeController` calls **only** `FeeService`. It handles HTTP concerns only.
-- `FeeService` is a **thin gateway with no business logic of its own**. It validates the request first with
-  `RequestValidator` (the same validators as VALIDATE; the logic stays in them), so an invalid request is answered with
-  400/422 before any call to Postgres or Restate. Then it answers an already charged id from `ChargedFees` (the Caffeine
-  cache, then Postgres within `fee-cache.lookup-timeout`) without Restate, otherwise submits or attaches to the
-  `FeeWorkflow` of that id, and maps `FeeOutcome` to HTTP. Only a charge is cached: never a rejection, a conflict or a
-  timeout.
-- **All business logic runs inside `FeeWorkflow`** as journaled steps: VALIDATE → MAP → CLAIM → CALCULATE → RECORD (RECORD
-  is the charge: the fee is stored in Postgres as the transaction's charged fee). VALIDATE stays although the gateway
-  validated: the workflow never trusts its input, because a run can be started past the app, through Restate's ingress.
-  Every step is wrapped with `StepHook.before/after`.
-- `contract`, `domain`, `fee`, `validation` and `ClaimDecider` are **pure Kotlin** (no Restate or Postgres imports) and
-  unit-tested without either.
+- `FeeService` is the **gateway**; it decides nothing about fees. It validates the request first with `RequestValidator`
+  (the logic stays in the validators), so an invalid request is answered with 400/422 before any call to Postgres or
+  Restate. Then it answers an already charged id from `ChargedFees` (the Caffeine cache, then Postgres within
+  `fee-cache.lookup-timeout`) without Restate. Otherwise it starts the id's fee record (`FeeRecordRepository.start`, with a
+  new `workflow_id`, within the same timeout), answers a record that is already charged, and submits or attaches to the
+  `FeeWorkflow` of the record's `workflow_id`. It maps failures to HTTP: a Postgres or Restate call that failed is 503, a
+  run not finished within `restate.attach-timeout` is 504. Only a charge is cached: never a rejection or a timeout.
+- **The fee is calculated and charged inside `FeeWorkflow`** as journaled steps: CALCULATE → CHARGE (CHARGE is the charge:
+  the fee is recorded in Postgres on the transaction's record). Only `FeeService` submits runs, after it validated the
+  request: clients never reach Restate, so the workflow doesn't validate again. Every step is wrapped with
+  `StepHook.before/after`.
+- `contract`, `domain`, `fee` and `validation` are **pure Kotlin** (no Restate or Postgres imports) and unit-tested without
+  either.
 - The request/response DTOs live in `contract` and the exceptions with the error body in `contract.error`, both in the **api
   module**, which every layer may import. The api module is published to other services: only Jackson and Kotlin, no Spring,
   no Restate, and nothing of the service. Nothing outside `api` imports `api` (the service's HTTP package).
@@ -118,12 +120,14 @@ Follow the call graph in `docs/design.md`:
   holds only the ingress URL, the admin URL, the endpoint port, the advertised host and the attach timeout. Don't add
   Restate settings or admin calls without asking.
 - Postgres is reached only through `FeeRecordRepository` (its `PostgresFeeRecordRepository`), which the tests fake: by
-  `FeeWorkflow` inside journaled steps, and by `ChargedFees` to read a charge. **Every write is one statement, atomic on its
-  own (no explicit transaction), and its row count decides**: at CLAIM, after validation passed and only for an id a plain
-  read didn't find, one `INSERT … ON CONFLICT DO NOTHING` (1 row: this run's claim, known without a read; 0 rows: a concurrent
-  claim's row, read to decide from it), and at RECORD one `UPDATE` guarded by the run's claim token, which must update 1
-  row. READ COMMITTED is enough, because the primary key serializes concurrent claims and the token check sits in the
-  `UPDATE` itself.
+  `FeeService` to start a record, by `ChargedFees` to read a charge, and by `FeeWorkflow` inside its CHARGE step. **Every
+  write is one statement, atomic on its own (no explicit transaction), and its row count decides**: the start, after
+  validation passed and only for an id the lookup didn't find charged, is one `INSERT … ON CONFLICT DO NOTHING` (1 row:
+  this request's record and `workflow_id`, known without a read; 0 rows: the existing record, read to go on with its
+  `workflow_id`), and CHARGE is one `UPDATE` guarded by the workflow's own `workflow_id`, which must update 1 row. It
+  writes the charged payload's request fields too, because a concurrent request of the id may have started the record
+  with another payload. READ COMMITTED is enough, because the primary key serializes concurrent starts and the
+  `workflow_id` check sits in the `UPDATE` itself.
 - The endpoint is started and stopped only by `RestateEndpointLifecycle`, which registers it at start and, at stop, removes
   its deployment only when no unfinished invocation needs it: a removed deployment strands its invocations for good. Never
   remove it unconditionally. Don't add Actuator until that's approved.
@@ -133,22 +137,21 @@ Follow the call graph in `docs/design.md`:
 
 - Workflow handlers must be **deterministic**. Anything non-deterministic or side-effecting goes
   inside a journaled step, `FeeWorkflowContext.journaled("name", typeTag<T>()) { … }` (Restate's `runBlock`). That covers
-  reading the clock, random values, UUIDs and I/O, Postgres included. Validation is journaled too, because it reads the `Clock`.
+  reading the clock, random values, UUIDs and I/O, Postgres included.
 - A journaled step runs again when the app crashed after its side effect but before its result was journaled, so a
-  journaled Postgres write must be safe to repeat. The claim token (a UUID journaled before CLAIM) makes it so: a CLAIM run
-  again finds its own record, and RECORD writes the same values again.
+  journaled Postgres write must be safe to repeat: CHARGE writes the same values again, under the same `workflow_id`.
 - Configuration that affects a workflow decision (the fee numbers) is read only inside a journaled step, so a value changed
   between restarts can't make a replay diverge.
 - Handlers are `suspend` functions with no `ctx` parameter: the SDK finds the invocation in the coroutine context. Don't
   launch coroutines or switch dispatchers inside a handler; Restate's journal must see every step in order.
 - Every Restate service class carries `@CustomSerdeFactory(KotlinJacksonSerdeFactory::class)`. Without it the Kotlin SDK
   falls back to kotlinx-serialization, which can't read the Jackson-annotated durable types or the stored JSON.
-- Business results are **returned** as `FeeOutcome` (`Charged`, `Rejected`, `Conflict`), never encoded in exception messages.
-  Infrastructure failures → plain exceptions (Restate retries them).
-- The workflow key is the `transaction_id`: every submission of an id attaches to its one run and gets that run's result,
-  whatever payload it carries. The CLAIM on the id's Postgres fee record keeps protecting the id once Restate has dropped
-  the run; never bypass it.
-- Keep handlers thin. Logic lives in injected, unit-tested classes (`RequestValidator`, `FeeCalculator`, `ClaimDecider`).
+- The workflow returns the charged `FeeResponse`. Infrastructure failures → plain exceptions (Restate retries them).
+- The workflow key is the `workflow_id` of the transaction's fee record, the one place it is assigned: every request of an
+  id submits that key, attaches to its one run and gets that run's result, whatever payload it carries. The record keeps
+  protecting the id once Restate has dropped the run: a charged record is answered from Postgres, and a pending one is
+  submitted again under its own `workflow_id`. Never submit a workflow under any other key.
+- Keep handlers thin. Logic lives in injected, unit-tested classes (`TransactionMapper`, `FeeCalculator`).
 - A new workflow step needs a `WorkflowStep` value, the `StepHook` wrapping, and a row in the crash-recovery tests.
 - Changing a handler signature, step order, a journaled name or result type, or stored state shape is a breaking change for
   in-flight workflows; call it out. That includes the JSON shape of `FeeRequest` and `FeeResponse` (journaled input and
@@ -160,7 +163,7 @@ Follow the call graph in `docs/design.md`:
 - **New validation:** a `@Component @Order(ValidationOrder.X)` class in `validation.rule` implementing `TransactionValidator` that
   returns `ValidationError?` (never throws). Add its constant to `ValidationOrder`, leaving gaps of 100. Structural checks (400) come
   before business checks (422). Messages must be readable and include the rejected value and the allowed values. It runs
-  in `FeeService` and in VALIDATE without further wiring, so it must stay pure (an injected `Clock` at most, no I/O).
+  in `FeeService` without further wiring, so it must stay pure (an injected `Clock` at most, no I/O).
 - **New transaction type:** an enum value in `TransactionType` + one `@Component` `FeeRule` in `fee.rule` (compose the building
   blocks in `fee.formula`) + its `@ConfigurationProperties` class in `config/FeeProperties.kt` + a `fee.<type>` section in
   `application.yml` + a unit test + a row in the BDD outline. `FeeCalculator`'s startup check fails if a rule is missing.
@@ -186,7 +189,7 @@ In [`docs/code-style.md`](docs/code-style.md).
   asynchronously.
 - Integration and BDD tests (`*IT`, Failsafe): Testcontainers Restate (`restatedev/restate`) and Postgres (`postgres`), and
   Cucumber features in `service/src/test/resources/features/`. Fee records are checked in Postgres itself
-  (`StoredFeeRecords`), past the app.
+  (`StoredFeeRecords`), past the app, and runs in Restate by the record's `workflow_id` (`StoredWorkflows`).
 - Money assertions use `compareTo` / `isEqualByComparingTo`, so `1.5` equals `1.50`.
 - Assert idempotency by the number of CALCULATE executions (`CountingFeeCalculator.count(id)`), not just by the response.
 - **Workflow and recovery tests are first-class.** Every workflow change must keep these passing: crash at each step boundary
@@ -218,7 +221,7 @@ mvn -pl api -am install  # puts fee-service-api (and the parent pom it needs) in
 ```
 
 Settings change without a rebuild: environment variables (`RESTATE_INGRESS_URL=…`) or a `config/application.yml` in the working
-directory (see Configuration in `docs/design.md`).
+directory (every key and its variable are in `application.yml`).
 
 The dev environment is described in `dev-setup/README.md`: `podman compose` starts the dev Restate, the dev Postgres and the dev container, which
 has nested podman so Testcontainers runs inside it.
@@ -234,7 +237,7 @@ engine, for jOOQ's code generation and the ITs. While working, run `mvn test` or
 
 1. Implement the change with tests, keeping it small and focused.
 2. Let the gate pass (in Claude Code the Stop hook runs it) and report its result honestly, including failures.
-3. Update `docs/design.md` (and the README) when the design or the behaviour changes, following Documentation below.
+3. Update the README (and this file) when the design or the behaviour changes, following Documentation below.
 4. Commits (only when asked): imperative subject ≤ 72 chars, one change per commit where practical.
 
 ## Documentation

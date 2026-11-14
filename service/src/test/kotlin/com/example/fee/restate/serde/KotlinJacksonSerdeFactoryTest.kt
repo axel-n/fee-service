@@ -1,9 +1,7 @@
 package com.example.fee.restate.serde
 
 import com.example.fee.contract.FeeResponse
-import com.example.fee.record.ClaimResult
 import com.example.fee.record.FeeRecords.response
-import com.example.fee.validation.ValidationError
 import dev.restate.common.Slice
 import dev.restate.serde.TypeTag
 import dev.restate.serde.jackson.JacksonSerdeFactory
@@ -20,20 +18,20 @@ class KotlinJacksonSerdeFactoryTest {
     @Test
     fun `writes the same JSON as Restate's Jackson serde, so journaled results keep their shape`() {
         // given
-        val claim: ClaimResult = ClaimResult.AlreadyCompleted(response)
+        val output: FeeResponse = response
 
         // when
-        val kotlinSdk = json(factory.create(typeTag<ClaimResult>()).serialize(claim))
-        val javaSdk = json(JacksonSerdeFactory().create(ClaimResult::class.java).serialize(claim))
+        val kotlinSdk = json(factory.create(typeTag<FeeResponse>()).serialize(output))
+        val javaSdk = json(JacksonSerdeFactory().create(FeeResponse::class.java).serialize(output))
 
         // then
-        assertThat(kotlinSdk).isEqualTo(javaSdk).contains("\"@type\":\"ALREADY_COMPLETED\"", "\"transaction_id\":\"txn_001\"")
+        assertThat(kotlinSdk).isEqualTo(javaSdk).contains("\"transaction_id\":\"txn_001\"", "\"fee\":1.50")
     }
 
     @Test
     fun `journals a missing nullable result as JSON null and reads it back as null`() {
-        // given: VALIDATE journals no error as null
-        val serde = factory.create(typeTag<ValidationError?>())
+        // given: a nullable result type
+        val serde = factory.create(typeTag<FeeResponse?>())
 
         // when
         val written = serde.serialize(null)

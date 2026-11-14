@@ -4,9 +4,9 @@ import java.math.BigDecimal
 import java.time.LocalDateTime
 
 /**
- * A request that passed validation, with its fields parsed. Built by [TransactionMapper] in the workflow's MAP step.
+ * A request that passed validation, with its fields parsed. Built by [TransactionMapper].
  *
- * Never journaled on its own: MAP is pure and runs again on every replay, so this class is not part of the durable
+ * Never journaled on its own: the workflow maps its input again on every replay, so this class is not part of the durable
  * contract and can change freely.
  */
 data class Transaction(

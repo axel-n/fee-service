@@ -50,7 +50,7 @@ class FeeRecordRepositoryIT
     constructor(
         private val connectionFactory: ConnectionFactory,
     ) : RestateIntegrationTest() {
-        private val clock = TestClock().apply { pin(CLAIMED_AT) }
+        private val clock = TestClock().apply { pin(STARTED_AT) }
         private val repository = PostgresFeeRecordRepository(connectionFactory, clock)
 
         @Test
@@ -63,50 +63,50 @@ class FeeRecordRepositoryIT
         }
 
         @Test
-        fun `claiming a new transaction id inserts an IN_PROGRESS record with the token`() =
+        fun `starting a new transaction id inserts a PENDING record with the workflow id`() =
             runBlocking<Unit> {
                 // given
                 val transactionId = newTransactionId()
 
                 // when
-                val record = repository.claim(transactionFor(transactionId), "token-a")
+                val record = repository.start(transactionFor(transactionId), "workflow-a")
 
                 // then
-                assertThat(record).isEqualTo(FeeRecord.inProgress("token-a"))
+                assertThat(record).isEqualTo(FeeRecord.pending("workflow-a"))
                 assertThat(StoredFeeRecords.of(transactionId)).isEqualTo(record)
             }
 
         @Test
-        fun `a claim whose insert meets a row committed after its read returns that row, not a claim of its own`() =
+        fun `a start whose insert meets a row committed meanwhile returns that row, not a record of its own`() =
             runBlocking<Unit> {
-                // given: another claim's row, not committed yet, so the claim's read finds nothing and its insert waits
+                // given: another request's row, not committed yet, so the start's insert waits for it
                 val transactionId = newTransactionId()
-                StoredFeeRecords.claimInOpenTransaction(transactionId).use { other ->
-                    val claim = async(Dispatchers.IO) { repository.claim(transactionFor(transactionId), "token-a") }
-                    awaitUntil("the claim's insert waits for the other claim") { other.blockedStatements() == 1L }
+                StoredFeeRecords.startInOpenTransaction(transactionId).use { other ->
+                    val start = async(Dispatchers.IO) { repository.start(transactionFor(transactionId), "workflow-a") }
+                    awaitUntil("the start's insert waits for the other request's") { other.blockedStatements() == 1L }
 
                     // when
                     other.commit()
-                    val record = claim.await()
+                    val record = start.await()
 
-                    // then: the other claim's row, which stays as it was
-                    assertThat(record).isEqualTo(FeeRecord.inProgress(StoredFeeRecords.FOREIGN_TOKEN))
+                    // then: the other request's row, which stays as it was
+                    assertThat(record).isEqualTo(FeeRecord.pending(StoredFeeRecords.FOREIGN_WORKFLOW_ID))
                     assertThat(StoredFeeRecords.of(transactionId)).isEqualTo(record)
                 }
             }
 
         @Test
-        fun `claiming stores every field of the request, created_at to the microsecond, and when it was claimed`() =
+        fun `starting stores every field of the request, created_at to the microsecond, and when it was started`() =
             runBlocking<Unit> {
                 // given
                 val transaction = transactionFor(newTransactionId())
 
                 // when
-                repository.claim(transaction, "token-a")
+                repository.start(transaction, "workflow-a")
 
                 // then
                 assertThat(StoredFeeRecords.transactionOf(transaction.transactionId)).isEqualTo(transaction)
-                assertThat(StoredFeeRecords.timesOf(transaction.transactionId)).isEqualTo(StoredTimes(CLAIMED_AT, chargedAt = null))
+                assertThat(StoredFeeRecords.timesOf(transaction.transactionId)).isEqualTo(StoredTimes(STARTED_AT, chargedAt = null))
             }
 
         @Test
@@ -122,7 +122,7 @@ class FeeRecordRepositoryIT
                         TimeZone.setDefault(TimeZone.getTimeZone("Europe/Berlin"))
 
                         // when
-                        repository.claim(transaction, "token-a")
+                        repository.start(transaction, "workflow-a")
                         StoredFeeRecords.transactionOf(transaction.transactionId)
                     } finally {
                         TimeZone.setDefault(defaultZone)
@@ -166,128 +166,159 @@ class FeeRecordRepositoryIT
             val transactionId = newTransactionId()
 
             // when
-            val claiming = runCatching { runBlocking { refused.claim(transactionFor(transactionId), "token-a") } }
-            val completing = runCatching { runBlocking { refused.complete(transactionId, "token-a", responseFor(transactionId)) } }
+            val starting = runCatching { runBlocking { refused.start(transactionFor(transactionId), "workflow-a") } }
+            val charging =
+                runCatching { runBlocking { refused.charge(transactionFor(transactionId), "workflow-a", responseFor(transactionId)) } }
 
-            // then: one line each, without the statement, the claim token or the request's values
-            assertThat(claiming.exceptionOrNull())
+            // then: one line each, without the statement, the workflow id or the request's values
+            assertThat(starting.exceptionOrNull())
                 .isInstanceOf(DataAccessException::class.java)
-                .hasMessageStartingWith("Reading the fee record of '$transactionId' failed: ")
-            assertThat(completing.exceptionOrNull())
+                .hasMessageStartingWith("Starting the fee record of '$transactionId' failed: ")
+            assertThat(charging.exceptionOrNull())
                 .isInstanceOf(DataAccessException::class.java)
-                .hasMessageStartingWith("Completing the fee record of '$transactionId' failed: ")
-            listOf(claiming, completing).forEach { failed ->
+                .hasMessageStartingWith("Charging the fee record of '$transactionId' failed: ")
+            listOf(starting, charging).forEach { failed ->
                 assertThat(failed.exceptionOrNull()).hasMessageContaining("password authentication failed")
-                listOf("\n", "\"fee_record\"", "token-a", "Mobile Top Up").forEach { revealing ->
+                listOf("\n", "\"fee_record\"", "workflow-a", "Mobile Top Up").forEach { revealing ->
                     assertThat(failed.exceptionOrNull()).hasMessageNotContaining(revealing)
                 }
             }
         }
 
         @Test
-        fun `claiming an id that has a record changes nothing, whatever the token or payload`() =
+        fun `starting an id that has a record changes nothing, whatever the workflow id or payload`() =
             runBlocking<Unit> {
                 // given
                 val transactionId = newTransactionId()
-                repository.claim(transactionFor(transactionId), "token-a")
+                repository.start(transactionFor(transactionId), "workflow-a")
 
                 // when
-                val again = repository.claim(transactionFor(transactionId), "token-a")
-                val other = repository.claim(transactionFor(transactionId).copy(amount = BigDecimal("2000")), "token-b")
+                val again = repository.start(transactionFor(transactionId), "workflow-a")
+                val other = repository.start(transactionFor(transactionId).copy(amount = BigDecimal("2000")), "workflow-b")
 
-                // then: the record of the first claim, both times, with the first claim's request
-                assertThat(listOf(again, other)).containsOnly(FeeRecord.inProgress("token-a"))
-                assertThat(StoredFeeRecords.of(transactionId)).isEqualTo(FeeRecord.inProgress("token-a"))
+                // then: the record of the first start, both times, with the first start's request
+                assertThat(listOf(again, other)).containsOnly(FeeRecord.pending("workflow-a"))
+                assertThat(StoredFeeRecords.of(transactionId)).isEqualTo(FeeRecord.pending("workflow-a"))
                 assertThat(StoredFeeRecords.transactionOf(transactionId)).isEqualTo(transactionFor(transactionId))
             }
 
         @Test
-        fun `completing with the claim token stores the response and when it was charged, every scale kept`() =
+        fun `charging under its workflow id stores the response and when it was charged, every scale kept`() =
             runBlocking<Unit> {
                 // given
                 val transactionId = newTransactionId()
-                repository.claim(transactionFor(transactionId), "token-a")
+                repository.start(transactionFor(transactionId), "workflow-a")
                 val response = responseFor(transactionId)
                 clock.pin(CHARGED_AT)
 
                 // when
-                repository.complete(transactionId, "token-a", response)
+                repository.charge(transactionFor(transactionId), "workflow-a", response)
 
                 // then: equal as data classes, so 1000 is still 1000 and 1.50 still 1.50
                 assertThat(repository.findCharged(transactionId)).isEqualTo(response)
-                assertThat(StoredFeeRecords.of(transactionId)).isEqualTo(FeeRecord.inProgress("token-a").complete(response))
-                assertThat(StoredFeeRecords.timesOf(transactionId)).isEqualTo(StoredTimes(CLAIMED_AT, CHARGED_AT))
+                assertThat(StoredFeeRecords.of(transactionId)).isEqualTo(FeeRecord.pending("workflow-a").charge(response))
+                assertThat(StoredFeeRecords.timesOf(transactionId)).isEqualTo(StoredTimes(STARTED_AT, CHARGED_AT))
             }
 
         @Test
-        fun `completing again with the same response changes nothing, not even charged_at, so a step run again after a crash is safe`() =
+        fun `charging writes the request fields of the payload it charged, whichever payload started the record`() =
+            runBlocking<Unit> {
+                // given: another request of the id started the record with a different amount
+                val transactionId = newTransactionId()
+                repository.start(transactionFor(transactionId).copy(amount = BigDecimal("2000")), "workflow-a")
+                val charged = transactionFor(transactionId)
+
+                // when: the workflow charges the payload it got
+                repository.charge(charged, "workflow-a", responseFor(transactionId))
+
+                // then: the record holds what was charged
+                assertThat(StoredFeeRecords.transactionOf(transactionId)).isEqualTo(charged)
+                assertThat(repository.findCharged(transactionId)).isEqualTo(responseFor(transactionId))
+            }
+
+        @Test
+        fun `charging again with the same response changes nothing, not even charged_at, so a step run again after a crash is safe`() =
             runBlocking<Unit> {
                 // given
                 val transactionId = newTransactionId()
-                repository.claim(transactionFor(transactionId), "token-a")
+                repository.start(transactionFor(transactionId), "workflow-a")
                 val response = responseFor(transactionId)
                 clock.pin(CHARGED_AT)
-                repository.complete(transactionId, "token-a", response)
+                repository.charge(transactionFor(transactionId), "workflow-a", response)
                 clock.pin(CHARGED_AT.plusSeconds(30))
 
                 // when
-                repository.complete(transactionId, "token-a", response)
+                repository.charge(transactionFor(transactionId), "workflow-a", response)
 
                 // then
-                assertThat(StoredFeeRecords.of(transactionId)).isEqualTo(FeeRecord.inProgress("token-a").complete(response))
-                assertThat(StoredFeeRecords.timesOf(transactionId)).isEqualTo(StoredTimes(CLAIMED_AT, CHARGED_AT))
+                assertThat(StoredFeeRecords.of(transactionId)).isEqualTo(FeeRecord.pending("workflow-a").charge(response))
+                assertThat(StoredFeeRecords.timesOf(transactionId)).isEqualTo(StoredTimes(STARTED_AT, CHARGED_AT))
                 assertThat(StoredFeeRecords.count(transactionId)).isEqualTo(1)
             }
 
         @Test
-        fun `completing with another token fails and leaves the record as it was`() {
+        fun `charging under another workflow id fails and leaves the record as it was`() {
             // given
             val transactionId = newTransactionId()
-            runBlocking { repository.claim(transactionFor(transactionId), "token-a") }
+            runBlocking { repository.start(transactionFor(transactionId), "workflow-a") }
 
             // when / then
-            assertThatThrownBy { runBlocking { repository.complete(transactionId, "token-b", responseFor(transactionId)) } }
-                .isInstanceOf(IllegalStateException::class.java)
-                .hasMessage("Fee record '$transactionId' is not claimed by token token-b, so it can't be completed")
-            assertThat(StoredFeeRecords.of(transactionId)).isEqualTo(FeeRecord.inProgress("token-a"))
+            assertThatThrownBy {
+                runBlocking {
+                    repository.charge(
+                        transactionFor(transactionId),
+                        "workflow-b",
+                        responseFor(transactionId),
+                    )
+                }
+            }.isInstanceOf(IllegalStateException::class.java)
+                .hasMessage("Fee record '$transactionId' was not started for workflow workflow-b, so it can't be charged")
+            assertThat(StoredFeeRecords.of(transactionId)).isEqualTo(FeeRecord.pending("workflow-a"))
         }
 
         @Test
-        fun `completing a transaction id that was never claimed fails and stores nothing`() {
+        fun `charging a transaction id that was never started fails and stores nothing`() {
             // given
             val transactionId = newTransactionId()
 
             // when / then
-            assertThatThrownBy { runBlocking { repository.complete(transactionId, "token-a", responseFor(transactionId)) } }
-                .isInstanceOf(IllegalStateException::class.java)
+            assertThatThrownBy {
+                runBlocking {
+                    repository.charge(
+                        transactionFor(transactionId),
+                        "workflow-a",
+                        responseFor(transactionId),
+                    )
+                }
+            }.isInstanceOf(IllegalStateException::class.java)
             assertThat(StoredFeeRecords.count(transactionId)).isZero()
         }
 
         @Test
-        fun `claiming a charged transaction id returns its completed record`() =
+        fun `starting a charged transaction id returns its charged record`() =
             runBlocking<Unit> {
                 // given
                 val transactionId = newTransactionId()
-                repository.claim(transactionFor(transactionId), "token-a")
+                repository.start(transactionFor(transactionId), "workflow-a")
                 val response = responseFor(transactionId)
-                repository.complete(transactionId, "token-a", response)
+                repository.charge(transactionFor(transactionId), "workflow-a", response)
 
                 // when
-                val record = repository.claim(transactionFor(transactionId), "token-b")
+                val record = repository.start(transactionFor(transactionId), "workflow-b")
 
                 // then
-                assertThat(record).isEqualTo(FeeRecord.inProgress("token-a").complete(response))
+                assertThat(record).isEqualTo(FeeRecord.pending("workflow-a").charge(response))
             }
 
         @Test
-        fun `the table refuses a half-written charge, in progress or completed`() {
+        fun `the table refuses a half-written charge, pending or charged`() {
             val halfWrittenCharges: List<(String) -> InsertSetMoreStep<FeeRecordRecord>> =
                 listOf(
-                    // in progress, with a fee
-                    { id -> rowOf(id, FeeRecordStatus.IN_PROGRESS).set(FEE_RECORD.FEE, BigDecimal("1.50")) },
-                    // completed, without charged_at
+                    // pending, with a fee
+                    { id -> rowOf(id, FeeRecordStatus.PENDING).set(FEE_RECORD.FEE, BigDecimal("1.50")) },
+                    // charged, without charged_at
                     { id ->
-                        rowOf(id, FeeRecordStatus.COMPLETED)
+                        rowOf(id, FeeRecordStatus.CHARGED)
                             .set(FEE_RECORD.FEE, BigDecimal("1.50"))
                             .set(FEE_RECORD.RATE, BigDecimal("0.0015"))
                             .set(FEE_RECORD.DESCRIPTION, "Standard fee rate of 0.15%")
@@ -299,7 +330,7 @@ class FeeRecordRepositoryIT
 
                 // when / then
                 assertThatThrownBy { runBlocking { insert(transactionId).awaitSingle() } }
-                    .hasStackTraceContaining("fee_record_charge_exactly_when_completed")
+                    .hasStackTraceContaining("fee_record_charge_exactly_when_charged")
                 assertThat(StoredFeeRecords.count(transactionId)).isZero()
             }
         }
@@ -309,8 +340,8 @@ class FeeRecordRepositoryIT
             runBlocking<Unit> {
                 // given: a charged record, and a repository on a pool of a single connection
                 val transactionId = newTransactionId()
-                repository.claim(transactionFor(transactionId), "token-a")
-                repository.complete(transactionId, "token-a", responseFor(transactionId))
+                repository.start(transactionFor(transactionId), "workflow-a")
+                repository.charge(transactionFor(transactionId), "workflow-a", responseFor(transactionId))
                 val pool = poolOfOneConnection()
                 try {
                     val onOneConnection = PostgresFeeRecordRepository(pool, clock)
@@ -342,9 +373,9 @@ class FeeRecordRepositoryIT
                     // when: each query needs the connection the one before used; a query that kept it would wait forever
                     val charged =
                         withTimeout(10.seconds) {
-                            onOneConnection.claim(transactionFor(transactionId), "token-a")
-                            onOneConnection.claim(transactionFor(transactionId), "token-a")
-                            onOneConnection.complete(transactionId, "token-a", responseFor(transactionId))
+                            onOneConnection.start(transactionFor(transactionId), "workflow-a")
+                            onOneConnection.start(transactionFor(transactionId), "workflow-a")
+                            onOneConnection.charge(transactionFor(transactionId), "workflow-a", responseFor(transactionId))
                             onOneConnection.findCharged(transactionId)
                         }
 
@@ -357,56 +388,61 @@ class FeeRecordRepositoryIT
             }
 
         @Test
-        fun `finds no charge for a transaction id without a record or with one in progress`() =
+        fun `finds no charge for a transaction id without a record or with a pending one`() =
             runBlocking<Unit> {
                 // given
                 val unknown = newTransactionId()
-                val inProgress = newTransactionId()
-                repository.claim(transactionFor(inProgress), "token-a")
+                val pending = newTransactionId()
+                repository.start(transactionFor(pending), "workflow-a")
 
                 // when
-                val found = listOf(repository.findCharged(unknown), repository.findCharged(inProgress))
+                val found = listOf(repository.findCharged(unknown), repository.findCharged(pending))
 
                 // then
                 assertThat(found).containsOnlyNulls()
             }
 
         @Test
-        fun `concurrent claims with different tokens leave exactly one claim, and only its token can complete it`() =
+        fun `concurrent starts with different workflow ids leave exactly one record, and only its workflow can charge it`() =
             runBlocking<Unit> {
-                // given: claims released together, each with its own token
+                // given: starts released together, each with its own workflow id
                 val transactionId = newTransactionId()
-                val tokens = List(CONCURRENT_CLAIMS) { "token-$it" }
+                val workflowIds = List(CONCURRENT_STARTS) { "workflow-$it" }
                 val gate = CompletableDeferred<Unit>()
-                val claims =
-                    tokens.map { token ->
+                val starts =
+                    workflowIds.map { workflowId ->
                         async(Dispatchers.IO) {
                             gate.await()
-                            token to repository.claim(transactionFor(transactionId), token)
+                            workflowId to repository.start(transactionFor(transactionId), workflowId)
                         }
                     }
 
                 // when
                 gate.complete(Unit)
-                val results = claims.awaitAll()
+                val results = starts.awaitAll()
 
-                // then: one record, and every claim saw it: only the winner got its own token back
-                val winner = checkNotNull(StoredFeeRecords.of(transactionId)).claimToken
+                // then: one record, and every start saw it: only the winner got its own workflow id back
+                val winner = checkNotNull(StoredFeeRecords.of(transactionId)).workflowId
                 assertThat(StoredFeeRecords.count(transactionId)).isEqualTo(1)
-                assertThat(results.map { it.second }).containsOnly(FeeRecord.inProgress(winner))
-                assertThat(results.filter { (token, record) -> record.claimToken == token }.map { it.first }).containsExactly(winner)
+                assertThat(results.map { it.second }).containsOnly(FeeRecord.pending(winner))
+                assertThat(
+                    results
+                        .filter { (workflowId, record) ->
+                            record.workflowId == workflowId
+                        }.map { it.first },
+                ).containsExactly(winner)
 
-                // then: a losing token can't complete it, the winner's can
+                // then: a losing workflow can't charge it, the winner can
                 val response = responseFor(transactionId)
-                val loser = tokens.first { it != winner }
-                assertThat(runCatching { repository.complete(transactionId, loser, response) }.isFailure).isTrue()
-                repository.complete(transactionId, winner, response)
-                assertThat(StoredFeeRecords.of(transactionId)).isEqualTo(FeeRecord.inProgress(winner).complete(response))
+                val loser = workflowIds.first { it != winner }
+                assertThat(runCatching { repository.charge(transactionFor(transactionId), loser, response) }.isFailure).isTrue()
+                repository.charge(transactionFor(transactionId), winner, response)
+                assertThat(StoredFeeRecords.of(transactionId)).isEqualTo(FeeRecord.pending(winner).charge(response))
             }
 
         private fun newTransactionId() = "it-repository-${UUID.randomUUID().toString().take(13)}"
 
-        /** The reference request of [transactionId], as MAP builds it: the transaction [responseFor] is the charge of. */
+        /** The reference request of [transactionId], as TransactionMapper builds it: the transaction [responseFor] is the charge of. */
         private fun transactionFor(transactionId: String) =
             Transaction(
                 transactionId = transactionId,
@@ -428,7 +464,7 @@ class FeeRecordRepositoryIT
                     .build(),
             )
 
-        /** An insert of the reference request of [transactionId] with [status], claimed by `token-a`: no charge yet. */
+        /** An insert of the reference request of [transactionId] with [status], started for `workflow-a`: no charge yet. */
         private fun rowOf(transactionId: String, status: FeeRecordStatus): InsertSetMoreStep<FeeRecordRecord> {
             val transaction = transactionFor(transactionId)
             return PostgresTestEnvironment.dsl
@@ -441,8 +477,8 @@ class FeeRecordRepositoryIT
                 .set(FEE_RECORD.STATE, transaction.state.value)
                 .set(FEE_RECORD.CREATED_AT, transaction.createdAt)
                 .set(FEE_RECORD.STATUS, status.name)
-                .set(FEE_RECORD.CLAIM_TOKEN, "token-a")
-                .set(FEE_RECORD.CLAIMED_AT, CLAIMED_AT)
+                .set(FEE_RECORD.WORKFLOW_ID, "workflow-a")
+                .set(FEE_RECORD.STARTED_AT, STARTED_AT)
         }
 
         private fun responseFor(transactionId: String) =
@@ -457,11 +493,11 @@ class FeeRecordRepositoryIT
             )
 
         private companion object {
-            const val CONCURRENT_CLAIMS = 10
+            const val CONCURRENT_STARTS = 10
             const val CUT_SHORT_LOOKUPS = 300
 
             // microseconds at most: Postgres keeps no more
-            val CLAIMED_AT: Instant = Instant.parse("2026-11-13T10:15:30.123456Z")
+            val STARTED_AT: Instant = Instant.parse("2026-11-13T10:15:30.123456Z")
             val CHARGED_AT: Instant = Instant.parse("2026-11-13T10:15:31.654321Z")
         }
     }

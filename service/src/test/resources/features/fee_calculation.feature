@@ -23,7 +23,7 @@ Feature: Fee calculation
       | rate           | 0.0015                     |
       | description    | Standard fee rate of 0.15% |
     And the fee was charged exactly once
-    And the fee is recorded as completed
+    And the fee is recorded as charged
     And the request is stored with the fee record
 
   Scenario Outline: A <type> of <amount> <asset> is charged <fee> <asset>
@@ -32,7 +32,7 @@ Feature: Fee calculation
     Then the response status is 200
     And the fee is <fee> with rate <rate> and description "<description>"
     And the fee was charged exactly once
-    And the fee is recorded as completed
+    And the fee is recorded as charged
     And the request is stored with the fee record
 
     Examples: One of each type in each supported asset

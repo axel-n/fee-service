@@ -16,7 +16,7 @@ class RestateProperties(
     advertisedHost: String?,
     attachTimeout: Duration?,
 ) {
-    /** Restate ingress, used by `FeeService` through the generated ingress clients. */
+    /** Restate ingress, used by `FeeService` through the Kotlin SDK's ingress client. */
     val ingressUrl: String = httpUrl("ingress-url", ingressUrl)
 
     /** Restate's admin API, where `RestateEndpointLifecycle` registers the endpoint at startup and removes it at shutdown. */

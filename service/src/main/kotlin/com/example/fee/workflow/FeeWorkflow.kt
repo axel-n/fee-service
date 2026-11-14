@@ -6,12 +6,8 @@ import com.example.fee.domain.Transaction
 import com.example.fee.domain.TransactionMapper
 import com.example.fee.fee.FeeCalculator
 import com.example.fee.fee.FeeQuote
-import com.example.fee.record.ClaimDecider
-import com.example.fee.record.ClaimResult
 import com.example.fee.record.FeeRecordRepository
 import com.example.fee.restate.serde.KotlinJacksonSerdeFactory
-import com.example.fee.validation.RequestValidator
-import com.example.fee.validation.ValidationError
 import dev.restate.sdk.annotation.CustomSerdeFactory
 import dev.restate.sdk.annotation.Shared
 import dev.restate.sdk.annotation.Workflow
@@ -23,17 +19,17 @@ import dev.restate.sdk.kotlin.workflowKey
 import dev.restate.serde.TypeTag
 import dev.restate.serde.kotlinx.typeTag
 import org.springframework.stereotype.Component
-import java.util.UUID
 
 /**
- * Processes the fee of one transaction (the workflow key is its `transaction_id`): VALIDATE → MAP → CLAIM → CALCULATE →
- * RECORD, each a journaled step wrapped by [StepHook]. CLAIM and RECORD write the `transaction_id`'s fee record in
- * Postgres; RECORD charges the fee by storing it there. On a retry Restate replays the journaled steps instead of running
- * them again.
+ * Calculates and charges the fee of one transaction: CALCULATE → CHARGE, each a journaled step wrapped by [StepHook].
+ * The workflow key is the transaction's `workflow_id`, the UUID `FeeService` stored on its fee record before it
+ * submitted the run. CHARGE charges the fee by recording it on that record in Postgres. On a retry Restate replays the
+ * journaled steps instead of running them again.
  *
- * Business results are returned as [FeeOutcome]. The handlers are deterministic: the clock, the fee numbers, the claim
- * token and Postgres are only reached inside [FeeWorkflowContext.journaled]. They reach Restate only through
- * [FeeWorkflowContext] and Postgres only through [FeeRecordRepository], so their logic is unit-tested without either.
+ * Only `FeeService` starts a run, after it validated the request, so the workflow doesn't validate again. The handlers
+ * are deterministic: the fee numbers and Postgres are only reached inside [FeeWorkflowContext.journaled]. They reach
+ * Restate only through [FeeWorkflowContext] and Postgres only through [FeeRecordRepository], so their logic is
+ * unit-tested without either.
  *
  * Breaking changes for in-flight workflows: the class and handler names and signatures, the step order, the journaled
  * names and result types, and the state key name.
@@ -42,78 +38,54 @@ import java.util.UUID
 @Workflow
 @CustomSerdeFactory(KotlinJacksonSerdeFactory::class)
 class FeeWorkflow(
-    private val requestValidator: RequestValidator,
     private val transactionMapper: TransactionMapper,
     private val feeCalculator: FeeCalculator,
-    private val claimDecider: ClaimDecider,
     private val feeRecords: FeeRecordRepository,
     private val stepHook: StepHook,
     private val context: FeeWorkflowContext,
 ) {
     /**
-     * Validates, claims, calculates, then charges the fee by recording it, for [request] exactly as the client sent it.
+     * Calculates, then charges the fee of [request], exactly as the client sent it, and returns the charged response.
      * The request is journaled as the workflow input.
      */
     @Workflow
-    suspend fun run(request: FeeRequest): FeeOutcome {
-        val outcome = process(request)
+    suspend fun run(request: FeeRequest): FeeResponse {
+        val response = process(request)
         context.setStep(WorkflowStep.DONE)
-        return outcome
+        return response
     }
 
     /** The step the workflow is at, [WorkflowStep.DONE] once it returned, or `null` if it never started. */
     @Shared
     suspend fun status(): WorkflowStep? = context.step()
 
-    private suspend fun process(request: FeeRequest): FeeOutcome {
-        val error =
-            step(WorkflowStep.VALIDATE) {
-                context.journaled("validate", typeTag<ValidationError?>()) { requestValidator.validate(request) }
-            }
-        if (error != null) return FeeOutcome.Rejected(error)
-
-        val transaction = step(WorkflowStep.MAP) { map(request) }
-        val transactionId = transaction.transactionId
-
-        // The token names this run in the fee record. Journaled before the claim, so a claim run again after a crash
-        // between its commit and its journal entry finds its own row instead of someone else's.
-        val claimToken = context.journaled("claim-token", typeTag<String>()) { UUID.randomUUID().toString() }
-        val claim =
-            step(WorkflowStep.CLAIM) {
-                context.journaled("claim", typeTag<ClaimResult>()) {
-                    claimDecider.decide(feeRecords.claim(transaction, claimToken), claimToken)
-                }
-            }
-        when (claim) {
-            ClaimResult.New -> Unit
-            is ClaimResult.AlreadyCompleted -> return FeeOutcome.Charged(claim.response)
-            ClaimResult.InProgress -> return FeeOutcome.Conflict(transactionId)
-        }
-
+    private suspend fun process(request: FeeRequest): FeeResponse {
+        // Pure and deterministic, so it runs again on every replay instead of being journaled
+        val transaction = map(request)
         val quote =
-            step(WorkflowStep.CALCULATE) {
+            step(WorkflowStep.CALCULATE, transaction.transactionId) {
                 context.journaled("calculate", typeTag<FeeQuote>()) { feeCalculator.calculate(transaction) }
             }
         val response = response(transaction, quote)
-        step(WorkflowStep.RECORD) {
-            context.journaled("record", typeTag<Unit>()) { feeRecords.complete(transactionId, claimToken, response) }
+        val workflowId = context.key()
+        step(WorkflowStep.CHARGE, transaction.transactionId) {
+            context.journaled("charge", typeTag<Unit>()) { feeRecords.charge(transaction, workflowId, response) }
         }
-        return FeeOutcome.Charged(response)
+        return response
     }
 
     // The state write and the hooks run on every replay too: the write is deterministic, and a hook that throws is how
     // tests crash the workflow at a step boundary.
-    private suspend fun <T> step(step: WorkflowStep, action: suspend () -> T): T {
+    private suspend fun <T> step(step: WorkflowStep, transactionId: String, action: suspend () -> T): T {
         context.setStep(step)
-        val key = context.key()
-        stepHook.before(step, key)
+        stepHook.before(step, transactionId)
         val result = action()
-        stepHook.after(step, key)
+        stepHook.after(step, transactionId)
         return result
     }
 
-    // Validation passed, so the mapper can't return null; if it does, that is a bug: a plain exception, retried until
-    // Restate pauses the invocation.
+    // FeeService validated the request before it submitted the run, so the mapper can't return null; if it does, that
+    // is a bug: a plain exception, retried until Restate pauses the invocation.
     private fun map(request: FeeRequest): Transaction =
         checkNotNull(transactionMapper.toTransaction(request)) {
             "Request for transaction '${request.transactionId}' passed validation but could not be mapped"
@@ -136,14 +108,14 @@ class FeeWorkflow(
  * reach Restate only through this, so tests replace it with an in-memory fake.
  */
 interface FeeWorkflowContext {
-    /** The workflow key: the `transaction_id`. */
+    /** The workflow key: the transaction's `workflow_id`. */
     suspend fun key(): String
 
     /**
      * Runs [action] once and journals its result as [name], serialized as [type]; a replay returns the journaled
-     * result without running [action]. For anything non-deterministic or with side effects, such as the clock, the fee
-     * numbers, a random token or Postgres. A failed [action] is retried; one that committed to Postgres but crashed
-     * before its result was journaled runs again, so its writes must be safe to repeat.
+     * result without running [action]. For anything non-deterministic or with side effects, such as the fee numbers or
+     * Postgres. A failed [action] is retried; one that committed to Postgres but crashed before its result was journaled
+     * runs again, so its writes must be safe to repeat.
      */
     suspend fun <T> journaled(name: String, type: TypeTag<T>, action: suspend () -> T): T
 
@@ -162,8 +134,8 @@ interface FeeWorkflowContext {
 class RestateFeeWorkflowContext : FeeWorkflowContext {
     override suspend fun key(): String = workflowKey()
 
-    // context(), not the top-level runBlock: that one takes only non-null results, and VALIDATE journals a nullable
-    // ValidationError, as it did before the Kotlin SDK.
+    // context(), not the top-level runBlock: that one takes only non-null results, and this interface is generic over
+    // any result type.
     @Suppress("DEPRECATION")
     override suspend fun <T> journaled(name: String, type: TypeTag<T>, action: suspend () -> T): T =
         context().runBlock(type, name, block = action)

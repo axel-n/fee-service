@@ -2,7 +2,6 @@ package com.example.fee.api
 
 import com.example.fee.application.FeeService
 import com.example.fee.contract.FeeRequest
-import com.example.fee.contract.error.DuplicateTransactionException
 import com.example.fee.contract.error.FeeException
 import com.example.fee.contract.error.FeeProblem
 import com.example.fee.contract.error.ValidationException
@@ -119,26 +118,6 @@ class ApiExceptionHandlerTest(
             .andExpect(jsonPath("$.value").value("PENDING"))
             .andExpect(jsonPath("$.message").value(message))
             .andExpect(jsonPath("$.detail").value(message))
-    }
-
-    @Test
-    fun `a transaction id claimed by another payload is 409 with the transaction id`() {
-        // given
-        submitThrows(DuplicateTransactionException("txn_001"))
-
-        // when
-        val result = postFee()
-
-        // then
-        result
-            .andExpect(status().isConflict)
-            .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
-            .andExpect(jsonPath("$.title").value("Conflict"))
-            .andExpect(jsonPath("$.status").value(409))
-            .andExpect(jsonPath("$.code").value("DUPLICATE_TRANSACTION"))
-            .andExpect(jsonPath("$.transaction_id").value("txn_001"))
-            .andExpect(jsonPath("$.detail").value(DuplicateTransactionException("txn_001").message))
-            .andExpect(jsonPath("$.field").doesNotExist())
     }
 
     @Test
@@ -274,7 +253,6 @@ class ApiExceptionHandlerTest(
                 ValidationException("amount", "-5", "Amount -5 must be greater than 0", ValidationException.Kind.INVALID),
                 ValidationException("asset", null, "Field 'asset' is required", ValidationException.Kind.INVALID),
                 ValidationException("state", "PENDING", "Unsupported state 'PENDING'", ValidationException.Kind.UNSUPPORTED),
-                DuplicateTransactionException("txn_001"),
                 WorkflowUnavailableException(ConnectException("Connection refused")),
                 WorkflowTimeoutException("txn_001"),
             )
@@ -301,7 +279,6 @@ class ApiExceptionHandlerTest(
     private fun properties(exception: FeeException): List<Any?> =
         when (exception) {
             is ValidationException -> listOf(exception.field, exception.value, exception.kind)
-            is DuplicateTransactionException -> listOf(exception.transactionId)
             is WorkflowUnavailableException -> emptyList()
             is WorkflowTimeoutException -> listOf(exception.transactionId)
         }

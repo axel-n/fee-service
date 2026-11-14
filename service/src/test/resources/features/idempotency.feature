@@ -1,10 +1,10 @@
 Feature: Idempotency
-  A transaction is keyed by its transaction_id: Restate runs one workflow per transaction_id, and every submission of
-  that id, one call after the other or by several callers at once, attaches to that run. The first payload Restate
-  receives is the one processed and charged, once, and every caller gets that run's response, whatever valid payload it
-  sent. Once charged, the id is answered from the app's cache or Postgres without Restate, with the same response, and
-  Postgres holds one fee record per id. An invalid payload is rejected by the app before it reaches Restate or
-  Postgres, even for a charged id, and leaves the charge as it was.
+  A transaction_id has one fee record, and with it one workflow_id, so Restate runs one workflow per transaction_id, and
+  every submission of that id, one call after the other or by several callers at once, attaches to that run. The first
+  payload Restate receives is the one processed and charged, once, and every caller gets that run's response, whatever
+  valid payload it sent. Once charged, the id is answered from the app's cache or Postgres without Restate, with the same
+  response, and Postgres holds one fee record per id. An invalid payload is rejected by the app before it reaches Restate
+  or Postgres, even for a charged id, and leaves the charge as it was.
 
   Scenario: The same payload sent twice gets the same response and is charged once
     Given a "Mobile Top Up" transaction "txn_401" of 1000 "USD" "FIAT" in state "SETTLED - PENDING FEE"
@@ -15,7 +15,7 @@ Feature: Idempotency
     And the response is the same as the first one
     And the fee is 1.5 with rate 0.0015 and description "Standard fee rate of 0.15%"
     And the fee was charged exactly once
-    And the fee is recorded as completed
+    And the fee is recorded as charged
 
   Scenario Outline: A charged transaction sent again with a changed <field> gets the first response and is charged once
     Given a "Mobile Top Up" transaction "<id>" of 1000 "USD" "FIAT" in state "SETTLED - PENDING FEE"
@@ -27,7 +27,7 @@ Feature: Idempotency
     And the response is the same as the first one
     And the fee is 1.5 with rate 0.0015 and description "Standard fee rate of 0.15%"
     And the fee was charged exactly once
-    And the fee is recorded as completed
+    And the fee is recorded as charged
 
     Examples: Fields of an already charged transaction
       | id      | field      | changed                    |
@@ -46,7 +46,7 @@ Feature: Idempotency
     Then the response status is 422
     And the request is rejected on field "state" with value "PENDING" and message "Unsupported state 'PENDING'. Supported: 'SETTLED - PENDING FEE'"
     And the fee was charged exactly once
-    And the fee is recorded as completed
+    And the fee is recorded as charged
 
   Scenario: The same payload sent by 5 callers at once is charged once, and every caller gets the response
     Given a "Bank Transfer" transaction "txn_421" of 1000 "EUR" "FIAT" in state "SETTLED - PENDING FEE"
@@ -54,7 +54,7 @@ Feature: Idempotency
     Then every caller gets status 200 and the same response
     And the fee is 5.0 with rate 0.005 and description "Fee rate of 0.5% (min 1.00 EUR)"
     And the fee was charged exactly once
-    And the fee is recorded as completed
+    And the fee is recorded as charged
 
   Scenario: Different payloads of one transaction sent at once: one is charged, and every caller gets its response
     Given a "Mobile Top Up" transaction "txn_422" of 1000 "USD" "FIAT" in state "SETTLED - PENDING FEE"
@@ -62,4 +62,4 @@ Feature: Idempotency
     Then every caller gets status 200 and the same response
     And the response is the charge of one caller's amount
     And the fee was charged exactly once
-    And the fee is recorded as completed
+    And the fee is recorded as charged

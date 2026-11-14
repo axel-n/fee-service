@@ -2,19 +2,10 @@ package com.example.fee.workflow
 
 import com.example.fee.contract.FeeRequest
 import com.example.fee.contract.FeeResponse
-import com.example.fee.domain.Asset
-import com.example.fee.domain.AssetType
-import com.example.fee.domain.Transaction
 import com.example.fee.domain.TransactionMapper
-import com.example.fee.domain.TransactionState
-import com.example.fee.domain.TransactionType
-import com.example.fee.record.ClaimDecider
 import com.example.fee.record.FeeRecord
 import com.example.fee.record.InMemoryFeeRecordRepository
 import com.example.fee.record.InMemoryFeeRecordRepository.Call
-import com.example.fee.validation.RequestValidator
-import com.example.fee.validation.TransactionValidator
-import com.example.fee.validation.ValidationError
 import com.example.fee.validation.allRulesCalculator
 import com.example.fee.validation.validRequest
 import dev.restate.common.Slice
@@ -28,19 +19,18 @@ import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import java.math.BigDecimal
-import java.time.LocalDateTime
-import java.util.UUID
 
 /**
- * The handlers against an in-memory [FeeWorkflowContext] (journaled actions run at once, or answer what a replay
- * would) and in-memory fee records. Journaling, replay, recovery and Postgres itself are the ITs'.
+ * The handlers against an in-memory [FeeWorkflowContext] (journaled actions run at once) and in-memory fee records,
+ * where `FeeService` has started the record of `txn_001` for the workflow [KEY]. Journaling, replay, recovery and
+ * Postgres itself are the ITs'.
  */
 class FeeWorkflowTest {
     private val hook = RecordingStepHook()
 
     private val expectedResponse =
         FeeResponse(
-            transactionId = "txn_001",
+            transactionId = TRANSACTION_ID,
             amount = BigDecimal("1000"),
             asset = "USD",
             type = "Mobile Top Up",
@@ -53,47 +43,32 @@ class FeeWorkflowTest {
     fun `charges the reference request and returns the fee response`() =
         runBlocking<Unit> {
             // given
-            val records = InMemoryFeeRecordRepository()
+            val records = startedRecords()
 
             // when
-            val outcome = workflow(FakeWorkflowContext(), records).run(validRequest)
+            val response = workflow(FakeWorkflowContext(), records).run(validRequest)
 
             // then
-            assertThat(outcome).isEqualTo(FeeOutcome.Charged(expectedResponse))
-            assertThat(records.records[KEY]?.response).isEqualTo(expectedResponse)
+            assertThat(response).isEqualTo(expectedResponse)
+            assertThat(records.records[TRANSACTION_ID]).isEqualTo(FeeRecord.pending(KEY).charge(expectedResponse))
         }
 
     @Test
-    fun `claims the transaction id with a fresh token and every request field, then records the response with the same token`() =
+    fun `charges the transaction's record under the workflow key with the payload it charged, and writes nothing else`() =
         runBlocking<Unit> {
             // given
-            val context = FakeWorkflowContext()
-            val records = InMemoryFeeRecordRepository()
+            val records = startedRecords()
 
             // when
-            workflow(context, records).run(validRequest)
+            workflow(FakeWorkflowContext(), records).run(validRequest)
 
-            // then: the claim carries the request exactly as sent, created_at parsed
-            val token = context.results["claim-token"] as String
-            assertThat(UUID.fromString(token)).isNotNull
-            val claimed =
-                Transaction(
-                    transactionId = KEY,
-                    amount = BigDecimal("1000"),
-                    asset = Asset.USD,
-                    assetType = AssetType.FIAT,
-                    type = TransactionType.MOBILE_TOP_UP,
-                    state = TransactionState.SETTLED_PENDING_FEE,
-                    createdAt = LocalDateTime.of(2023, 8, 30, 15, 42, 17, 610_059_000),
-                )
-            assertThat(records.calls).containsExactly(
-                Call("claim", KEY, token, transaction = claimed),
-                Call("complete", KEY, token, expectedResponse),
-            )
+            // then
+            val charged = TransactionMapper().toTransaction(validRequest)
+            assertThat(records.calls).containsExactly(Call("charge", TRANSACTION_ID, KEY, expectedResponse, charged))
         }
 
     @Test
-    fun `wraps every step with the step hook, in order, with the workflow key`() =
+    fun `wraps every step with the step hook, in order, with the transaction id`() =
         runBlocking<Unit> {
             // given
             val context = FakeWorkflowContext()
@@ -103,21 +78,15 @@ class FeeWorkflowTest {
 
             // then
             assertThat(hook.events).containsExactly(
-                "before VALIDATE $KEY",
-                "after VALIDATE $KEY",
-                "before MAP $KEY",
-                "after MAP $KEY",
-                "before CLAIM $KEY",
-                "after CLAIM $KEY",
-                "before CALCULATE $KEY",
-                "after CALCULATE $KEY",
-                "before RECORD $KEY",
-                "after RECORD $KEY",
+                "before CALCULATE $TRANSACTION_ID",
+                "after CALCULATE $TRANSACTION_ID",
+                "before CHARGE $TRANSACTION_ID",
+                "after CHARGE $TRANSACTION_ID",
             )
         }
 
     @Test
-    fun `journals validation, the claim token, the claim, the calculation and the record, and only those`() =
+    fun `journals the calculation and the charge, and only those`() =
         runBlocking<Unit> {
             // given
             val context = FakeWorkflowContext()
@@ -126,7 +95,7 @@ class FeeWorkflowTest {
             workflow(context).run(validRequest)
 
             // then
-            assertThat(context.journaled).containsExactly("validate", "claim-token", "claim", "calculate", "record")
+            assertThat(context.journaled).containsExactly("calculate", "charge")
         }
 
     @Test
@@ -140,147 +109,76 @@ class FeeWorkflowTest {
             workflow.run(validRequest)
 
             // then
-            assertThat(context.stepWrites).containsExactly(
-                WorkflowStep.VALIDATE,
-                WorkflowStep.MAP,
-                WorkflowStep.CLAIM,
-                WorkflowStep.CALCULATE,
-                WorkflowStep.RECORD,
-                WorkflowStep.DONE,
-            )
+            assertThat(context.stepWrites).containsExactly(WorkflowStep.CALCULATE, WorkflowStep.CHARGE, WorkflowStep.DONE)
             assertThat(workflow.status()).isEqualTo(WorkflowStep.DONE)
         }
 
     @Test
-    fun `returns a rejection without touching the fee records`() =
-        runBlocking<Unit> {
-            // given
-            val error = ValidationError("state", "PENDING", "Unsupported state 'PENDING'", ValidationError.Kind.UNSUPPORTED)
-            val context = FakeWorkflowContext()
-            val records = InMemoryFeeRecordRepository()
-
-            // when
-            val outcome = workflow(context, records, validator = validatorReturning(error)).run(validRequest)
-
-            // then
-            assertThat(outcome).isEqualTo(FeeOutcome.Rejected(error))
-            assertThat(records.calls).isEmpty()
-            assertThat(records.records).isEmpty()
-            assertThat(context.journaled).containsExactly("validate")
-            assertThat(context.stepWrites).containsExactly(WorkflowStep.VALIDATE, WorkflowStep.DONE)
-            assertThat(hook.events).containsExactly("before VALIDATE $KEY", "after VALIDATE $KEY")
-        }
-
-    @Test
-    fun `returns the stored response for a transaction that was already charged, without charging again`() =
-        runBlocking<Unit> {
-            // given
-            val stored = expectedResponse.copy(description = "charged earlier")
-            val context = FakeWorkflowContext()
-            val records = InMemoryFeeRecordRepository(KEY to FeeRecord.inProgress("earlier-run").complete(stored))
-
-            // when
-            val outcome = workflow(context, records).run(validRequest)
-
-            // then
-            assertThat(outcome).isEqualTo(FeeOutcome.Charged(stored))
-            assertThat(context.journaled).containsExactly("validate", "claim-token", "claim")
-            assertThat(records.calls.map { it.name }).containsExactly("claim")
-            assertThat(records.records[KEY]?.response).isEqualTo(stored)
-            assertThat(context.stepWrites).containsExactly(
-                WorkflowStep.VALIDATE,
-                WorkflowStep.MAP,
-                WorkflowStep.CLAIM,
-                WorkflowStep.DONE,
-            )
-        }
-
-    @Test
-    fun `returns a conflict when an earlier run that never finished holds the claim, without charging`() =
-        runBlocking<Unit> {
-            // given
-            val context = FakeWorkflowContext()
-            val records = InMemoryFeeRecordRepository(KEY to FeeRecord.inProgress("earlier-run"))
-
-            // when
-            val outcome = workflow(context, records).run(validRequest)
-
-            // then
-            assertThat(outcome).isEqualTo(FeeOutcome.Conflict("txn_001"))
-            assertThat(records.calls.map { it.name }).containsExactly("claim")
-            assertThat(records.records[KEY]).isEqualTo(FeeRecord.inProgress("earlier-run"))
-            assertThat(context.stepWrites.last()).isEqualTo(WorkflowStep.DONE)
-        }
-
-    @Test
-    fun `a claim run again after a crash finds its own record by the replayed token and goes on to charge`() =
-        runBlocking<Unit> {
-            // given: the claim committed, the app crashed before its journal entry, and the token is replayed
-            val context = FakeWorkflowContext(replayed = mapOf("claim-token" to "token-of-this-run"))
-            val records = InMemoryFeeRecordRepository(KEY to FeeRecord.inProgress("token-of-this-run"))
-
-            // when
-            val outcome = workflow(context, records).run(validRequest)
-
-            // then
-            assertThat(outcome).isEqualTo(FeeOutcome.Charged(expectedResponse))
-            assertThat(records.records[KEY]).isEqualTo(FeeRecord.inProgress("token-of-this-run").complete(expectedResponse))
-        }
-
-    @Test
-    fun `a crash injected before RECORD stops the workflow before the fee is recorded, with status RECORD`() =
+    fun `a crash injected before CHARGE stops the workflow before the fee is charged, with status CHARGE`() =
         runBlocking<Unit> {
             // given
             val crash = IllegalStateException("injected crash")
             val crashingHook =
                 object : StepHook {
-                    override fun before(step: WorkflowStep, workflowKey: String) {
-                        if (step == WorkflowStep.RECORD) throw crash
+                    override fun before(step: WorkflowStep, transactionId: String) {
+                        if (step == WorkflowStep.CHARGE) throw crash
                     }
 
-                    override fun after(step: WorkflowStep, workflowKey: String) = Unit
+                    override fun after(step: WorkflowStep, transactionId: String) = Unit
                 }
-            val records = InMemoryFeeRecordRepository()
+            val records = startedRecords()
             val workflow = workflow(FakeWorkflowContext(), records, stepHook = crashingHook)
 
             // when / then
             assertThatThrownBy { runBlocking { workflow.run(validRequest) } }.isSameAs(crash)
-            assertThat(records.calls.map { it.name }).containsExactly("claim")
-            assertThat(workflow.status()).isEqualTo(WorkflowStep.RECORD)
+            assertThat(records.calls).isEmpty()
+            assertThat(workflow.status()).isEqualTo(WorkflowStep.CHARGE)
         }
 
     @Test
-    fun `a failure inside CALCULATE propagates as a plain exception, so Restate retries it, and nothing is recorded`() =
+    fun `a failure inside CALCULATE propagates as a plain exception, so Restate retries it, and nothing is charged`() =
         runBlocking<Unit> {
             // given
             val outage = IllegalStateException("configuration unreadable")
-            val records = InMemoryFeeRecordRepository()
+            val records = startedRecords()
             val workflow = workflow(FakeWorkflowContext(failing = mapOf("calculate" to outage)), records)
 
             // when / then
             assertThatThrownBy { runBlocking { workflow.run(validRequest) } }.isSameAs(outage)
-            assertThat(records.calls.map { it.name }).containsExactly("claim")
+            assertThat(records.calls).isEmpty()
             assertThat(workflow.status()).isEqualTo(WorkflowStep.CALCULATE)
         }
 
     @Test
-    fun `a Postgres failure at RECORD propagates as a plain exception, so Restate retries it`() =
+    fun `a Postgres failure at CHARGE propagates as a plain exception, so Restate retries it`() =
         runBlocking<Unit> {
             // given
             val outage = IllegalStateException("database unreachable")
-            val records = InMemoryFeeRecordRepository(failing = mapOf("complete" to outage))
+            val records = startedRecords(failing = mapOf("charge" to outage))
             val workflow = workflow(FakeWorkflowContext(), records)
 
             // when / then
             assertThatThrownBy { runBlocking { workflow.run(validRequest) } }.isSameAs(outage)
-            assertThat(records.records[KEY]?.response).isNull()
-            assertThat(workflow.status()).isEqualTo(WorkflowStep.RECORD)
+            assertThat(records.records[TRANSACTION_ID]).isEqualTo(FeeRecord.pending(KEY))
+            assertThat(workflow.status()).isEqualTo(WorkflowStep.CHARGE)
         }
 
     @Test
-    fun `a request that passed validation but can't be mapped is a bug, thrown before the claim`() {
+    fun `a record started for another workflow is not charged, and the failure propagates so Restate retries it`() =
+        runBlocking<Unit> {
+            // given
+            val records = InMemoryFeeRecordRepository(TRANSACTION_ID to FeeRecord.pending("another-workflow"))
+            val workflow = workflow(FakeWorkflowContext(), records)
+
+            // when / then
+            assertThatThrownBy { runBlocking { workflow.run(validRequest) } }.isInstanceOf(IllegalStateException::class.java)
+            assertThat(records.records[TRANSACTION_ID]).isEqualTo(FeeRecord.pending("another-workflow"))
+        }
+
+    @Test
+    fun `a request that passed validation but can't be mapped is a bug, thrown before CALCULATE`() {
         // given
-        val records = InMemoryFeeRecordRepository()
+        val records = startedRecords()
         val unmappable = validRequest.copy(createdAt = null)
 
         // when / then
@@ -288,6 +186,7 @@ class FeeWorkflowTest {
             .isInstanceOf(IllegalStateException::class.java)
             .hasMessage("Request for transaction 'txn_001' passed validation but could not be mapped")
         assertThat(records.calls).isEmpty()
+        assertThat(hook.events).isEmpty()
     }
 
     @Test
@@ -320,7 +219,7 @@ class FeeWorkflowTest {
     }
 
     @Test
-    fun `reads its input and writes its outcome with Restate's Jackson serde, in snake case`() {
+    fun `reads its input and writes its response with Restate's Jackson serde, in snake case`() {
         // given
         val handlers = workflow(FakeWorkflowContext())
 
@@ -330,16 +229,19 @@ class FeeWorkflowTest {
                 .discover(handlers)
                 .create(handlers, null)
                 .handlers
-                .single { it.name == "run" } as HandlerDefinition<FeeRequest, FeeOutcome>
+                .single { it.name == "run" } as HandlerDefinition<FeeRequest, FeeResponse>
         val input = """{"transaction_id":"txn_001","amount":1000}""".toByteArray()
 
         // when
         val request = run.requestSerde.deserialize(Slice.wrap(input))
-        val output = String(run.responseSerde.serialize(FeeOutcome.Conflict("txn_001")).toByteArray())
+        val output = String(run.responseSerde.serialize(expectedResponse).toByteArray())
 
         // then
         assertThat(request).isEqualTo(FeeRequest(transactionId = "txn_001", amount = BigDecimal("1000")))
-        assertThat(output).isEqualTo("""{"@type":"CONFLICT","transaction_id":"txn_001"}""")
+        assertThat(output).isEqualTo(
+            """{"transaction_id":"txn_001","amount":1000,"asset":"USD","type":"Mobile Top Up",""" +
+                """"fee":1.50,"rate":0.0015,"description":"Standard fee rate of 0.15%"}""",
+        )
     }
 
     @Test
@@ -354,56 +256,40 @@ class FeeWorkflowTest {
         assertThat(name).isEqualTo("step")
     }
 
-    private fun workflow(
-        context: FeeWorkflowContext,
-        records: InMemoryFeeRecordRepository = InMemoryFeeRecordRepository(),
-        validator: RequestValidator = validatorReturning(null),
-        stepHook: StepHook = hook,
-    ) = FeeWorkflow(validator, TransactionMapper(), allRulesCalculator(), ClaimDecider(), records, stepHook, context)
+    private fun startedRecords(failing: Map<String, Exception> = emptyMap()) =
+        InMemoryFeeRecordRepository(TRANSACTION_ID to FeeRecord.pending(KEY), failing = failing)
 
-    private fun validatorReturning(error: ValidationError?) =
-        RequestValidator(
-            listOf(
-                object : TransactionValidator {
-                    override fun validate(request: FeeRequest): ValidationError? = error
-                },
-            ),
-        )
+    private fun workflow(context: FeeWorkflowContext, records: InMemoryFeeRecordRepository = startedRecords(), stepHook: StepHook = hook) =
+        FeeWorkflow(TransactionMapper(), allRulesCalculator(), records, stepHook, context)
 
     private class RecordingStepHook : StepHook {
         val events = mutableListOf<String>()
 
-        override fun before(step: WorkflowStep, workflowKey: String) {
-            events += "before $step $workflowKey"
+        override fun before(step: WorkflowStep, transactionId: String) {
+            events += "before $step $transactionId"
         }
 
-        override fun after(step: WorkflowStep, workflowKey: String) {
-            events += "after $step $workflowKey"
+        override fun after(step: WorkflowStep, transactionId: String) {
+            events += "after $step $transactionId"
         }
     }
 
     /**
-     * The workflow `txn_001` in memory: the step state is a list, and a journaled action runs at once (or throws what
-     * [failing] maps its name to). An action named in [replayed] doesn't run: it answers that journaled result, as a
-     * replay does. Every result is kept in [results].
+     * The workflow [KEY] in memory: the step state is a list, and a journaled action runs at once (or throws what
+     * [failing] maps its name to).
      */
     private class FakeWorkflowContext(
         private val failing: Map<String, Exception> = emptyMap(),
-        private val replayed: Map<String, Any?> = emptyMap(),
     ) : FeeWorkflowContext {
         val journaled = mutableListOf<String>()
-        val results = mutableMapOf<String, Any?>()
         val stepWrites = mutableListOf<WorkflowStep>()
 
         override suspend fun key(): String = KEY
 
-        @Suppress("UNCHECKED_CAST")
         override suspend fun <T> journaled(name: String, type: TypeTag<T>, action: suspend () -> T): T {
             journaled += name
             failing[name]?.let { throw it }
-            val result = if (name in replayed) replayed[name] as T else action()
-            results[name] = result
-            return result
+            return action()
         }
 
         override suspend fun setStep(step: WorkflowStep) {
@@ -414,6 +300,7 @@ class FeeWorkflowTest {
     }
 
     private companion object {
-        const val KEY = "txn_001"
+        const val KEY = "0b5c3d4e-1f2a-4b3c-8d9e-0f1a2b3c4d5e"
+        const val TRANSACTION_ID = "txn_001"
     }
 }

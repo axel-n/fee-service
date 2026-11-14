@@ -46,11 +46,10 @@ class FaultInjectingStepHook : StepHook {
     /** How many times the hook was called at the [phase] side of [step] for [transactionId], replays included. */
     fun callCount(transactionId: String, step: WorkflowStep, phase: Phase): Int = calls[transactionId to Boundary(step, phase)]?.get() ?: 0
 
-    override fun before(step: WorkflowStep, workflowKey: String) = reach(workflowKey, Boundary(step, Phase.BEFORE))
+    override fun before(step: WorkflowStep, transactionId: String) = reach(transactionId, Boundary(step, Phase.BEFORE))
 
-    override fun after(step: WorkflowStep, workflowKey: String) = reach(workflowKey, Boundary(step, Phase.AFTER))
+    override fun after(step: WorkflowStep, transactionId: String) = reach(transactionId, Boundary(step, Phase.AFTER))
 
-    // The workflow key is the transaction_id
     private fun reach(transactionId: String, boundary: Boundary) {
         calls.computeIfAbsent(transactionId to boundary) { AtomicInteger() }.incrementAndGet()
         // remove(key, value) disarms atomically, so the crash happens exactly once even if two runs reach it together

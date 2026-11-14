@@ -20,10 +20,10 @@ object FeeRecords {
 }
 
 /**
- * The fee records in memory, with the rules of `PostgresFeeRecordRepository`: a claim inserts only an id without a
- * record, and only the claim token's holder can complete it. Every call is recorded in [calls]; a call whose name is in
- * [failing] throws that exception instead, and one in [hanging] never returns (a database that doesn't answer), both
- * before they change anything.
+ * The fee records in memory, with the rules of `PostgresFeeRecordRepository`: a start inserts only an id without a
+ * record and otherwise returns the record that is there, and only the record's own workflow can charge it. Every call is
+ * recorded in [calls]; a call whose name is in [failing] throws that exception instead, and one in [hanging] never
+ * returns (a database that doesn't answer), both before they change anything.
  */
 class InMemoryFeeRecordRepository(
     vararg stored: Pair<String, FeeRecord>,
@@ -33,24 +33,25 @@ class InMemoryFeeRecordRepository(
     val records = mutableMapOf(*stored)
     val calls = mutableListOf<Call>()
 
-    /** A call the code under test made: [name] is `claim` (with [transaction]), `complete` (with [response]) or `findCharged`. */
+    /** A call the code under test made: [name] is `start` (with [transaction]), `charge` (with both) or `findCharged`. */
     data class Call(
         val name: String,
         val transactionId: String,
-        val claimToken: String? = null,
+        val workflowId: String? = null,
         val response: FeeResponse? = null,
         val transaction: Transaction? = null,
     )
 
-    override suspend fun claim(transaction: Transaction, claimToken: String): FeeRecord {
-        record(Call("claim", transaction.transactionId, claimToken, transaction = transaction))
-        return records.getOrPut(transaction.transactionId) { FeeRecord.inProgress(claimToken) }
+    override suspend fun start(transaction: Transaction, workflowId: String): FeeRecord {
+        record(Call("start", transaction.transactionId, workflowId, transaction = transaction))
+        return records.getOrPut(transaction.transactionId) { FeeRecord.pending(workflowId) }
     }
 
-    override suspend fun complete(transactionId: String, claimToken: String, response: FeeResponse) {
-        record(Call("complete", transactionId, claimToken, response))
-        val record = checkNotNull(records[transactionId]?.takeIf { it.claimToken == claimToken }) { "not claimed by $claimToken" }
-        records[transactionId] = record.complete(response)
+    override suspend fun charge(transaction: Transaction, workflowId: String, response: FeeResponse) {
+        val transactionId = transaction.transactionId
+        record(Call("charge", transactionId, workflowId, response, transaction))
+        val record = checkNotNull(records[transactionId]?.takeIf { it.workflowId == workflowId }) { "not started for $workflowId" }
+        records[transactionId] = record.charge(response)
     }
 
     override suspend fun findCharged(transactionId: String): FeeResponse? {

@@ -2,7 +2,6 @@ package com.example.fee.it
 
 import com.example.fee.contract.FeeRequest
 import com.example.fee.record.FeeRecordStatus
-import com.example.fee.workflow.FeeOutcome
 import com.example.fee.workflow.WorkflowStep
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
@@ -16,11 +15,12 @@ import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
 /**
- * Duplicates end to end. The workflow key is the `transaction_id`, so Restate runs one workflow per id and every caller
- * of that id attaches to that run, whatever valid payload it sends: the first run's result is the answer. An invalid
- * payload is rejected by the gateway before it reaches Restate, so it never joins the run. Idempotency is
- * asserted by the number of CALCULATE executions, not just by the response. Once charged, the id is answered from the
- * app's cache or Postgres, and Postgres holds exactly one record for it, the accepted payload's charge.
+ * Duplicates end to end. A `transaction_id` gets one fee record, and with it one `workflow_id`, so Restate runs one
+ * workflow per id and every caller of that id attaches to that run, whatever valid payload it sends: the first run's
+ * result is the answer, and the record holds the payload that run charged. An invalid payload is rejected by the gateway
+ * before it reaches Postgres or Restate, so it never joins the run. Idempotency is asserted by the number of CALCULATE
+ * executions, not just by the response. Once charged, the id is answered from the app's cache or Postgres, and Postgres
+ * holds exactly one record for it, the accepted payload's charge.
  */
 class DuplicatesIT
     @Autowired
@@ -45,7 +45,7 @@ class DuplicatesIT
             assertThat(second.body).isEqualTo(first.body)
             assertThat(second.body["fee"].decimalValue()).isEqualByComparingTo(BigDecimal("1.50"))
 
-            // then: one CALCULATE execution, one completed record
+            // then: one CALCULATE execution, one charged record
             assertChargedOnce(request)
         }
 
@@ -65,7 +65,7 @@ class DuplicatesIT
             assertThat(responses.first().body["transaction_id"].asText()).isEqualTo(request.transactionId)
             assertThat(responses.first().body["fee"].decimalValue()).isEqualByComparingTo(BigDecimal("1.50"))
 
-            // then: one CALCULATE execution, one completed record
+            // then: one CALCULATE execution, one charged record
             assertChargedOnce(request)
         }
 
@@ -89,7 +89,7 @@ class DuplicatesIT
             // then: the one workflow of the id, which ran for the original payload
             assertThat(StoredWorkflows.keyOf(changed)).isEqualTo(StoredWorkflows.keyOf(original))
             assertThat(StoredWorkflows.step(changed)).isEqualTo(WorkflowStep.DONE)
-            assertThat(StoredWorkflows.outcome(changed)).isInstanceOf(FeeOutcome.Charged::class.java)
+            assertThat(StoredWorkflows.response(changed)?.amount).isEqualByComparingTo(BigDecimal("1000"))
 
             // then: the original charge and record stand, and the changed payload was not charged
             assertChargedOnce(original)
@@ -150,25 +150,22 @@ class DuplicatesIT
         }
 
         @Test
-        fun `a transaction_id whose record is claimed by a run that never finished is a conflict and is not charged`() {
-            // given: the record claimed as a run killed after CLAIM leaves it, and no workflow for the id
+        fun `a transaction_id whose record has no workflow in Restate goes to the record's workflow id and is charged once`() {
+            // given: a pending record whose workflow Restate doesn't know: the app died between the insert and the
+            // submit, or Restate dropped a run that never charged it
             val request = validRequest(newTransactionId())
             val transactionId = checkNotNull(request.transactionId)
-            StoredFeeRecords.claimByARunThatNeverFinished(transactionId)
+            val workflowId = StoredFeeRecords.startWithoutWorkflow(transactionId)
 
             // when
             val response = api.submit(bodyOf(request))
 
-            // then: 409 naming the transaction
-            assertThat(response.status).describedAs("POST status, body %s", response.body).isEqualTo(409)
-            assertThat(response.body["code"].asText()).isEqualTo("DUPLICATE_TRANSACTION")
-            assertThat(response.body["transaction_id"].asText()).isEqualTo(transactionId)
-
-            // then: the workflow stopped at CLAIM, nothing was calculated, and the claim stands
-            assertThat(StoredWorkflows.outcome(request)).isEqualTo(FeeOutcome.Conflict(transactionId))
-            assertThat(calculator.count(transactionId)).describedAs("CALCULATE executions").isZero()
-            assertThat(StoredFeeRecords.of(transactionId)?.status).isEqualTo(FeeRecordStatus.IN_PROGRESS)
-            assertThat(StoredFeeRecords.of(transactionId)?.claimToken).isEqualTo(StoredFeeRecords.FOREIGN_TOKEN)
+            // then: charged by a workflow under the record's own workflow id
+            assertThat(response.status).describedAs("POST status, body %s", response.body).isEqualTo(200)
+            assertThat(response.body["fee"].decimalValue()).isEqualByComparingTo(BigDecimal("1.50"))
+            assertThat(StoredFeeRecords.of(transactionId)?.workflowId).isEqualTo(workflowId)
+            assertThat(StoredWorkflows.step(request)).isEqualTo(WorkflowStep.DONE)
+            assertChargedOnce(request)
         }
 
         private fun assertChargedOnce(request: FeeRequest) {
@@ -176,7 +173,7 @@ class DuplicatesIT
             assertThat(calculator.count(transactionId)).describedAs("CALCULATE executions").isEqualTo(1)
 
             val record = StoredFeeRecords.of(transactionId)
-            assertThat(record?.status).isEqualTo(FeeRecordStatus.COMPLETED)
+            assertThat(record?.status).isEqualTo(FeeRecordStatus.CHARGED)
             assertThat(record?.response?.amount).isEqualByComparingTo(request.amount)
             assertThat(record?.response?.fee).isEqualByComparingTo(expectedFee(request))
         }

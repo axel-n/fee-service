@@ -3,7 +3,6 @@ package com.example.fee.it
 import com.example.fee.contract.FeeRequest
 import com.example.fee.record.FeeRecordStatus
 import com.example.fee.restate.RestateEndpointLifecycle
-import com.example.fee.workflow.FeeOutcome
 import com.example.fee.workflow.WorkflowStep
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.AfterEach
@@ -49,7 +48,7 @@ class EndpointRestartIT
             val firstPost = CompletableFuture.supplyAsync { api.submit(bodyOf(request)) }
             awaitUntil("CALCULATE has started") { calculator.count(transactionId) == 1 }
             assertThat(StoredWorkflows.step(request)).isEqualTo(WorkflowStep.CALCULATE)
-            assertThat(StoredFeeRecords.of(transactionId)?.status).isEqualTo(FeeRecordStatus.IN_PROGRESS)
+            assertThat(StoredFeeRecords.of(transactionId)?.status).isEqualTo(FeeRecordStatus.PENDING)
 
             // when: the endpoint restarts while CALCULATE is blocked
             val deploymentBefore = registeredDeploymentId()
@@ -68,17 +67,16 @@ class EndpointRestartIT
 
             // then: Restate retried the invocation on the restarted endpoint, and CALCULATE (not journaled) runs again
             awaitUntil("Restate runs CALCULATE again on the restarted endpoint") { calculator.count(transactionId) >= 2 }
-            assertThat(StoredFeeRecords.of(transactionId)?.status).isEqualTo(FeeRecordStatus.IN_PROGRESS)
+            assertThat(StoredFeeRecords.of(transactionId)?.status).isEqualTo(FeeRecordStatus.PENDING)
 
             // when: both calls go on
             calculator.release(transactionId)
 
-            // then: the workflow completes as Charged
+            // then: the workflow completes with the charged fee
             val first = firstPost.get(2, TimeUnit.MINUTES)
-            awaitUntil("the workflow has returned") { StoredWorkflows.outcome(request) != null }
-            val outcome = StoredWorkflows.outcome(request)
-            assertThat(outcome).isInstanceOf(FeeOutcome.Charged::class.java)
-            assertThat((outcome as FeeOutcome.Charged).response.fee).isEqualByComparingTo(BigDecimal("1.50"))
+            awaitUntil("the workflow has returned") { StoredWorkflows.response(request) != null }
+            val charged = StoredWorkflows.response(request)
+            assertThat(charged?.fee).isEqualByComparingTo(BigDecimal("1.50"))
             assertThat(StoredWorkflows.step(request)).isEqualTo(WorkflowStep.DONE)
 
             // then: the first caller got the result, or a 504 if the restart outlasted the attach timeout
@@ -87,9 +85,9 @@ class EndpointRestartIT
                 assertThat(first.body["fee"].decimalValue()).isEqualByComparingTo(BigDecimal("1.50"))
             }
 
-            // then: the record is completed with the fee
+            // then: the record is charged with the fee
             val record = StoredFeeRecords.of(transactionId)
-            assertThat(record?.status).isEqualTo(FeeRecordStatus.COMPLETED)
+            assertThat(record?.status).isEqualTo(FeeRecordStatus.CHARGED)
             assertThat(record?.response?.fee).isEqualByComparingTo(BigDecimal("1.50"))
 
             // when: the same payload is sent again

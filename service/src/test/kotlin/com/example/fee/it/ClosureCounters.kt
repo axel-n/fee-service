@@ -1,21 +1,16 @@
 package com.example.fee.it
 
-import com.example.fee.contract.FeeRequest
 import com.example.fee.domain.Transaction
 import com.example.fee.fee.FeeCalculator
 import com.example.fee.fee.FeeQuote
 import com.example.fee.fee.FeeRule
-import com.example.fee.validation.TransactionValidator
-import com.example.fee.validation.ValidationError
-import org.springframework.core.Ordered
-import org.springframework.core.annotation.Order
 import java.time.Duration
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 
-/** Counts per `transaction_id`, for the closure counters below. */
+/** Counts per `transaction_id`, for the closure counter below. */
 class CallCounter {
     private val counts = ConcurrentHashMap<String, AtomicInteger>()
 
@@ -24,25 +19,6 @@ class CallCounter {
     }
 
     fun count(transactionId: String): Int = counts[transactionId]?.get() ?: 0
-}
-
-/**
- * A validator that always passes and counts how often it ran, per `transaction_id`. It runs last, so its count is the
- * number of validations that passed every real check: one by `FeeService` per request through the API, plus one per
- * execution of the workflow's VALIDATE journaled step. Recovery tests count these instead of hook calls, because a
- * replay runs the handler again but not a journaled closure.
- */
-@Order(Ordered.LOWEST_PRECEDENCE)
-class CountingValidator : TransactionValidator {
-    private val counter = CallCounter()
-
-    override fun validate(request: FeeRequest): ValidationError? {
-        counter.increment(request.transactionId)
-        return null
-    }
-
-    /** How many validations of [transactionId] passed every real check: the gateway's and VALIDATE's closure runs. */
-    fun count(transactionId: String): Int = counter.count(transactionId)
 }
 
 /**

@@ -108,7 +108,7 @@ class FeeSteps(
 
     /**
      * Pins the app's clock to [now], a UTC time in the `created_at` format, so a message that names "now" is exact. It
-     * is the clock the gateway and the workflow's VALIDATE read; [resetClock] unpins it after the scenario.
+     * is the clock the gateway's validation reads; [resetClock] unpins it after the scenario.
      */
     @Given("it is {string} UTC")
     fun itIs(now: String) {
@@ -237,17 +237,17 @@ class FeeSteps(
     }
 
     /** Read from Postgres itself, past the app's API: one record, with the fee and the amount of the charged response. */
-    @Then("the fee is recorded as completed")
+    @Then("the fee is recorded as charged")
     fun theFeeIsRecordedAsCompleted() {
         assertThat(StoredFeeRecords.count(submittedTransactionId())).describedAs("fee records").isEqualTo(1)
         val record = StoredFeeRecords.of(submittedTransactionId())
         val charged = chargedResponse().body
-        assertThat(record?.status).isEqualTo(FeeRecordStatus.COMPLETED)
+        assertThat(record?.status).isEqualTo(FeeRecordStatus.CHARGED)
         assertThat(record?.response?.fee).isEqualByComparingTo(charged["fee"].decimalValue())
         assertThat(record?.response?.amount).isEqualByComparingTo(charged["amount"].decimalValue())
     }
 
-    /** Read from Postgres itself: the record holds every field of the request as sent, and when it was claimed and charged. */
+    /** Read from Postgres itself: the record holds every field of the request as sent, and when it was started and charged. */
     @Then("the request is stored with the fee record")
     fun theRequestIsStoredWithTheFeeRecord() {
         val sent = checkNotNull(request) { "No transaction request was given" }
@@ -259,7 +259,7 @@ class FeeSteps(
         assertThat(stored.state.value).isEqualTo(sent["state"])
         assertThat(stored.createdAt).isEqualTo(CreatedAtFormat.parseOrNull(sent["created_at"] as String))
         val times = checkNotNull(StoredFeeRecords.timesOf(submittedTransactionId()))
-        assertThat(times.chargedAt).isNotNull().isAfterOrEqualTo(times.claimedAt)
+        assertThat(times.chargedAt).isNotNull().isAfterOrEqualTo(times.startedAt)
     }
 
     /** The response of the scenario's latest submission, waiting for it if it is still in flight. */

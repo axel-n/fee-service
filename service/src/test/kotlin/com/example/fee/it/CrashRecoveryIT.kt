@@ -1,13 +1,13 @@
 package com.example.fee.it
 
 import com.example.fee.contract.FeeRequest
+import com.example.fee.record.FeeRecord
 import com.example.fee.record.FeeRecordStatus
-import com.example.fee.workflow.FeeOutcome
 import com.example.fee.workflow.WorkflowStep
 import org.assertj.core.api.Assertions.assertThat
+import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.Arguments
-import org.junit.jupiter.params.provider.EnumSource
 import org.junit.jupiter.params.provider.MethodSource
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.web.server.LocalServerPort
@@ -17,20 +17,21 @@ import java.util.stream.Stream
 
 /**
  * A crash at every step boundary: [FaultInjectingStepHook] throws once before or after a step, Restate retries
- * the invocation from the top, replays the journaled steps and runs the rest. The caller still gets `Charged`, and the
- * record is `COMPLETED`. [FaultInjectingFeeRecordRepository] crashes right after a Postgres write committed, before its
- * step is journaled: the step runs again and finds what it wrote, so there is still one record, `COMPLETED`.
+ * the invocation from the top, replays the journaled steps and runs the rest. The caller still gets the fee, and the
+ * record is `CHARGED`. [FaultInjectingFeeRecordRepository] crashes right after a Postgres write committed: after the
+ * CHARGE update, before its step is journaled, the step runs again and writes the same values; after the start insert,
+ * before `FeeService` submitted the workflow, the request fails and the next one reuses the record's `workflow_id`.
+ * Either way there is one record, `CHARGED`.
  *
- * "Not re-executed" is asserted by counting the journaled closures (validator, calculator), never hook calls: the
- * handler, hooks included, runs again on every replay. Each closure runs exactly once whichever boundary crashed: a step
- * journaled before the crash is replayed, and a step after it runs only on the retry.
+ * "Not re-executed" is asserted by counting the CALCULATE closure, never hook calls: the handler, hooks included, runs
+ * again on every replay. The closure runs exactly once whichever boundary crashed: journaled before the crash, it is
+ * replayed; after it, it runs only on the retry.
  */
 class CrashRecoveryIT
     @Autowired
     constructor(
         private val hook: FaultInjectingStepHook,
         private val records: FaultInjectingFeeRecordRepository,
-        private val validator: CountingValidator,
         private val calculator: CountingFeeCalculator,
         @LocalServerPort apiPort: Int,
     ) : RestateIntegrationTest() {
@@ -52,8 +53,8 @@ class CrashRecoveryIT
 
             // then: the crash happened, and Restate ran the handler again from the top
             assertThat(hook.crashCount(transactionId)).describedAs("injected crashes").isEqualTo(1)
-            assertThat(hook.callCount(transactionId, WorkflowStep.VALIDATE, FaultInjectingStepHook.Phase.BEFORE))
-                .describedAs("handler runs (hook calls before VALIDATE)")
+            assertThat(hook.callCount(transactionId, WorkflowStep.CALCULATE, FaultInjectingStepHook.Phase.BEFORE))
+                .describedAs("handler runs (hook calls before CALCULATE)")
                 .isEqualTo(2)
 
             // then: the caller gets the charge
@@ -61,45 +62,68 @@ class CrashRecoveryIT
             assertThat(response.body["transaction_id"].asText()).isEqualTo(transactionId)
             assertThat(response.body["fee"].decimalValue()).isEqualByComparingTo(BigDecimal("1.50"))
             assertThat(StoredWorkflows.step(request)).isEqualTo(WorkflowStep.DONE)
-            assertThat(StoredWorkflows.outcome(request)).isInstanceOf(FeeOutcome.Charged::class.java)
+            assertThat(StoredWorkflows.response(request)?.fee).isEqualByComparingTo(BigDecimal("1.50"))
 
-            // then: every journaled closure ran exactly once, so nothing journaled before the crash ran again
-            assertThat(validator.count(transactionId))
-                .describedAs("validations that passed: 1 at the gateway + 1 VALIDATE execution, none by the replay")
-                .isEqualTo(2)
+            // then: the journaled calculation ran exactly once, so nothing journaled before the crash ran again
             assertThat(calculator.count(transactionId)).describedAs("CALCULATE executions").isEqualTo(1)
 
-            // then: the record is completed with the charged response
-            val record = StoredFeeRecords.of(transactionId)
-            assertThat(record?.status).isEqualTo(FeeRecordStatus.COMPLETED)
-            assertThat(record?.response?.fee).isEqualByComparingTo(BigDecimal("1.50"))
+            // then: the record is charged with the charged response
+            assertCharged(transactionId)
         }
 
-        @ParameterizedTest(name = "crash right after the {0} committed")
-        @EnumSource(FaultInjectingFeeRecordRepository.Write::class)
-        fun `a crash after a Postgres write committed but before Restate journaled it is retried to one fee record`(
-            write: FaultInjectingFeeRecordRepository.Write,
-        ) {
-            // given: the write commits, then the app dies before the step's result is journaled
+        @Test
+        fun `a crash after the CHARGE update committed but before Restate journaled it is retried to one fee record`() {
+            // given: the update commits, then the app dies before the step's result is journaled
             val transactionId = "it-commit-crash-${UUID.randomUUID().toString().take(13)}"
             val request = validRequest(transactionId)
-            records.crashAfterCommitOnce(transactionId, write)
+            records.crashAfterCommitOnce(transactionId, FaultInjectingFeeRecordRepository.Write.CHARGE)
 
             // when
             val response = api.submit(bodyOf(request))
 
-            // then: the crash happened, and the step ran again: the claim found its own record by its token, and the
-            // record was completed with the same response
+            // then: the crash happened, and the step ran again, writing the same values to the same record
             assertThat(records.crashCount(transactionId)).describedAs("injected crashes").isEqualTo(1)
             assertThat(response.status).describedAs("POST status, body %s", response.body).isEqualTo(200)
             assertThat(response.body["fee"].decimalValue()).isEqualByComparingTo(BigDecimal("1.50"))
-            assertThat(StoredWorkflows.outcome(request)).isInstanceOf(FeeOutcome.Charged::class.java)
+            assertThat(StoredWorkflows.response(request)?.fee).isEqualByComparingTo(BigDecimal("1.50"))
 
-            // then: calculated once, one record, completed
+            // then: calculated once, one record, charged
             assertThat(calculator.count(transactionId)).describedAs("CALCULATE executions").isEqualTo(1)
+            assertCharged(transactionId)
+        }
+
+        @Test
+        fun `a crash after the start insert committed fails the request, and the next one reuses the record's workflow`() {
+            // given: the insert commits, then the app dies before it submits the workflow
+            val transactionId = "it-start-crash-${UUID.randomUUID().toString().take(13)}"
+            val request = validRequest(transactionId)
+            records.crashAfterCommitOnce(transactionId, FaultInjectingFeeRecordRepository.Write.START)
+
+            // when
+            val failed = api.submit(bodyOf(request))
+
+            // then: nothing was submitted, and the record waits under its workflow id
+            assertThat(records.crashCount(transactionId)).describedAs("injected crashes").isEqualTo(1)
+            assertThat(failed.status).describedAs("POST status, body %s", failed.body).isEqualTo(503)
+            val started = StoredFeeRecords.of(transactionId)
+            assertThat(started?.status).isEqualTo(FeeRecordStatus.PENDING)
+            assertThat(StoredWorkflows.step(request)).describedAs("workflow step").isNull()
+
+            // when: the same request is sent again
+            val response = api.submit(bodyOf(request))
+
+            // then: it went to the workflow of the record, which charged it once
+            assertThat(response.status).describedAs("POST status, body %s", response.body).isEqualTo(200)
+            assertThat(response.body["fee"].decimalValue()).isEqualByComparingTo(BigDecimal("1.50"))
+            assertThat(calculator.count(transactionId)).describedAs("CALCULATE executions").isEqualTo(1)
+            assertCharged(transactionId)
+            assertThat(StoredFeeRecords.of(transactionId)?.workflowId).isEqualTo(started?.workflowId)
+        }
+
+        private fun assertCharged(transactionId: String) {
             assertThat(StoredFeeRecords.count(transactionId)).describedAs("fee records").isEqualTo(1)
-            val record = StoredFeeRecords.of(transactionId)
-            assertThat(record?.status).isEqualTo(FeeRecordStatus.COMPLETED)
+            val record: FeeRecord? = StoredFeeRecords.of(transactionId)
+            assertThat(record?.status).isEqualTo(FeeRecordStatus.CHARGED)
             assertThat(record?.response?.fee).isEqualByComparingTo(BigDecimal("1.50"))
         }
 

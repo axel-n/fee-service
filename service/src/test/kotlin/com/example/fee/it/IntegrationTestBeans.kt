@@ -17,10 +17,6 @@ class IntegrationTestBeans {
     @Primary
     fun faultInjectingStepHook(): FaultInjectingStepHook = FaultInjectingStepHook()
 
-    // Joins the injected validator list and runs last; it always passes
-    @Bean
-    fun countingValidator(): CountingValidator = CountingValidator()
-
     // @Primary over the app's FeeCalculator, which stays a bean; the same rules, so the same fees
     @Bean
     @Primary

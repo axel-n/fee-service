@@ -28,6 +28,8 @@ import java.net.http.HttpResponse
 import java.nio.file.Files
 import java.nio.file.Path
 import java.time.Duration
+import java.time.Instant
+import java.time.LocalDateTime
 import java.util.UUID
 import java.util.regex.Pattern
 import kotlin.io.path.listDirectoryEntries
@@ -113,28 +115,30 @@ class AppContainerIT {
 
     @Test
     fun `a run submitted while the app is down waits, then finishes once the app is back at the same URL`() {
-        // given: the app is killed, so its deployment stays, and a run reaches Restate meanwhile
+        // given: the app is killed, so its deployment stays, after it started a record and submitted its run: the test
+        // does both itself, as FeeService does, while the app is down
         val first = startApp()
         val deployment = admin.deployments().single()
         kill(first)
         val transactionId = newTransactionId()
-        val sent = ingress("POST", "/FeeWorkflow/$transactionId/run/send", body(transactionId, "Mobile Top Up"))
+        val workflowId = startRecord(transactionId)
+        val sent = ingress("POST", "/FeeWorkflow/$workflowId/run/send", body(transactionId, "Mobile Top Up"))
         assertThat(sent.statusCode()).describedAs("send status, body %s", sent.body()).isIn(200, 202)
 
         // then: Restate retries the run and reports it as not finished, 470, which the API answers with 504
-        awaitUntil("Restate retries the run") { runStatus(transactionId) == "backing-off" }
-        assertThat(ingress("GET", "/restate/workflow/FeeWorkflow/$transactionId/output").statusCode()).isEqualTo(470)
+        awaitUntil("Restate retries the run") { runStatus(workflowId) == "backing-off" }
+        assertThat(ingress("GET", "/restate/workflow/FeeWorkflow/$workflowId/output").statusCode()).isEqualTo(470)
 
         // when: the app is back at the same URL
         val second = startApp()
 
         // then: it is the same deployment, the run finishes, and the fee is charged once
         assertThat(admin.deployments().map { it.id }).containsExactly(deployment.id)
-        awaitUntil("the run has finished", Duration.ofMinutes(3)) { runStatus(transactionId) == "completed" }
+        awaitUntil("the run has finished", Duration.ofMinutes(3)) { runStatus(workflowId) == "completed" }
         val response = api(second).submit(body(transactionId, "Mobile Top Up"))
         assertThat(response.status).describedAs("POST status, body %s", response.body).isEqualTo(200)
         assertThat(response.body["fee"].decimalValue()).isEqualByComparingTo(BigDecimal("1.50"))
-        assertThat(completedRecords(transactionId)).describedAs("charges").isEqualTo(1)
+        assertThat(chargedRecords(transactionId)).describedAs("charges").isEqualTo(1)
     }
 
     /** Starts the packaged app on the network; it is ready once it registered its endpoint at [ADVERTISED_URL]. */
@@ -190,21 +194,44 @@ class AppContainerIT {
         app.stop()
     }
 
-    private fun runStatus(transactionId: String): String? =
+    private fun runStatus(workflowId: String): String? =
         admin
-            .query("$RUN_STATUS 'FeeWorkflow/$transactionId/run'")
+            .query("$RUN_STATUS 'FeeWorkflow/$workflowId/run'")
             .singleOrNull()
             ?.get("status")
             ?.asText()
 
+    // In the app's own Postgres, past the app: the PENDING record of the sample request, under a fresh workflow id
+    private fun startRecord(transactionId: String): String {
+        val workflowId = UUID.randomUUID().toString()
+        val inserted =
+            runBlocking {
+                database
+                    .insertInto(FEE_RECORD)
+                    .set(FEE_RECORD.TRANSACTION_ID, transactionId)
+                    .set(FEE_RECORD.AMOUNT, BigDecimal("1000"))
+                    .set(FEE_RECORD.ASSET, "USD")
+                    .set(FEE_RECORD.ASSET_TYPE, "FIAT")
+                    .set(FEE_RECORD.TYPE, "Mobile Top Up")
+                    .set(FEE_RECORD.STATE, "SETTLED - PENDING FEE")
+                    .set(FEE_RECORD.CREATED_AT, LocalDateTime.of(2023, 8, 30, 15, 42, 17, 610_059_000))
+                    .set(FEE_RECORD.STATUS, FeeRecordStatus.PENDING.name)
+                    .set(FEE_RECORD.WORKFLOW_ID, workflowId)
+                    .set(FEE_RECORD.STARTED_AT, Instant.now())
+                    .awaitSingle()
+            }
+        check(inserted == 1) { "the record of $transactionId was not inserted" }
+        return workflowId
+    }
+
     // Read in the app's own Postgres, past the app
-    private fun completedRecords(transactionId: String): Long =
+    private fun chargedRecords(transactionId: String): Long =
         runBlocking {
             database
                 .selectCount()
                 .from(FEE_RECORD)
                 .where(FEE_RECORD.TRANSACTION_ID.eq(transactionId))
-                .and(FEE_RECORD.STATUS.eq(FeeRecordStatus.COMPLETED.name))
+                .and(FEE_RECORD.STATUS.eq(FeeRecordStatus.CHARGED.name))
                 .awaitSingle()
                 .value1()
                 .toLong()

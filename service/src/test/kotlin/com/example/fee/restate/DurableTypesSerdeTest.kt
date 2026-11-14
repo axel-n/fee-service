@@ -3,11 +3,8 @@ package com.example.fee.restate
 import com.example.fee.contract.FeeRequest
 import com.example.fee.contract.FeeResponse
 import com.example.fee.fee.FeeQuote
-import com.example.fee.record.ClaimResult
 import com.example.fee.record.FeeRecords.response
 import com.example.fee.restate.serde.KotlinJacksonSerdeFactory
-import com.example.fee.validation.ValidationError
-import com.example.fee.workflow.FeeOutcome
 import com.example.fee.workflow.WorkflowStep
 import dev.restate.serde.kotlinx.KotlinSerializationSerdeFactory.KtTypeTag
 import org.assertj.core.api.Assertions.assertThat
@@ -48,21 +45,13 @@ class DurableTypesSerdeTest {
                 state = "SETTLED - PENDING FEE",
                 createdAt = "2023-08-30 15:42:17.610059",
             )
-        private val error = ValidationError("amount", null, "Field 'amount' is required", ValidationError.Kind.INVALID)
 
         @JvmStatic
         fun durableValues() =
             listOf(
-                Arguments.of("FeeOutcome.Charged", FeeOutcome.Charged(response), FeeOutcome::class.java),
-                Arguments.of("FeeOutcome.Rejected", FeeOutcome.Rejected(error), FeeOutcome::class.java),
-                Arguments.of("FeeOutcome.Conflict", FeeOutcome.Conflict("txn_001"), FeeOutcome::class.java),
-                Arguments.of("ClaimResult.New", ClaimResult.New, ClaimResult::class.java),
-                Arguments.of("ClaimResult.AlreadyCompleted", ClaimResult.AlreadyCompleted(response), ClaimResult::class.java),
-                Arguments.of("ClaimResult.InProgress", ClaimResult.InProgress, ClaimResult::class.java),
-                Arguments.of("ValidationError", error, ValidationError::class.java),
                 Arguments.of("FeeRequest (the workflow input)", request, FeeRequest::class.java),
                 Arguments.of("FeeRequest with missing fields", FeeRequest(transactionId = "txn_001"), FeeRequest::class.java),
-                Arguments.of("FeeResponse", response, FeeResponse::class.java),
+                Arguments.of("FeeResponse (the workflow output)", response, FeeResponse::class.java),
                 Arguments.of("FeeQuote", FeeQuote(BigDecimal("1.50"), BigDecimal("0.0015"), "Fee"), FeeQuote::class.java),
             ) + WorkflowStep.entries.map { Arguments.of("WorkflowStep.$it", it, WorkflowStep::class.java) }
     }

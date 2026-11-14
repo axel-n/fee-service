@@ -12,14 +12,14 @@ Feature: Fee workflow survives failures
     And the fee is 1.5 with rate 0.0015 and description "Standard fee rate of 0.15%"
     And the service crashed once
     And the fee was charged exactly once
-    And the fee is recorded as completed
+    And the fee is recorded as charged
 
     Examples:
       | moment | step      |
       | before | CALCULATE |
       | after  | CALCULATE |
-      | before | RECORD    |
-      | after  | RECORD    |
+      | before | CHARGE    |
+      | after  | CHARGE    |
 
   Scenario: The service endpoint restarts while calculating
     Given a "Bank Transfer" transaction "txn_201" of 1000 "EUR" "FIAT" in state "SETTLED - PENDING FEE"
@@ -27,4 +27,4 @@ Feature: Fee workflow survives failures
     When the transaction is submitted to "/transaction/fee"
     And the service endpoint restarts
     Then the fee is 5.0
-    And the fee is recorded as completed
+    And the fee is recorded as charged

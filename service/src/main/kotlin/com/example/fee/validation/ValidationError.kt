@@ -1,21 +1,17 @@
 package com.example.fee.validation
 
 import com.example.fee.contract.PlainBigDecimal
-import com.fasterxml.jackson.annotation.JsonProperty
 import java.math.BigDecimal
 
 /**
  * Why a request was rejected: the request [field], the rejected [value] as sent (`null` when the field is missing),
  * a readable [message], and the [kind] that decides the HTTP status.
- *
- * Journaled as the result of VALIDATE and carried by `FeeOutcome.Rejected`, so this JSON shape is durable:
- * renaming or removing a field is breaking, adding a nullable one is safe.
  */
 data class ValidationError(
-    @JsonProperty("field") val field: String,
-    @JsonProperty("value") val value: String?,
-    @JsonProperty("message") val message: String,
-    @JsonProperty("kind") val kind: Kind,
+    val field: String,
+    val value: String?,
+    val message: String,
+    val kind: Kind,
 ) {
     enum class Kind {
         /** The request is malformed: a missing field or a value of the wrong form → 400. */

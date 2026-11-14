@@ -1,12 +1,11 @@
 Feature: Request validation
   Every request is validated by the app before it reaches Restate or Postgres, and the first problem decides the
-  response. A malformed request (a missing field, a transaction_id that can't be a key, an amount of 0 or less, a
+  response. A malformed request (a missing field, a transaction_id that is not a plain identifier, an amount of 0 or less, a
   created_at in the wrong format or in the future) is rejected with 400 before any unsupported value is looked at; a
   well-formed request asking for something unsupported (an asset other than USD and EUR, an asset type other than FIAT,
   an unknown transaction type, more decimals than the asset allows, an amount above 3000000000) is rejected with 422.
   Each rejection names the field, echoes the value as sent and explains what is allowed. A rejection starts no workflow
-  and asks Postgres nothing, so it is neither charged nor recorded. The workflow runs the same checks again before
-  anything is claimed or charged.
+  and asks Postgres nothing, so it is neither charged nor recorded.
 
   Scenario Outline: A request without <field> is rejected with 400
     Given a "Mobile Top Up" transaction "<id>" of 1000 "USD" "FIAT" in state "SETTLED - PENDING FEE"
@@ -156,7 +155,7 @@ Feature: Request validation
     Then the response status is 200
     And the fee is 1.5 with rate 0.0015 and description "Standard fee rate of 0.15%"
     And the fee was charged exactly once
-    And the fee is recorded as completed
+    And the fee is recorded as charged
 
   Scenario Outline: An unsupported <field> "<value>" is rejected with 422
     Given a "<type>" transaction "<id>" of <amount> "<asset>" "<asset_type>" in state "SETTLED - PENDING FEE"
@@ -202,7 +201,7 @@ Feature: Request validation
     Then the response status is 200
     And the fee is 0.02 with rate 0.0015 and description "Standard fee rate of 0.15%"
     And the fee was charged exactly once
-    And the fee is recorded as completed
+    And the fee is recorded as charged
 
   Scenario: An amount of exactly the maximum is accepted
     Given a "Mobile Top Up" transaction "txn_475" of 3000000000.00 "USD" "FIAT" in state "SETTLED - PENDING FEE"
@@ -210,7 +209,7 @@ Feature: Request validation
     Then the response status is 200
     And the fee is 4500000.00 with rate 0.0015 and description "Standard fee rate of 0.15%"
     And the fee was charged exactly once
-    And the fee is recorded as completed
+    And the fee is recorded as charged
 
   Scenario: Too many decimals are reported before an amount above the maximum
     Given a "Mobile Top Up" transaction "txn_476" of 3000000000.001 "USD" "FIAT" in state "SETTLED - PENDING FEE"

@@ -47,14 +47,14 @@ class FeeProblemTest {
     @Test
     fun `ignores properties a later version adds`() {
         // given
-        val json = """{"status": 409, "code": "DUPLICATE_TRANSACTION", "transaction_id": "txn_001", "retry_after": 5}"""
+        val json = """{"status": 504, "code": "WORKFLOW_TIMEOUT", "transaction_id": "txn_001", "retry_after": 5}"""
 
         // when
         val problem = read(json)
 
         // then
         assertThat(problem.transactionId).isEqualTo("txn_001")
-        assertThat(problem.errorCode()).isEqualTo(FeeErrorCode.DUPLICATE_TRANSACTION)
+        assertThat(problem.errorCode()).isEqualTo(FeeErrorCode.WORKFLOW_TIMEOUT)
     }
 
     @Test
@@ -110,13 +110,11 @@ class FeeProblemTest {
         // given
         val originals =
             listOf(
-                DuplicateTransactionException("txn_001"),
                 WorkflowUnavailableException(),
                 WorkflowTimeoutException("txn_001"),
             )
         val problems =
             listOf(
-                FeeProblem(status = 409, code = "DUPLICATE_TRANSACTION", transactionId = "txn_001"),
                 FeeProblem(status = 503, code = "WORKFLOW_UNAVAILABLE"),
                 FeeProblem(status = 504, code = "WORKFLOW_TIMEOUT", transactionId = "txn_001"),
             )
@@ -127,7 +125,7 @@ class FeeProblemTest {
         // then
         assertThat(rebuilt.map { it?.javaClass }).containsExactlyElementsOf(originals.map { it.javaClass })
         assertThat(rebuilt.map { it?.message }).containsExactlyElementsOf(originals.map { it.message })
-        assertThat(rebuilt.map { it?.status }).containsExactly(409, 503, 504)
+        assertThat(rebuilt.map { it?.status }).containsExactly(503, 504)
     }
 
     @Test
@@ -147,12 +145,11 @@ class FeeProblemTest {
     @Test
     fun `a problem missing a property its exception needs is not rebuilt`() {
         // given
-        val withoutId = FeeProblem(status = 409, code = "DUPLICATE_TRANSACTION")
         val timeoutWithoutId = FeeProblem(status = 504, code = "WORKFLOW_TIMEOUT")
         val withoutField = FeeProblem(status = 400, code = "INVALID_REQUEST", message = "Field is required")
 
         // when
-        val exceptions = listOf(withoutId.toException(), timeoutWithoutId.toException(), withoutField.toException())
+        val exceptions = listOf(timeoutWithoutId.toException(), withoutField.toException())
 
         // then
         assertThat(exceptions).containsOnlyNulls()
@@ -161,7 +158,7 @@ class FeeProblemTest {
     @Test
     fun `writes snake_case names and leaves out absent properties`() {
         // given
-        val problem = FeeProblem(status = 409, code = "DUPLICATE_TRANSACTION", transactionId = "txn_001")
+        val problem = FeeProblem(status = 504, code = "WORKFLOW_TIMEOUT", transactionId = "txn_001")
 
         // when
         val json = ContractMapper.HTTP.write(problem, FeeProblem::class.java)

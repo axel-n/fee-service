@@ -1,7 +1,7 @@
-## prepartions
+## preparations
 podman compose up -d --force-recreate restate
 
-### if idea does not work:
+### if IDEA does not work:
 java -jar service/target/fee-service-0.0.1-SNAPSHOT.jar --spring.profiles.active=local --server.port=8082
 
 
@@ -25,8 +25,8 @@ curl -i -X POST localhost:8082/transaction/fee -H 'Content-Type: application/jso
 
 ## 2. The same `transaction_id` again: no second charge
 
-The workflow is keyed by `transaction_id`: sending the id again gets the first charge's response, from the local cache or
-Postgres once it is charged, otherwise by attaching to its first run.
+A `transaction_id` has one fee record and one workflow: sending the id again gets the first charge's response, from the
+local cache or Postgres once it is charged, otherwise by attaching to its first run.
 
 Tested by: `DuplicatesIT`; `idempotency.feature`
 

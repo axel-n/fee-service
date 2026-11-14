@@ -19,20 +19,21 @@ import org.springframework.r2dbc.connection.SingleConnectionFactory
 import java.math.BigDecimal
 import java.time.Instant
 import java.time.LocalDateTime
+import java.util.UUID
 
 /**
  * The fee records read and written straight in the shared Postgres ([PostgresTestEnvironment]), past the app's own code,
  * so a test sees what is stored rather than what the app reports.
  */
 object StoredFeeRecords {
-    /** The token of [claimByARunThatNeverFinished] and [claimInOpenTransaction]: no workflow run of the app ever holds it. */
-    const val FOREIGN_TOKEN = "a-run-that-never-finished"
+    /** The workflow id of [startInOpenTransaction]: no request of the app ever gets it. */
+    const val FOREIGN_WORKFLOW_ID = "a-workflow-of-another-request"
 
     // pg_stat_activity is a system view, which has no generated class: the statements waiting for the backend {0}
     private const val BLOCKED_BY = "{0} = ANY(pg_blocking_pids(pid))"
     private val PG_STAT_ACTIVITY = DSL.table(DSL.name("pg_stat_activity"))
 
-    /** The record of [transactionId], or `null` if the id was never claimed. */
+    /** The record of [transactionId], or `null` if the id has no record. */
     fun of(transactionId: String): FeeRecord? =
         runBlocking {
             PostgresTestEnvironment.dsl
@@ -42,7 +43,7 @@ object StoredFeeRecords {
                 ?.let { row ->
                     val status = FeeRecordStatus.valueOf(row.status)
                     val response =
-                        if (status == FeeRecordStatus.COMPLETED) {
+                        if (status == FeeRecordStatus.CHARGED) {
                             FeeResponse(
                                 transactionId = transactionId,
                                 amount = row.amount,
@@ -55,11 +56,11 @@ object StoredFeeRecords {
                         } else {
                             null
                         }
-                    FeeRecord(status, row.claimToken, response)
+                    FeeRecord(status, row.workflowId, response)
                 }
         }
 
-    /** The request fields stored in the record of [transactionId], or `null` if the id was never claimed. */
+    /** The request fields stored in the record of [transactionId], or `null` if the id has no record. */
     fun transactionOf(transactionId: String): Transaction? =
         runBlocking {
             PostgresTestEnvironment.dsl
@@ -81,7 +82,7 @@ object StoredFeeRecords {
 
     /**
      * The `created_at` of the record of [transactionId] as Postgres itself writes it (`2023-08-30 15:42:17.610059`), cast
-     * to text in the database, so no Java date binding can shift it; `null` if the id was never claimed.
+     * to text in the database, so no Java date binding can shift it; `null` if the id has no record.
      */
     fun createdAtAsStored(transactionId: String): String? =
         runBlocking {
@@ -93,15 +94,15 @@ object StoredFeeRecords {
                 ?.value1()
         }
 
-    /** When the record of [transactionId] was claimed and charged, or `null` if the id was never claimed. */
+    /** When the record of [transactionId] was started and charged, or `null` if the id has no record. */
     fun timesOf(transactionId: String): StoredTimes? =
         runBlocking {
             PostgresTestEnvironment.dsl
-                .select(FEE_RECORD.CLAIMED_AT, FEE_RECORD.CHARGED_AT)
+                .select(FEE_RECORD.STARTED_AT, FEE_RECORD.CHARGED_AT)
                 .from(FEE_RECORD)
                 .where(FEE_RECORD.TRANSACTION_ID.eq(transactionId))
                 .awaitFirstOrNull()
-                ?.let { (claimedAt, chargedAt) -> StoredTimes(checkNotNull(claimedAt), chargedAt) }
+                ?.let { (startedAt, chargedAt) -> StoredTimes(checkNotNull(startedAt), chargedAt) }
         }
 
     /** How many rows `fee_record` holds for [transactionId]: 0 or 1, the primary key allows no more. */
@@ -117,19 +118,22 @@ object StoredFeeRecords {
         }
 
     /**
-     * Inserts an `IN_PROGRESS` record of [transactionId] (the requirements' sample request) under [FOREIGN_TOKEN], as a
-     * run killed after its CLAIM leaves it once Restate has dropped the run.
+     * Inserts a `PENDING` record of [transactionId] (the requirements' sample request) under a fresh `workflow_id`, and
+     * returns that id. No workflow of it was ever submitted: what `FeeService` leaves when the app dies between the
+     * insert and the submit, and what a record looks like once Restate has dropped a run that never charged it.
      */
-    fun claimByARunThatNeverFinished(transactionId: String) {
-        runBlocking { insertForeignClaim(PostgresTestEnvironment.dsl, transactionId) }
+    fun startWithoutWorkflow(transactionId: String): String {
+        val workflowId = UUID.randomUUID().toString()
+        runBlocking { insertPending(PostgresTestEnvironment.dsl, transactionId, workflowId) }
+        return workflowId
     }
 
     /**
-     * Inserts an `IN_PROGRESS` record of [transactionId] under [FOREIGN_TOKEN], as [claimByARunThatNeverFinished] does,
-     * but in a transaction left open on a connection of its own: other connections don't see the record until
-     * [OpenClaim.commit], and an insert of the same id waits for it. A claim that loses a race, made deterministic.
+     * Inserts a `PENDING` record of [transactionId] under [FOREIGN_WORKFLOW_ID], in a transaction left open on a
+     * connection of its own: other connections don't see the record until [OpenStart.commit], and an insert of the same
+     * id waits for it. A start that loses a race, made deterministic.
      */
-    fun claimInOpenTransaction(transactionId: String): OpenClaim {
+    fun startInOpenTransaction(transactionId: String): OpenStart {
         // suppressClose: every statement runs on the one connection, so the transaction stays open between them
         val connection = SingleConnectionFactory(PostgresTestEnvironment.urlWithCredentials, true)
         val dsl = jooq(connection)
@@ -141,8 +145,8 @@ object StoredFeeRecords {
                         .awaitSingle()
                         .value1()
                 dsl.startTransaction().awaitFirstOrNull()
-                insertForeignClaim(dsl, transactionId)
-                OpenClaim(dsl, connection, backendPid)
+                insertPending(dsl, transactionId, FOREIGN_WORKFLOW_ID)
+                OpenStart(dsl, connection, backendPid)
             }
         } catch (failure: Exception) {
             // an open transaction would hold its row, and its lock on fee_record, until the JVM exits
@@ -152,7 +156,7 @@ object StoredFeeRecords {
     }
 
     // The requirements' sample request, a Mobile Top Up of 1000 USD
-    private suspend fun insertForeignClaim(dsl: DSLContext, transactionId: String) {
+    private suspend fun insertPending(dsl: DSLContext, transactionId: String, workflowId: String) {
         val inserted =
             dsl
                 .insertInto(FEE_RECORD)
@@ -163,18 +167,18 @@ object StoredFeeRecords {
                 .set(FEE_RECORD.TYPE, TransactionType.MOBILE_TOP_UP.value)
                 .set(FEE_RECORD.STATE, TransactionState.SETTLED_PENDING_FEE.value)
                 .set(FEE_RECORD.CREATED_AT, LocalDateTime.of(2023, 8, 30, 15, 42, 17, 610_059_000))
-                .set(FEE_RECORD.STATUS, FeeRecordStatus.IN_PROGRESS.name)
-                .set(FEE_RECORD.CLAIM_TOKEN, FOREIGN_TOKEN)
-                .set(FEE_RECORD.CLAIMED_AT, Instant.now())
+                .set(FEE_RECORD.STATUS, FeeRecordStatus.PENDING.name)
+                .set(FEE_RECORD.WORKFLOW_ID, workflowId)
+                .set(FEE_RECORD.STARTED_AT, Instant.now())
                 .awaitSingle()
         check(inserted == 1) { "the record of $transactionId was not inserted" }
     }
 
     /**
-     * The open transaction of [claimInOpenTransaction], on the connection of Postgres backend [backendPid]. Closing the
+     * The open transaction of [startInOpenTransaction], on the connection of Postgres backend [backendPid]. Closing the
      * connection without [commit] rolls it back, so a statement waiting for it goes on.
      */
-    class OpenClaim(
+    class OpenStart(
         private val dsl: DSLContext,
         private val connection: SingleConnectionFactory,
         private val backendPid: Int,
@@ -201,9 +205,9 @@ object StoredFeeRecords {
         }
     }
 
-    /** The `claimed_at` and `charged_at` of a record; [chargedAt] is `null` until it is `COMPLETED`. */
+    /** The `started_at` and `charged_at` of a record; [chargedAt] is `null` until it is `CHARGED`. */
     data class StoredTimes(
-        val claimedAt: Instant,
+        val startedAt: Instant,
         val chargedAt: Instant?,
     )
 }

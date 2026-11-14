@@ -2,12 +2,6 @@ package com.example.fee.it
 
 import com.example.fee.contract.FeeRequest
 import com.example.fee.record.FeeRecordStatus
-import com.example.fee.validation.ValidationError
-import com.example.fee.validation.ValidationError.Kind.INVALID
-import com.example.fee.validation.ValidationError.Kind.UNSUPPORTED
-import com.example.fee.workflow.FeeOutcome
-import com.example.fee.workflow.WorkflowStep
-import dev.restate.client.SendResponse
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
@@ -20,8 +14,7 @@ import java.util.UUID
 /**
  * Rejections end to end. Through the API, `FeeService` validates the request before any call to Postgres or Restate:
  * a rejected payload starts no workflow and asks Postgres nothing, so the same id with a corrected payload is charged
- * right away. Sent past the app, straight through Restate's ingress, the same payload is rejected by the workflow's own
- * VALIDATE step, which returns `FeeOutcome.Rejected` before CLAIM: the workflow never trusts its input.
+ * right away.
  */
 class RejectedIT
     @Autowired
@@ -41,7 +34,6 @@ class RejectedIT
             val field: String,
             val value: String?,
             val status: Int,
-            val kind: ValidationError.Kind,
             val message: String,
             val messageIsPrefix: Boolean = false,
             val broken: (FeeRequest) -> FeeRequest,
@@ -88,42 +80,14 @@ class RejectedIT
             // then: the rejection didn't use the id up: it is charged, once
             assertThat(corrected.status).describedAs("POST status, body %s", corrected.body).isEqualTo(200)
             assertThat(corrected.body["fee"].decimalValue()).isEqualByComparingTo(BigDecimal("1.50"))
-            assertThat(StoredWorkflows.outcome(valid)).isInstanceOf(FeeOutcome.Charged::class.java)
+            assertThat(StoredWorkflows.response(valid)?.fee).isEqualByComparingTo(BigDecimal("1.50"))
             assertThat(calculator.count(transactionId)).describedAs("CALCULATE executions").isEqualTo(1)
-            assertThat(StoredFeeRecords.of(transactionId)?.status).isEqualTo(FeeRecordStatus.COMPLETED)
-        }
-
-        @ParameterizedTest(name = "{0}")
-        @MethodSource("cases")
-        fun `a rejected payload sent past the app is rejected by the workflow itself, before CLAIM`(case: Case) {
-            // given
-            val transactionId = newTransactionId()
-            val rejected = case.broken(validRequest(transactionId))
-
-            // when: straight through Restate's ingress, as an operator or another service could
-            val sent = StoredWorkflows.submit(rejected)
-            awaitUntil("the run of $transactionId has finished") { StoredWorkflows.outcome(rejected) != null }
-
-            // then: VALIDATE returned the same rejection as a business result
-            assertThat(sent.sendStatus()).isEqualTo(SendResponse.SendStatus.ACCEPTED)
-            assertThat(StoredWorkflows.step(rejected)).isEqualTo(WorkflowStep.DONE)
-            val outcome = StoredWorkflows.outcome(rejected)
-            assertThat(outcome).isInstanceOf(FeeOutcome.Rejected::class.java)
-            val error = (outcome as FeeOutcome.Rejected).error
-            assertThat(error.field).isEqualTo(case.field)
-            assertThat(error.value).isEqualTo(case.value)
-            assertThat(error.kind).isEqualTo(case.kind)
-            case.assertMessage(error.message)
-
-            // then: it stopped before CLAIM: Postgres never asked, nothing calculated or recorded
-            assertThat(records.callCount(transactionId)).describedAs("Postgres calls").isZero()
-            assertThat(calculator.count(transactionId)).isZero()
-            assertThat(StoredFeeRecords.of(transactionId)).isNull()
+            assertThat(StoredFeeRecords.of(transactionId)?.status).isEqualTo(FeeRecordStatus.CHARGED)
         }
 
         @Test
         fun `a malformed transaction_id is rejected by the gateway before any workflow starts`() {
-            // given: valid characters, so Restate could key on it, but one too many of them
+            // given: valid characters, but one too many of them
             val transactionId = newTransactionId().padEnd(65, 'x')
             val rejected = validRequest(transactionId)
 
@@ -179,7 +143,6 @@ class RejectedIT
                         "asset",
                         null,
                         400,
-                        INVALID,
                         "Field 'asset' is required",
                     ) { it.copy(asset = null) },
                     Case(
@@ -187,7 +150,6 @@ class RejectedIT
                         "state",
                         "  ",
                         400,
-                        INVALID,
                         "Field 'state' is required but was blank: '  '",
                     ) { it.copy(state = "  ") },
                     Case(
@@ -195,7 +157,6 @@ class RejectedIT
                         "amount",
                         "0",
                         400,
-                        INVALID,
                         "Invalid amount '0'. Allowed: a number greater than 0",
                     ) { it.copy(amount = BigDecimal("0")) },
                     Case(
@@ -203,7 +164,6 @@ class RejectedIT
                         "created_at",
                         "2023-08-30T15:42:17",
                         400,
-                        INVALID,
                         "Invalid created_at '2023-08-30T15:42:17'. Allowed: 'yyyy-MM-dd HH:mm:ss' with 0 to 9 fraction " +
                             "digits, e.g. '2023-08-30 15:42:17.610059'",
                     ) { it.copy(createdAt = "2023-08-30T15:42:17") },
@@ -212,7 +172,6 @@ class RejectedIT
                         "created_at",
                         "2999-01-01 00:00:00",
                         400,
-                        INVALID,
                         "Invalid created_at '2999-01-01 00:00:00': it is in the future. Allowed: up to now, ",
                         messageIsPrefix = true,
                     ) { it.copy(createdAt = "2999-01-01 00:00:00") },
@@ -221,7 +180,6 @@ class RejectedIT
                         "state",
                         "PENDING",
                         422,
-                        UNSUPPORTED,
                         "Unsupported state 'PENDING'. Supported: 'SETTLED - PENDING FEE'",
                     ) { it.copy(state = "PENDING") },
                     Case(
@@ -229,7 +187,6 @@ class RejectedIT
                         "asset",
                         "BTC",
                         422,
-                        UNSUPPORTED,
                         "Unsupported asset 'BTC'. Supported: 'USD', 'EUR'",
                     ) { it.copy(asset = "BTC") },
                     Case(
@@ -237,7 +194,6 @@ class RejectedIT
                         "asset_type",
                         "CRYPTO",
                         422,
-                        UNSUPPORTED,
                         "Unsupported asset_type 'CRYPTO'. Supported: 'FIAT'",
                     ) { it.copy(assetType = "CRYPTO") },
                     Case(
@@ -245,7 +201,6 @@ class RejectedIT
                         "type",
                         "Refund",
                         422,
-                        UNSUPPORTED,
                         "Unsupported type 'Refund'. Supported: 'Mobile Top Up', 'Bank Transfer', 'Merchant Payment', " +
                             "'Cash Withdrawal'",
                     ) { it.copy(type = "Refund") },
@@ -254,7 +209,6 @@ class RejectedIT
                         "amount",
                         "10.001",
                         422,
-                        UNSUPPORTED,
                         "Amount 10.001 has 3 decimals. USD allows 2",
                     ) { it.copy(amount = BigDecimal("10.001")) },
                 )
