@@ -29,7 +29,7 @@ podman compose exec postgres psql -U fee -d fee -c 'DROP TABLE fee_record'
 
 
 
-## 2. for run integration tests on host machine
+## 2. for builds and integration tests on the host machine
 
 ### for podman users
 ```bash

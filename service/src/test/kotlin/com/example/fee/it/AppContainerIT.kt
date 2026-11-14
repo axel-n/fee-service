@@ -1,16 +1,18 @@
 package com.example.fee.it
 
 import com.example.fee.ProjectLayout
+import com.example.fee.record.FeeRecordStatus
+import com.example.fee.record.jooq.tables.references.FEE_RECORD
 import com.fasterxml.jackson.databind.ObjectMapper
 import io.r2dbc.spi.ConnectionFactories
+import kotlinx.coroutines.reactive.awaitSingle
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
+import org.jooq.DSLContext
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import org.slf4j.LoggerFactory
-import org.springframework.r2dbc.core.DatabaseClient
-import org.springframework.r2dbc.core.awaitSingle
 import org.testcontainers.DockerClientFactory
 import org.testcontainers.containers.GenericContainer
 import org.testcontainers.containers.Network
@@ -199,10 +201,13 @@ class AppContainerIT {
     private fun completedRecords(transactionId: String): Long =
         runBlocking {
             database
-                .sql(COUNT_COMPLETED)
-                .bind("id", transactionId)
-                .map { row -> checkNotNull(row.get("records", Long::class.javaObjectType)) }
+                .selectCount()
+                .from(FEE_RECORD)
+                .where(FEE_RECORD.TRANSACTION_ID.eq(transactionId))
+                .and(FEE_RECORD.STATUS.eq(FeeRecordStatus.COMPLETED.name))
                 .awaitSingle()
+                .value1()
+                .toLong()
         }
 
     /** A call to Restate's ingress past the app, with [body] as JSON if given. */
@@ -245,8 +250,6 @@ class AppContainerIT {
 
         // Restate's query API takes no parameters: the run's target is appended, quoted
         private const val RUN_STATUS = "SELECT status FROM sys_invocation WHERE target ="
-        private const val COUNT_COMPLETED =
-            "SELECT count(*) AS records FROM fee_record WHERE transaction_id = :id AND status = 'COMPLETED'"
 
         private val mapper = ObjectMapper()
         private val http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build()
@@ -269,8 +272,8 @@ class AppContainerIT {
                 .withNetworkAliases(POSTGRES_ALIAS)
                 .also { it.start() }
 
-        private val database: DatabaseClient =
-            DatabaseClient.create(
+        private val database: DSLContext =
+            jooq(
                 ConnectionFactories.get(
                     "r2dbc:postgresql://${PostgresTestEnvironment.USERNAME}:${PostgresTestEnvironment.PASSWORD}@" +
                         "${postgres.host}:${postgres.getMappedPort(PostgresTestEnvironment.PORT)}/${PostgresTestEnvironment.DATABASE}",

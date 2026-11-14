@@ -108,6 +108,31 @@
     <build>
         <sourceDirectory>${project.basedir}/src/main/kotlin</sourceDirectory>
         <testSourceDirectory>${project.basedir}/src/test/kotlin</testSourceDirectory>
+        <!-- Versions of what the service's plugins need and Boot's parent doesn't manage -->
+        <pluginManagement>
+            <plugins>
+                <!-- jOOQ's code generation (service/pom.xml) reads a Postgres that Testcontainers starts for it, through
+                     JDBC: Testcontainers' Postgres module, for the jdbc:tc:postgresql URL, and Postgres' JDBC driver.
+                     On the plugin's classpath only. Maven doesn't manage plugin dependencies, so their versions are
+                     Boot's properties -->
+                <plugin>
+                    <groupId>org.jooq</groupId>
+                    <artifactId>jooq-codegen-maven</artifactId>
+                    <dependencies>
+                        <dependency>
+                            <groupId>org.testcontainers</groupId>
+                            <artifactId>testcontainers-postgresql</artifactId>
+                            <version>${testcontainers.version}</version>
+                        </dependency>
+                        <dependency>
+                            <groupId>org.postgresql</groupId>
+                            <artifactId>postgresql</artifactId>
+                            <version>${postgresql.version}</version>
+                        </dependency>
+                    </dependencies>
+                </plugin>
+            </plugins>
+        </pluginManagement>
         <!-- Run in both modules -->
         <plugins>
             <!-- The spring plugin opens @Component classes: Spring needs that, and so do the Restate SDK's client

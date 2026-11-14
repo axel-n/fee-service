@@ -8,13 +8,14 @@ import com.example.fee.domain.TransactionState
 import com.example.fee.domain.TransactionType
 import com.example.fee.record.FeeRecord
 import com.example.fee.record.FeeRecordStatus
+import com.example.fee.record.jooq.tables.references.FEE_RECORD
+import kotlinx.coroutines.reactive.awaitFirstOrNull
+import kotlinx.coroutines.reactive.awaitSingle
 import kotlinx.coroutines.runBlocking
+import org.jooq.DSLContext
+import org.jooq.impl.DSL
+import org.jooq.impl.SQLDataType
 import org.springframework.r2dbc.connection.SingleConnectionFactory
-import org.springframework.r2dbc.core.DatabaseClient
-import org.springframework.r2dbc.core.await
-import org.springframework.r2dbc.core.awaitOneOrNull
-import org.springframework.r2dbc.core.awaitRowsUpdated
-import org.springframework.r2dbc.core.awaitSingle
 import java.math.BigDecimal
 import java.time.Instant
 import java.time.LocalDateTime
@@ -27,104 +28,92 @@ object StoredFeeRecords {
     /** The token of [claimByARunThatNeverFinished] and [claimInOpenTransaction]: no workflow run of the app ever holds it. */
     const val FOREIGN_TOKEN = "a-run-that-never-finished"
 
-    private const val SELECT_RECORD = """
-        SELECT status, claim_token, amount, asset, type, fee, rate, description
-        FROM fee_record
-        WHERE transaction_id = :id
-    """
-
-    private const val SELECT_REQUEST = """
-        SELECT amount, asset, asset_type, type, state, created_at
-        FROM fee_record
-        WHERE transaction_id = :id
-    """
-
-    private const val SELECT_TIMES = "SELECT claimed_at, charged_at FROM fee_record WHERE transaction_id = :id"
-
-    private const val COUNT = "SELECT count(*) AS records FROM fee_record WHERE transaction_id = :id"
-
-    // a Mobile Top Up of 1000 USD, the requirements' sample
-    private const val INSERT_FOREIGN_CLAIM = """
-        INSERT INTO fee_record
-            (transaction_id, amount, asset, asset_type, type, state, created_at, status, claim_token, claimed_at)
-        VALUES
-            (:id, 1000, 'USD', 'FIAT', 'Mobile Top Up', 'SETTLED - PENDING FEE', '2023-08-30 15:42:17.610059',
-             'IN_PROGRESS', :token, now())
-    """
-
-    private const val BEGIN = "BEGIN"
-    private const val COMMIT = "COMMIT"
-    private const val SELECT_BACKEND_PID = "SELECT pg_backend_pid() AS pid"
-    private const val COUNT_BLOCKED_BY = "SELECT count(*) AS blocked FROM pg_stat_activity WHERE :pid = ANY(pg_blocking_pids(pid))"
+    // pg_stat_activity is a system view, which has no generated class: the statements waiting for the backend {0}
+    private const val BLOCKED_BY = "{0} = ANY(pg_blocking_pids(pid))"
+    private val PG_STAT_ACTIVITY = DSL.table(DSL.name("pg_stat_activity"))
 
     /** The record of [transactionId], or `null` if the id was never claimed. */
     fun of(transactionId: String): FeeRecord? =
         runBlocking {
-            PostgresTestEnvironment.client
-                .sql(SELECT_RECORD)
-                .bind("id", transactionId)
-                .map { row ->
-                    val status = FeeRecordStatus.valueOf(row.get("status", String::class.java).orEmpty())
-                    val claimToken = row.get("claim_token", String::class.java).orEmpty()
+            PostgresTestEnvironment.dsl
+                .selectFrom(FEE_RECORD)
+                .where(FEE_RECORD.TRANSACTION_ID.eq(transactionId))
+                .awaitFirstOrNull()
+                ?.let { row ->
+                    val status = FeeRecordStatus.valueOf(row.status)
                     val response =
                         if (status == FeeRecordStatus.COMPLETED) {
                             FeeResponse(
                                 transactionId = transactionId,
-                                amount = checkNotNull(row.get("amount", BigDecimal::class.java)),
-                                asset = row.get("asset", String::class.java).orEmpty(),
-                                type = row.get("type", String::class.java).orEmpty(),
-                                fee = checkNotNull(row.get("fee", BigDecimal::class.java)),
-                                rate = checkNotNull(row.get("rate", BigDecimal::class.java)),
-                                description = row.get("description", String::class.java).orEmpty(),
+                                amount = row.amount,
+                                asset = row.asset,
+                                type = row.type,
+                                fee = checkNotNull(row.fee),
+                                rate = checkNotNull(row.rate),
+                                description = row.description.orEmpty(),
                             )
                         } else {
                             null
                         }
-                    FeeRecord(status, claimToken, response)
-                }.awaitOneOrNull()
+                    FeeRecord(status, row.claimToken, response)
+                }
         }
 
     /** The request fields stored in the record of [transactionId], or `null` if the id was never claimed. */
     fun transactionOf(transactionId: String): Transaction? =
         runBlocking {
-            PostgresTestEnvironment.client
-                .sql(SELECT_REQUEST)
-                .bind("id", transactionId)
-                .map { row ->
+            PostgresTestEnvironment.dsl
+                .selectFrom(FEE_RECORD)
+                .where(FEE_RECORD.TRANSACTION_ID.eq(transactionId))
+                .awaitFirstOrNull()
+                ?.let { row ->
                     Transaction(
                         transactionId = transactionId,
-                        amount = checkNotNull(row.get("amount", BigDecimal::class.java)),
-                        asset = Asset.fromValue(row.get("asset", String::class.java)),
-                        assetType = AssetType.fromValue(row.get("asset_type", String::class.java)),
-                        type = TransactionType.fromValue(row.get("type", String::class.java)),
-                        state = TransactionState.fromValue(row.get("state", String::class.java)),
-                        createdAt = checkNotNull(row.get("created_at", LocalDateTime::class.java)),
+                        amount = row.amount,
+                        asset = Asset.fromValue(row.asset),
+                        assetType = AssetType.fromValue(row.assetType),
+                        type = TransactionType.fromValue(row.type),
+                        state = TransactionState.fromValue(row.state),
+                        createdAt = row.createdAt,
                     )
-                }.awaitOneOrNull()
+                }
+        }
+
+    /**
+     * The `created_at` of the record of [transactionId] as Postgres itself writes it (`2023-08-30 15:42:17.610059`), cast
+     * to text in the database, so no Java date binding can shift it; `null` if the id was never claimed.
+     */
+    fun createdAtAsStored(transactionId: String): String? =
+        runBlocking {
+            PostgresTestEnvironment.dsl
+                .select(FEE_RECORD.CREATED_AT.cast(SQLDataType.VARCHAR))
+                .from(FEE_RECORD)
+                .where(FEE_RECORD.TRANSACTION_ID.eq(transactionId))
+                .awaitFirstOrNull()
+                ?.value1()
         }
 
     /** When the record of [transactionId] was claimed and charged, or `null` if the id was never claimed. */
     fun timesOf(transactionId: String): StoredTimes? =
         runBlocking {
-            PostgresTestEnvironment.client
-                .sql(SELECT_TIMES)
-                .bind("id", transactionId)
-                .map { row ->
-                    StoredTimes(
-                        claimedAt = checkNotNull(row.get("claimed_at", Instant::class.java)),
-                        chargedAt = row.get("charged_at", Instant::class.java),
-                    )
-                }.awaitOneOrNull()
+            PostgresTestEnvironment.dsl
+                .select(FEE_RECORD.CLAIMED_AT, FEE_RECORD.CHARGED_AT)
+                .from(FEE_RECORD)
+                .where(FEE_RECORD.TRANSACTION_ID.eq(transactionId))
+                .awaitFirstOrNull()
+                ?.let { (claimedAt, chargedAt) -> StoredTimes(checkNotNull(claimedAt), chargedAt) }
         }
 
     /** How many rows `fee_record` holds for [transactionId]: 0 or 1, the primary key allows no more. */
     fun count(transactionId: String): Long =
         runBlocking {
-            PostgresTestEnvironment.client
-                .sql(COUNT)
-                .bind("id", transactionId)
-                .map { row -> checkNotNull(row.get("records", Long::class.javaObjectType)) }
+            PostgresTestEnvironment.dsl
+                .selectCount()
+                .from(FEE_RECORD)
+                .where(FEE_RECORD.TRANSACTION_ID.eq(transactionId))
                 .awaitSingle()
+                .value1()
+                .toLong()
         }
 
     /**
@@ -132,16 +121,7 @@ object StoredFeeRecords {
      * run killed after its CLAIM leaves it once Restate has dropped the run.
      */
     fun claimByARunThatNeverFinished(transactionId: String) {
-        runBlocking {
-            val inserted =
-                PostgresTestEnvironment.client
-                    .sql(INSERT_FOREIGN_CLAIM)
-                    .bind("id", transactionId)
-                    .bind("token", FOREIGN_TOKEN)
-                    .fetch()
-                    .awaitRowsUpdated()
-            check(inserted == 1L) { "the record of $transactionId was not inserted" }
-        }
+        runBlocking { insertForeignClaim(PostgresTestEnvironment.dsl, transactionId) }
     }
 
     /**
@@ -152,24 +132,17 @@ object StoredFeeRecords {
     fun claimInOpenTransaction(transactionId: String): OpenClaim {
         // suppressClose: every statement runs on the one connection, so the transaction stays open between them
         val connection = SingleConnectionFactory(PostgresTestEnvironment.urlWithCredentials, true)
-        val client = DatabaseClient.create(connection)
+        val dsl = jooq(connection)
         try {
             return runBlocking {
                 val backendPid =
-                    client
-                        .sql(SELECT_BACKEND_PID)
-                        .map { row -> checkNotNull(row.get("pid", Int::class.javaObjectType)) }
+                    dsl
+                        .select(DSL.function("pg_backend_pid", Int::class.javaObjectType))
                         .awaitSingle()
-                client.sql(BEGIN).await()
-                val inserted =
-                    client
-                        .sql(INSERT_FOREIGN_CLAIM)
-                        .bind("id", transactionId)
-                        .bind("token", FOREIGN_TOKEN)
-                        .fetch()
-                        .awaitRowsUpdated()
-                check(inserted == 1L) { "the record of $transactionId was not inserted" }
-                OpenClaim(client, connection, backendPid)
+                        .value1()
+                dsl.startTransaction().awaitFirstOrNull()
+                insertForeignClaim(dsl, transactionId)
+                OpenClaim(dsl, connection, backendPid)
             }
         } catch (failure: Exception) {
             // an open transaction would hold its row, and its lock on fee_record, until the JVM exits
@@ -178,28 +151,49 @@ object StoredFeeRecords {
         }
     }
 
+    // The requirements' sample request, a Mobile Top Up of 1000 USD
+    private suspend fun insertForeignClaim(dsl: DSLContext, transactionId: String) {
+        val inserted =
+            dsl
+                .insertInto(FEE_RECORD)
+                .set(FEE_RECORD.TRANSACTION_ID, transactionId)
+                .set(FEE_RECORD.AMOUNT, BigDecimal("1000"))
+                .set(FEE_RECORD.ASSET, Asset.USD.value)
+                .set(FEE_RECORD.ASSET_TYPE, AssetType.FIAT.value)
+                .set(FEE_RECORD.TYPE, TransactionType.MOBILE_TOP_UP.value)
+                .set(FEE_RECORD.STATE, TransactionState.SETTLED_PENDING_FEE.value)
+                .set(FEE_RECORD.CREATED_AT, LocalDateTime.of(2023, 8, 30, 15, 42, 17, 610_059_000))
+                .set(FEE_RECORD.STATUS, FeeRecordStatus.IN_PROGRESS.name)
+                .set(FEE_RECORD.CLAIM_TOKEN, FOREIGN_TOKEN)
+                .set(FEE_RECORD.CLAIMED_AT, Instant.now())
+                .awaitSingle()
+        check(inserted == 1) { "the record of $transactionId was not inserted" }
+    }
+
     /**
      * The open transaction of [claimInOpenTransaction], on the connection of Postgres backend [backendPid]. Closing the
      * connection without [commit] rolls it back, so a statement waiting for it goes on.
      */
     class OpenClaim(
-        private val client: DatabaseClient,
+        private val dsl: DSLContext,
         private val connection: SingleConnectionFactory,
         private val backendPid: Int,
     ) : AutoCloseable {
         /** How many statements of other connections wait for this transaction, such as an insert of the same id. */
         fun blockedStatements(): Long =
             runBlocking {
-                PostgresTestEnvironment.client
-                    .sql(COUNT_BLOCKED_BY)
-                    .bind("pid", backendPid)
-                    .map { row -> checkNotNull(row.get("blocked", Long::class.javaObjectType)) }
+                PostgresTestEnvironment.dsl
+                    .selectCount()
+                    .from(PG_STAT_ACTIVITY)
+                    .where(DSL.condition(BLOCKED_BY, DSL.value(backendPid)))
                     .awaitSingle()
+                    .value1()
+                    .toLong()
             }
 
         /** Commits the record: every connection sees it from now on. */
         fun commit() {
-            runBlocking { client.sql(COMMIT).await() }
+            runBlocking { dsl.commit().awaitFirstOrNull() }
         }
 
         override fun close() {

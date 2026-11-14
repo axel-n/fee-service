@@ -12,22 +12,34 @@ import com.example.fee.it.StoredFeeRecords
 import com.example.fee.it.StoredFeeRecords.StoredTimes
 import com.example.fee.it.TestClock
 import com.example.fee.it.awaitUntil
+import com.example.fee.record.jooq.tables.records.FeeRecordRecord
+import com.example.fee.record.jooq.tables.references.FEE_RECORD
 import io.r2dbc.pool.ConnectionPool
+import io.r2dbc.pool.ConnectionPoolConfiguration
+import io.r2dbc.spi.ConnectionFactories
 import io.r2dbc.spi.ConnectionFactory
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.reactive.awaitSingle
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
+import org.jooq.InsertSetMoreStep
+import org.jooq.exception.DataAccessException
+import org.jooq.impl.DSL
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.r2dbc.core.awaitRowsUpdated
 import java.math.BigDecimal
 import java.time.Instant
 import java.time.LocalDateTime
+import java.util.TimeZone
 import java.util.UUID
+import kotlin.time.Duration.Companion.milliseconds
+import kotlin.time.Duration.Companion.seconds
 
 /**
  * [PostgresFeeRecordRepository] against the shared Postgres of the ITs, with the table the app created at startup.
@@ -96,6 +108,81 @@ class FeeRecordRepositoryIT
                 assertThat(StoredFeeRecords.transactionOf(transaction.transactionId)).isEqualTo(transaction)
                 assertThat(StoredFeeRecords.timesOf(transaction.transactionId)).isEqualTo(StoredTimes(CLAIMED_AT, chargedAt = null))
             }
+
+        @Test
+        fun `created_at is stored and read exactly as sent whatever the JVM's time zone, even in a daylight saving gap`() =
+            runBlocking<Unit> {
+                // given: a created_at in the hour Berlin skipped on 2024-03-31 (02:00 to 03:00), with Berlin as the
+                // JVM's default zone; created_at has no zone, so the zone must not matter
+                val transaction =
+                    transactionFor(newTransactionId()).copy(createdAt = LocalDateTime.of(2024, 3, 31, 2, 30, 0, 123_456_000))
+                val defaultZone = TimeZone.getDefault()
+                val readBack =
+                    try {
+                        TimeZone.setDefault(TimeZone.getTimeZone("Europe/Berlin"))
+
+                        // when
+                        repository.claim(transaction, "token-a")
+                        StoredFeeRecords.transactionOf(transaction.transactionId)
+                    } finally {
+                        TimeZone.setDefault(defaultZone)
+                    }
+
+                // then: as Postgres itself shows it, and as jOOQ reads it back
+                assertThat(StoredFeeRecords.createdAtAsStored(transaction.transactionId)).isEqualTo("2024-03-31 02:30:00.123456")
+                assertThat(readBack).isEqualTo(transaction)
+            }
+
+        @Test
+        fun `a zone-free timestamp that is null binds and reads back as null`() =
+            runBlocking<Unit> {
+                // given: a null bind value of created_at's type, so of its ZoneFreeLocalDateTimeBinding
+                val nothing = DSL.value(null as LocalDateTime?, FEE_RECORD.CREATED_AT)
+
+                // when
+                val read =
+                    PostgresTestEnvironment.dsl
+                        .select(nothing)
+                        .awaitSingle()
+                        .value1()
+
+                // then
+                assertThat(read).isNull()
+            }
+
+        @Test
+        fun `a query that gets no connection fails with the operation, the id and the cause, not its statement and values`() {
+            // given: a repository whose database refuses its password
+            val refused =
+                PostgresFeeRecordRepository(
+                    ConnectionFactories.get(
+                        PostgresTestEnvironment.url.replace(
+                            "r2dbc:postgresql://",
+                            "r2dbc:postgresql://${PostgresTestEnvironment.USERNAME}:not-the-password@",
+                        ),
+                    ),
+                    clock,
+                )
+            val transactionId = newTransactionId()
+
+            // when
+            val claiming = runCatching { runBlocking { refused.claim(transactionFor(transactionId), "token-a") } }
+            val completing = runCatching { runBlocking { refused.complete(transactionId, "token-a", responseFor(transactionId)) } }
+
+            // then: one line each, without the statement, the claim token or the request's values
+            assertThat(claiming.exceptionOrNull())
+                .isInstanceOf(DataAccessException::class.java)
+                .hasMessageStartingWith("Reading the fee record of '$transactionId' failed: ")
+            assertThat(completing.exceptionOrNull())
+                .isInstanceOf(DataAccessException::class.java)
+                .hasMessageStartingWith("Completing the fee record of '$transactionId' failed: ")
+            listOf(claiming, completing).forEach { failed ->
+                assertThat(failed.exceptionOrNull()).hasMessageContaining("password authentication failed")
+                listOf("\n", "\"fee_record\"", "token-a", "Mobile Top Up").forEach { revealing ->
+                    assertThat(failed.exceptionOrNull()).hasMessageNotContaining(revealing)
+                }
+            }
+        }
 
         @Test
         fun `claiming an id that has a record changes nothing, whatever the token or payload`() =
@@ -194,23 +281,80 @@ class FeeRecordRepositoryIT
 
         @Test
         fun `the table refuses a half-written charge, in progress or completed`() {
-            listOf(INSERT_IN_PROGRESS_WITH_A_FEE, INSERT_COMPLETED_WITHOUT_CHARGED_AT).forEach { insert ->
+            val halfWrittenCharges: List<(String) -> InsertSetMoreStep<FeeRecordRecord>> =
+                listOf(
+                    // in progress, with a fee
+                    { id -> rowOf(id, FeeRecordStatus.IN_PROGRESS).set(FEE_RECORD.FEE, BigDecimal("1.50")) },
+                    // completed, without charged_at
+                    { id ->
+                        rowOf(id, FeeRecordStatus.COMPLETED)
+                            .set(FEE_RECORD.FEE, BigDecimal("1.50"))
+                            .set(FEE_RECORD.RATE, BigDecimal("0.0015"))
+                            .set(FEE_RECORD.DESCRIPTION, "Standard fee rate of 0.15%")
+                    },
+                )
+            halfWrittenCharges.forEach { insert ->
                 // given
                 val transactionId = newTransactionId()
 
                 // when / then
-                assertThatThrownBy {
-                    runBlocking {
-                        PostgresTestEnvironment.client
-                            .sql(insert)
-                            .bind("id", transactionId)
-                            .fetch()
-                            .awaitRowsUpdated()
-                    }
-                }.hasStackTraceContaining("fee_record_charge_exactly_when_completed")
+                assertThatThrownBy { runBlocking { insert(transactionId).awaitSingle() } }
+                    .hasStackTraceContaining("fee_record_charge_exactly_when_completed")
                 assertThat(StoredFeeRecords.count(transactionId)).isZero()
             }
         }
+
+        @Test
+        fun `lookups cut short at any moment still give their connection back to the pool`() =
+            runBlocking<Unit> {
+                // given: a charged record, and a repository on a pool of a single connection
+                val transactionId = newTransactionId()
+                repository.claim(transactionFor(transactionId), "token-a")
+                repository.complete(transactionId, "token-a", responseFor(transactionId))
+                val pool = poolOfOneConnection()
+                try {
+                    val onOneConnection = PostgresFeeRecordRepository(pool, clock)
+
+                    // when: lookups cut short by a timeout, as ChargedFees cuts a slow one short, at varying moments of
+                    // their run: acquiring the connection, running the query, reading the row
+                    repeat(CUT_SHORT_LOOKUPS) { attempt ->
+                        withTimeoutOrNull((1 + attempt % 3).milliseconds) { onOneConnection.findCharged(transactionId) }
+                    }
+
+                    // then: the one connection still serves a lookup, and nothing holds it afterwards
+                    val charged = withTimeout(10.seconds) { onOneConnection.findCharged(transactionId) }
+                    assertThat(charged).isEqualTo(responseFor(transactionId))
+                    assertThat(pool.metrics.orElseThrow().acquiredSize()).isZero()
+                } finally {
+                    pool.dispose()
+                }
+            }
+
+        @Test
+        fun `every query gives its connection back to the pool, so a pool of one serves them one after another`() =
+            runBlocking<Unit> {
+                // given: a repository on a pool of a single connection
+                val pool = poolOfOneConnection()
+                try {
+                    val onOneConnection = PostgresFeeRecordRepository(pool, clock)
+                    val transactionId = newTransactionId()
+
+                    // when: each query needs the connection the one before used; a query that kept it would wait forever
+                    val charged =
+                        withTimeout(10.seconds) {
+                            onOneConnection.claim(transactionFor(transactionId), "token-a")
+                            onOneConnection.claim(transactionFor(transactionId), "token-a")
+                            onOneConnection.complete(transactionId, "token-a", responseFor(transactionId))
+                            onOneConnection.findCharged(transactionId)
+                        }
+
+                    // then
+                    assertThat(charged).isEqualTo(responseFor(transactionId))
+                    assertThat(pool.metrics.orElseThrow().acquiredSize()).isZero()
+                } finally {
+                    pool.dispose()
+                }
+            }
 
         @Test
         fun `finds no charge for a transaction id without a record or with one in progress`() =
@@ -274,6 +418,33 @@ class FeeRecordRepositoryIT
                 createdAt = LocalDateTime.of(2023, 8, 30, 15, 42, 17, 610_059_000),
             )
 
+        /** A pool of a single connection to the shared Postgres: a query that keeps its connection blocks every other. */
+        private fun poolOfOneConnection() =
+            ConnectionPool(
+                ConnectionPoolConfiguration
+                    .builder(ConnectionFactories.get(PostgresTestEnvironment.urlWithCredentials))
+                    .initialSize(1)
+                    .maxSize(1)
+                    .build(),
+            )
+
+        /** An insert of the reference request of [transactionId] with [status], claimed by `token-a`: no charge yet. */
+        private fun rowOf(transactionId: String, status: FeeRecordStatus): InsertSetMoreStep<FeeRecordRecord> {
+            val transaction = transactionFor(transactionId)
+            return PostgresTestEnvironment.dsl
+                .insertInto(FEE_RECORD)
+                .set(FEE_RECORD.TRANSACTION_ID, transactionId)
+                .set(FEE_RECORD.AMOUNT, transaction.amount)
+                .set(FEE_RECORD.ASSET, transaction.asset.value)
+                .set(FEE_RECORD.ASSET_TYPE, transaction.assetType.value)
+                .set(FEE_RECORD.TYPE, transaction.type.value)
+                .set(FEE_RECORD.STATE, transaction.state.value)
+                .set(FEE_RECORD.CREATED_AT, transaction.createdAt)
+                .set(FEE_RECORD.STATUS, status.name)
+                .set(FEE_RECORD.CLAIM_TOKEN, "token-a")
+                .set(FEE_RECORD.CLAIMED_AT, CLAIMED_AT)
+        }
+
         private fun responseFor(transactionId: String) =
             FeeResponse(
                 transactionId = transactionId,
@@ -287,22 +458,7 @@ class FeeRecordRepositoryIT
 
         private companion object {
             const val CONCURRENT_CLAIMS = 10
-
-            const val INSERT_IN_PROGRESS_WITH_A_FEE = """
-                INSERT INTO fee_record
-                    (transaction_id, amount, asset, asset_type, type, state, created_at, status, claim_token, claimed_at, fee)
-                VALUES
-                    (:id, 1000, 'USD', 'FIAT', 'Mobile Top Up', 'SETTLED - PENDING FEE', now(), 'IN_PROGRESS', 'token-a', now(), 1.50)
-            """
-
-            const val INSERT_COMPLETED_WITHOUT_CHARGED_AT = """
-                INSERT INTO fee_record
-                    (transaction_id, amount, asset, asset_type, type, state, created_at, status, claim_token, claimed_at, fee,
-                     rate, description)
-                VALUES
-                    (:id, 1000, 'USD', 'FIAT', 'Mobile Top Up', 'SETTLED - PENDING FEE', now(), 'COMPLETED', 'token-a', now(), 1.50,
-                     0.0015, 'Standard fee rate of 0.15%')
-            """
+            const val CUT_SHORT_LOOKUPS = 300
 
             // microseconds at most: Postgres keeps no more
             val CLAIMED_AT: Instant = Instant.parse("2026-11-13T10:15:30.123456Z")

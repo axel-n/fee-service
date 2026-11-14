@@ -23,6 +23,11 @@ spring:
     init:
       mode: always
 
+# jOOQ logs its logo and a "tip of the day" at INFO on its first query: advertising, not the app's own news
+logging:
+  level:
+    org.jooq.Constants: warn
+
 server:
   port: 8081
 

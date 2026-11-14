@@ -61,9 +61,16 @@ Approach:
   runs **externally** in Docker. The root `pom.xml` overrides Boot's Kotlin, coroutines and Jackson 2 versions where Boot
   pins older ones than the SDK is built against; check them whenever `restate.version` or the Boot version changes
 - **PostgreSQL** for the fee records, reached non-blocking through **R2DBC** (`spring-boot-starter-r2dbc`, `r2dbc-postgresql`,
-  and `r2dbc-pool`, Boot's connection pool at its default size): `DatabaseClient` with its coroutine extensions. The
-  schema is `schema.sql`, run at every start (`spring.sql.init.mode: always`); there is no migration tool. Postgres runs
-  **externally** in Docker, like Restate
+  and `r2dbc-pool`, Boot's connection pool at its default size). The queries are **jOOQ** (`org.jooq:jooq`, Boot's
+  version), on that pool: each one a `Publisher` awaited from a coroutine (`awaitSingle`, `awaitFirstOrNull`), never
+  jOOQ's blocking `fetch()`/`execute()`. Not `spring-boot-starter-jooq`, which is JDBC. The schema is `schema.sql`, run
+  at every start (`spring.sql.init.mode: always`); there is no migration tool. The build generates jOOQ's Kotlin classes
+  of the table from that same file (`jooq-codegen-maven` in `service/pom.xml`: Testcontainers starts a Postgres of the
+  tests' version through its JDBC URL, which runs the script, and jOOQ's `PostgresDatabase` reads the table from it)
+  into `service/target/generated-sources/jooq`, package `com.example.fee.record.jooq`. So every build of the service
+  needs a container engine. No embedded SQL database (H2 and the like): the build and the ITs use Postgres in
+  Testcontainers, the app a real one, and unit tests fake `FeeRecordRepository`. Postgres runs **externally** in Docker,
+  like Restate
 - **Caffeine** for the local cache of charged fees in `FeeService` (`ChargedFees`)
 - Tests: JUnit 6, Mockito, Testcontainers 2, Cucumber 8
 - Formatting: ktlint through `ktlint-maven-plugin` (root `pom.xml`), with its default `ktlint_official` style. The root
@@ -203,7 +210,7 @@ In [`docs/code-style.md`](docs/code-style.md).
 
 ```bash
 mvn ktlint:format    # reformats main and test sources; every build fails while ktlint reports a problem
-mvn test             # unit tests only (fast, no Docker)
+mvn test             # unit tests only (fast; a container engine only for jOOQ's code generation)
 mvn verify           # + Testcontainers and Cucumber (needs Docker)
 mvn clean verify     # the gate; in Claude Code the Stop hook runs it (below)
 mvn spring-boot:run      # from the root: starts the app (service module); it registers its endpoint with Restate (README, "Run")
@@ -220,7 +227,7 @@ has nested podman so Testcontainers runs inside it.
 didn't run fails the build). In Claude Code a Stop hook (`.claude/settings.json`, `.claude/hooks/verify.sh`) runs it
 when the session ends a turn and a source (pom, `.editorconfig`, anything under `src/`) changed since its last run,
 whoever changed it, and keeps the session working while the build is red or a test was skipped. It needs a container
-engine for the ITs. While working, run `mvn test` or the ITs you need, and leave `mvn clean verify` to the hook: a
+engine, for jOOQ's code generation and the ITs. While working, run `mvn test` or the ITs you need, and leave `mvn clean verify` to the hook: a
 `clean` of your own only makes the hook build everything again.
 
 ## Workflow for agents

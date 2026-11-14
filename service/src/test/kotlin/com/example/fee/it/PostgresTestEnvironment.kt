@@ -1,10 +1,13 @@
 package com.example.fee.it
 
 import io.r2dbc.spi.ConnectionFactories
+import io.r2dbc.spi.ConnectionFactory
+import kotlinx.coroutines.reactive.awaitFirstOrNull
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
-import org.springframework.r2dbc.core.DatabaseClient
-import org.springframework.r2dbc.core.awaitOneOrNull
+import org.jooq.DSLContext
+import org.jooq.SQLDialect
+import org.jooq.impl.DSL
 import org.springframework.test.context.DynamicPropertyRegistry
 import org.testcontainers.DockerClientFactory
 import org.testcontainers.containers.GenericContainer
@@ -35,8 +38,11 @@ object PostgresTestEnvironment {
     /** [url] with the credentials, for the tests' own connections. */
     val urlWithCredentials: String = url.replace("r2dbc:postgresql://", "r2dbc:postgresql://$USERNAME:$PASSWORD@")
 
-    /** The tests' own connection, past the app, to read and write `fee_record` rows directly. */
-    val client: DatabaseClient by lazy { DatabaseClient.create(ConnectionFactories.get(urlWithCredentials)) }
+    /**
+     * The tests' own jOOQ, past the app, to read and write `fee_record` rows directly. Not pooled: every query opens a
+     * connection of its own.
+     */
+    val dsl: DSLContext by lazy { jooq(ConnectionFactories.get(urlWithCredentials)) }
 
     /**
      * The `spring.r2dbc.*` settings of an app under test. Set through `@DynamicPropertySource`, which wins over
@@ -78,7 +84,7 @@ object PostgresTestEnvironment {
 
     /** Whether the database answers a query within [timeout], on a new connection of the tests' own. */
     fun answersWithin(timeout: Duration): Boolean =
-        runBlocking { withTimeoutOrNull(timeout.toKotlinDuration()) { client.sql(PING).fetch().awaitOneOrNull() } != null }
+        runBlocking { withTimeoutOrNull(timeout.toKotlinDuration()) { dsl.selectOne().awaitFirstOrNull() } != null }
 
     /** Ends [freeze]; harmless when the database isn't frozen. The postmaster is resumed even if the rest failed. */
     fun thaw() {
@@ -117,9 +123,12 @@ object PostgresTestEnvironment {
     private const val REFUSE_CONNECTIONS = "ALTER DATABASE $DATABASE WITH ALLOW_CONNECTIONS false"
     private const val ACCEPT_CONNECTIONS = "ALTER DATABASE $DATABASE WITH ALLOW_CONNECTIONS true"
     private const val CUT_CONNECTIONS = "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '$DATABASE'"
-    private const val PING = "SELECT 1 AS answered"
 }
 
+/** jOOQ for the tests' own queries on a Postgres, past the app, over [connectionFactory]. */
+fun jooq(connectionFactory: ConnectionFactory): DSLContext = DSL.using(connectionFactory, SQLDialect.POSTGRES)
+
+// The version of jOOQ's code generation (service/pom.xml) and the dev compose: keep them together
 private const val POSTGRES_IMAGE = "docker.io/library/postgres:18.7"
 
 /**

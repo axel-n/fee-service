@@ -30,7 +30,8 @@
             <artifactId>spring-boot-starter-webmvc</artifactId>
         </dependency>
         <!-- Spring MVC runs a suspend controller method through Reactor: without it, the method isn't invoked. It brings
-             kotlinx-coroutines-core, for the suspend Restate handlers, FeeService and controller -->
+             kotlinx-coroutines-core, for the suspend Restate handlers, FeeService and controller, and
+             kotlinx-coroutines-reactive, which awaits jOOQ's queries (Publishers) in the repository -->
         <dependency>
             <groupId>org.jetbrains.kotlinx</groupId>
             <artifactId>kotlinx-coroutines-reactor</artifactId>
@@ -46,11 +47,17 @@
             <groupId>dev.restate</groupId>
             <artifactId>sdk-serde-jackson</artifactId>
         </dependency>
-        <!-- The fee records in PostgreSQL, non-blocking: DatabaseClient with its coroutine extensions, and schema.sql run
-             at every start -->
+        <!-- The fee records in PostgreSQL, non-blocking: Boot's R2DBC ConnectionFactory, and schema.sql run at every
+             start -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-r2dbc</artifactId>
+        </dependency>
+        <!-- The queries: jOOQ's DSL over that ConnectionFactory, each query a Publisher awaited from a coroutine, over the
+             classes generated from schema.sql (jooq-codegen-maven below). Not spring-boot-starter-jooq, which is JDBC -->
+        <dependency>
+            <groupId>org.jooq</groupId>
+            <artifactId>jooq</artifactId>
         </dependency>
         <dependency>
             <groupId>org.postgresql</groupId>
@@ -113,6 +120,66 @@
 
     <build>
         <plugins>
+            <!-- The jOOQ classes of the fee_record table, generated as Kotlin from schema.sql in generate-sources: a
+                 throwaway Postgres, started by Testcontainers when jOOQ connects, runs the script, and jOOQ reads the
+                 table as Postgres made it. So the build needs a container engine, like the ITs. The classes land in
+                 target/generated-sources/jooq, a compile source root, and are never checked by ktlint, which runs
+                 before. The driver and Testcontainers (root pluginManagement) are on the plugin's classpath only -->
+            <plugin>
+                <groupId>org.jooq</groupId>
+                <artifactId>jooq-codegen-maven</artifactId>
+                <executions>
+                    <execution>
+                        <id>jooq-codegen</id>
+                        <phase>generate-sources</phase>
+                        <goals>
+                            <goal>generate</goal>
+                        </goals>
+                    </execution>
+                </executions>
+                <configuration>
+                    <!-- Warnings and errors only, instead of the whole configuration and every generated file in each
+                         build. jOOQ's logo and tip of the day come as it loads, before this applies -->
+                    <logging>WARN</logging>
+                    <!-- The Postgres of PostgresTestEnvironment and the dev compose (keep the versions together), with
+                         schema.sql run when the container starts. It is removed when jOOQ closes its connection -->
+                    <jdbc>
+                        <driver>org.testcontainers.jdbc.ContainerDatabaseDriver</driver>
+                        <url>jdbc:tc:postgresql:18.7:///fee?TC_INITSCRIPT=file:${project.basedir}/src/main/resources/schema.sql</url>
+                    </jdbc>
+                    <generator>
+                        <name>org.jooq.codegen.KotlinGenerator</name>
+                        <database>
+                            <name>org.jooq.meta.postgres.PostgresDatabase</name>
+                            <!-- The table is generated unqualified, so it lives in the schema of the app's connection -->
+                            <inputSchema>public</inputSchema>
+                            <outputSchemaToDefault>true</outputSchemaToDefault>
+                            <forcedTypes>
+                                <!-- created_at, a TIMESTAMP without a zone: bound and read as the LocalDateTime itself.
+                                     jOOQ's own binding goes through java.sql.Timestamp and the JVM's default zone, which
+                                     moves a time in a skipped daylight saving hour -->
+                                <forcedType>
+                                    <userType>java.time.LocalDateTime</userType>
+                                    <binding>com.example.fee.record.ZoneFreeLocalDateTimeBinding</binding>
+                                    <includeTypes>(?i:TIMESTAMP(\ WITHOUT\ TIME\ ZONE)?)</includeTypes>
+                                </forcedType>
+                                <!-- claimed_at and charged_at, the app's Clock: Instant, as Clock.instant() gives it -->
+                                <forcedType>
+                                    <name>INSTANT</name>
+                                    <includeTypes>(?i:TIMESTAMP\ WITH\ TIME\ ZONE)</includeTypes>
+                                </forcedType>
+                            </forcedTypes>
+                        </database>
+                        <generate>
+                            <kotlinNotNullRecordAttributes>true</kotlinNotNullRecordAttributes>
+                        </generate>
+                        <target>
+                            <packageName>com.example.fee.record.jooq</packageName>
+                            <directory>${project.build.directory}/generated-sources/jooq</directory>
+                        </target>
+                    </generator>
+                </configuration>
+            </plugin>
             <!-- Integration and BDD tests (*IT), mvn verify. Boot's parent binds integration-test and verify. No IT run
                  fails the build instead of passing empty -->
             <plugin>

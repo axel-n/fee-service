@@ -38,9 +38,14 @@ build). Everything else here is followed by whoever writes the code, and checked
 
 ## Layout, SQL, JSON and errors
 
-- **SQL is a named constant**: each statement is a `private const val` (a raw string for more than one line) in the
-  companion object of the class that runs it, with named bind parameters (`:id`), never a string glued together at the
-  call. Only where an API takes no parameters (Restate's query API) is a quoted value appended to a constant prefix.
+- **Postgres SQL is jOOQ's DSL** over the classes generated from `schema.sql` (`FEE_RECORD.TRANSACTION_ID`, …), in main
+  and test code, never a SQL string. A query is a `Publisher` awaited from a coroutine: `awaitSingle()` for a row count
+  or a single row, `awaitFirstOrNull()` for at most one row. Never jOOQ's blocking `fetch()`, `fetchOne()` or
+  `execute()`. A change to the table starts in `schema.sql`; the build regenerates the classes from it.
+- **Other SQL is a named constant**, only where no generated class exists (Restate's query API; Postgres system views and
+  admin commands in tests): a `private const val` (a raw string for more than one line) next to the code that runs it,
+  with bind parameters (jOOQ's `{0}` in a plain-SQL template), never a string glued together at the call. Only where an
+  API takes no parameters (Restate's query API) is a quoted value appended to a constant prefix.
 - Package and file layout: a package holds one kind of class, and an extension point's implementations get a sub-package
   (`fee.rule`, `fee.formula`, `validation.rule`). A file holds one main type plus the small types and helpers that exist only to
   serve it (its result and field types, its default implementation, internal helpers). Don't create a file for a lone data class,

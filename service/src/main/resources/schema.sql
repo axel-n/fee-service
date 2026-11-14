@@ -2,12 +2,14 @@
 -- the validated request, RECORD completes it with the charge. Run at every start (spring.sql.init.mode: always), so it
 -- must stay idempotent; that run also fails startup when the database can't be reached, or when it holds a fee_record
 -- table that lacks one of its columns (the last statement). The app's database user owns the table: it creates it and its index.
+-- The build also reads this file: it runs it in a Postgres that Testcontainers starts, and jOOQ generates the table's
+-- Kotlin classes from the result (jooq-codegen-maven in service/pom.xml).
 --
 -- Stored data: renaming or removing a column, or changing a status value, breaks existing records.
 -- NUMERIC without precision keeps each value's scale: an amount sent as 1000 is read back as 1000, a fee of 1.50 as 1.50.
 CREATE TABLE IF NOT EXISTS fee_record (
     -- the request, every field as the client sent it
-    transaction_id TEXT PRIMARY KEY,
+    transaction_id TEXT      CONSTRAINT fee_record_pkey PRIMARY KEY,
     amount         NUMERIC   NOT NULL,
     asset          TEXT      NOT NULL,
     asset_type     TEXT      NOT NULL,
@@ -15,7 +17,7 @@ CREATE TABLE IF NOT EXISTS fee_record (
     state          TEXT      NOT NULL,
     -- the request's created_at (no zone, read as UTC); Postgres keeps microseconds, so a 7th to 9th fraction digit is rounded
     created_at     TIMESTAMP NOT NULL,
-    status         TEXT      NOT NULL CHECK (status IN ('IN_PROGRESS', 'COMPLETED')),
+    status         TEXT      NOT NULL CONSTRAINT fee_record_status_check CHECK (status IN ('IN_PROGRESS', 'COMPLETED')),
     -- the workflow run that claimed the row: only it may complete it, also when it runs a step again after a crash
     claim_token    TEXT      NOT NULL,
     -- when the row was claimed, from the app's clock

@@ -2,14 +2,26 @@ package com.example.fee.record
 
 import com.example.fee.contract.FeeResponse
 import com.example.fee.domain.Transaction
+import com.example.fee.record.jooq.tables.records.FeeRecordRecord
+import com.example.fee.record.jooq.tables.references.FEE_RECORD
 import io.r2dbc.spi.ConnectionFactory
-import io.r2dbc.spi.Readable
-import org.springframework.r2dbc.core.DatabaseClient
-import org.springframework.r2dbc.core.awaitOneOrNull
-import org.springframework.r2dbc.core.awaitRowsUpdated
+import kotlinx.coroutines.reactive.awaitFirstOrNull
+import kotlinx.coroutines.reactive.awaitSingle
+import org.jooq.Binding
+import org.jooq.BindingGetResultSetContext
+import org.jooq.BindingSetStatementContext
+import org.jooq.Field
+import org.jooq.SQLDialect
+import org.jooq.exception.DataAccessException
+import org.jooq.impl.DSL
+import org.jooq.impl.DSL.coalesce
+import org.jooq.impl.DSL.value
+import org.jooq.impl.DefaultBinding
+import org.jooq.impl.SQLDataType
 import org.springframework.stereotype.Repository
-import java.math.BigDecimal
+import java.sql.Types
 import java.time.Clock
+import java.time.LocalDateTime
 
 /**
  * The fee records in PostgreSQL (the `fee_record` table, `schema.sql`): one row per `transaction_id`. `FeeWorkflow`
@@ -42,7 +54,10 @@ interface FeeRecordRepository {
 }
 
 /**
- * [FeeRecordRepository] over R2DBC: non-blocking, so callers suspend instead of holding a thread.
+ * [FeeRecordRepository] in jOOQ over R2DBC: each query is built with jOOQ's DSL on the classes generated from
+ * `schema.sql` ([FEE_RECORD]), and runs as a `Publisher` on Boot's pooled [ConnectionFactory] that the caller awaits.
+ * Non-blocking, so callers suspend instead of holding a thread. jOOQ's blocking `fetch()` and `execute()` are never
+ * used: over R2DBC they would block the thread until the database answers.
  *
  * No explicit transaction: each write is a single statement, which Postgres runs as one transaction of its own, and
  * its row count tells what happened. READ COMMITTED (Postgres' default) is enough. The primary key serializes
@@ -58,27 +73,31 @@ class PostgresFeeRecordRepository(
     connectionFactory: ConnectionFactory,
     private val clock: Clock,
 ) : FeeRecordRepository {
-    private val client = DatabaseClient.create(connectionFactory)
+    private val dsl = DSL.using(connectionFactory, SQLDialect.POSTGRES)
 
     override suspend fun claim(transaction: Transaction, claimToken: String): FeeRecord {
         val transactionId = transaction.transactionId
         find(transactionId)?.let { return it }
+        // A new IN_PROGRESS record with every field of the request; an existing record of the id is left as it is
         val inserted =
-            client
-                .sql(INSERT_CLAIM)
-                .bind("id", transactionId)
-                .bind("amount", transaction.amount)
-                .bind("asset", transaction.asset.value)
-                .bind("assetType", transaction.assetType.value)
-                .bind("type", transaction.type.value)
-                .bind("state", transaction.state.value)
-                .bind("createdAt", transaction.createdAt)
-                .bind("status", FeeRecordStatus.IN_PROGRESS.name)
-                .bind("token", claimToken)
-                .bind("claimedAt", clock.instant())
-                .fetch()
-                .awaitRowsUpdated()
-        if (inserted == 1L) return FeeRecord.inProgress(claimToken)
+            failingAs("Claiming", transactionId) {
+                dsl
+                    .insertInto(FEE_RECORD)
+                    .set(FEE_RECORD.TRANSACTION_ID, transactionId)
+                    .set(FEE_RECORD.AMOUNT, transaction.amount)
+                    .set(FEE_RECORD.ASSET, transaction.asset.value)
+                    .set(FEE_RECORD.ASSET_TYPE, transaction.assetType.value)
+                    .set(FEE_RECORD.TYPE, transaction.type.value)
+                    .set(FEE_RECORD.STATE, transaction.state.value)
+                    .set(FEE_RECORD.CREATED_AT, transaction.createdAt)
+                    .set(FEE_RECORD.STATUS, FeeRecordStatus.IN_PROGRESS.name)
+                    .set(FEE_RECORD.CLAIM_TOKEN, claimToken)
+                    .set(FEE_RECORD.CLAIMED_AT, clock.instant())
+                    .onConflict(FEE_RECORD.TRANSACTION_ID)
+                    .doNothing()
+                    .awaitSingle()
+            }
+        if (inserted == 1) return FeeRecord.inProgress(claimToken)
         // A concurrent claim committed its row between the read and the insert: decide from that row
         return checkNotNull(find(transactionId)) { "Fee record '$transactionId' is missing although its insert met it" }
     }
@@ -87,76 +106,83 @@ class PostgresFeeRecordRepository(
         require(response.transactionId == transactionId) {
             "The response of transaction '${response.transactionId}' can't complete the fee record of '$transactionId'"
         }
+        // The charge, by the claim token's holder only; a charged_at already set is kept
         val updated =
-            client
-                .sql(UPDATE_COMPLETE)
-                .bind("status", FeeRecordStatus.COMPLETED.name)
-                .bind("fee", response.fee)
-                .bind("rate", response.rate)
-                .bind("description", response.description)
-                .bind("chargedAt", clock.instant())
-                .bind("id", transactionId)
-                .bind("token", claimToken)
-                .fetch()
-                .awaitRowsUpdated()
+            failingAs("Completing", transactionId) {
+                dsl
+                    .update(FEE_RECORD)
+                    .set(FEE_RECORD.STATUS, FeeRecordStatus.COMPLETED.name)
+                    .set(FEE_RECORD.FEE, response.fee)
+                    .set(FEE_RECORD.RATE, response.rate)
+                    .set(FEE_RECORD.DESCRIPTION, response.description)
+                    .set(FEE_RECORD.CHARGED_AT, coalesce(FEE_RECORD.CHARGED_AT, value(clock.instant(), FEE_RECORD.CHARGED_AT)))
+                    .where(FEE_RECORD.TRANSACTION_ID.eq(transactionId))
+                    .and(FEE_RECORD.CLAIM_TOKEN.eq(claimToken))
+                    .awaitSingle()
+            }
         // Only the run that claimed the id completes it, so anything else is a bug: nothing was written, and Restate
         // retries until it pauses the invocation, which can be resumed once the bug is fixed.
-        check(updated == 1L) { "Fee record '$transactionId' is not claimed by token $claimToken, so it can't be completed" }
+        check(updated == 1) { "Fee record '$transactionId' is not claimed by token $claimToken, so it can't be completed" }
     }
 
     override suspend fun findCharged(transactionId: String): FeeResponse? = find(transactionId)?.response
 
     private suspend fun find(transactionId: String): FeeRecord? =
-        client
-            .sql(SELECT_BY_ID)
-            .bind("id", transactionId)
-            .map(::record)
-            .awaitOneOrNull()
+        failingAs("Reading", transactionId) {
+            dsl
+                .selectFrom(FEE_RECORD)
+                .where(FEE_RECORD.TRANSACTION_ID.eq(transactionId))
+                .awaitFirstOrNull()
+        }?.let(::record)
 
-    private fun record(row: Readable): FeeRecord {
-        val transactionId = row.required("transaction_id", String::class.java)
-        val status = FeeRecordStatus.valueOf(row.required("status", String::class.java))
-        val claimToken = row.required("claim_token", String::class.java)
-        if (status != FeeRecordStatus.COMPLETED) return FeeRecord(status, claimToken)
+    // jOOQ's message of a query that failed before it ran (no connection) is the whole statement with its values, over
+    // many lines; Restate stores it as the invocation's failure and the log repeats it on every retry. The operation, the
+    // id and the cause say what failed.
+    private inline fun <T> failingAs(operation: String, transactionId: String, query: () -> T): T =
+        try {
+            query()
+        } catch (failure: DataAccessException) {
+            val cause = failure.cause ?: failure
+            throw DataAccessException("$operation the fee record of '$transactionId' failed: ${cause.message}", cause)
+        }
+
+    // The claim, and the charged response once COMPLETED
+    private fun record(row: FeeRecordRecord): FeeRecord {
+        val status = FeeRecordStatus.valueOf(row.status)
+        if (status != FeeRecordStatus.COMPLETED) return FeeRecord(status, row.claimToken)
         val response =
             FeeResponse(
-                transactionId = transactionId,
-                amount = row.required("amount", BigDecimal::class.java),
-                asset = row.required("asset", String::class.java),
-                type = row.required("type", String::class.java),
-                fee = row.required("fee", BigDecimal::class.java),
-                rate = row.required("rate", BigDecimal::class.java),
-                description = row.required("description", String::class.java),
+                transactionId = row.transactionId,
+                amount = row.amount,
+                asset = row.asset,
+                type = row.type,
+                fee = required(row.fee, FEE_RECORD.FEE),
+                rate = required(row.rate, FEE_RECORD.RATE),
+                description = required(row.description, FEE_RECORD.DESCRIPTION),
             )
-        return FeeRecord(status, claimToken, response)
+        return FeeRecord(status, row.claimToken, response)
     }
 
-    private fun <T : Any> Readable.required(column: String, type: Class<T>): T =
-        checkNotNull(get(column, type)) { "fee_record.$column is null" }
+    private fun <T : Any> required(value: T?, column: Field<*>): T = checkNotNull(value) { "fee_record.${column.name} is null" }
+}
 
-    private companion object {
-        /** A new `IN_PROGRESS` record with every field of the request; an existing record of the id is left as it is. */
-        const val INSERT_CLAIM = """
-            INSERT INTO fee_record
-                (transaction_id, amount, asset, asset_type, type, state, created_at, status, claim_token, claimed_at)
-            VALUES
-                (:id, :amount, :asset, :assetType, :type, :state, :createdAt, :status, :token, :claimedAt)
-            ON CONFLICT (transaction_id) DO NOTHING
-        """
+/**
+ * The jOOQ binding of a `TIMESTAMP` without a zone (`created_at`): the [LocalDateTime] goes to R2DBC and comes back as
+ * it is. jOOQ's own binding converts it through `java.sql.Timestamp` in the JVM's default zone, so in a zone with
+ * daylight saving a time in the skipped hour (02:30 on 2024-03-31 in Berlin) would be stored and read an hour late.
+ * Everything else (rendering, the other contexts) is jOOQ's. Named by the jOOQ code generation in `service/pom.xml`.
+ */
+class ZoneFreeLocalDateTimeBinding : Binding<LocalDateTime, LocalDateTime> by DefaultBinding.binding(SQLDataType.LOCALDATETIME) {
+    override fun set(ctx: BindingSetStatementContext<LocalDateTime>) {
+        val value = ctx.convert(converter()).value()
+        if (value == null) {
+            ctx.statement().setNull(ctx.index(), Types.TIMESTAMP)
+        } else {
+            ctx.statement().setObject(ctx.index(), value)
+        }
+    }
 
-        /** The charge, by the claim token's holder only; a `charged_at` already set is kept. */
-        const val UPDATE_COMPLETE = """
-            UPDATE fee_record
-            SET status = :status, fee = :fee, rate = :rate, description = :description,
-                charged_at = COALESCE(charged_at, :chargedAt)
-            WHERE transaction_id = :id AND claim_token = :token
-        """
-
-        /** What the app reads back: the claim, and the charged response once `COMPLETED`. */
-        const val SELECT_BY_ID = """
-            SELECT transaction_id, status, claim_token, amount, asset, type, fee, rate, description
-            FROM fee_record
-            WHERE transaction_id = :id
-        """
+    override fun get(ctx: BindingGetResultSetContext<LocalDateTime>) {
+        ctx.convert(converter()).value(ctx.resultSet().getObject(ctx.index(), LocalDateTime::class.java))
     }
 }

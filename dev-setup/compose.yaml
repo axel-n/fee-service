@@ -16,7 +16,7 @@ services:
       - "127.0.0.1:9070:9070"   # admin API and UI: http://localhost:9070
 
   postgres:
-    # the version the tests use (PostgresTestEnvironment)
+    # the version the tests and the build's jOOQ code generation use (PostgresTestEnvironment, service/pom.xml)
     image: docker.io/library/postgres:18.7
     container_name: fee-service-postgres
     environment:
