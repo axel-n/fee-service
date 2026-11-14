@@ -11,14 +11,13 @@ import org.springframework.stereotype.Component
 import kotlin.coroutines.cancellation.CancellationException
 import kotlin.time.toKotlinDuration
 
+private val log = LoggerFactory.getLogger(ChargedFees::class.java)
+
 /**
  * The charged fees `FeeService` answers without Restate: first the local [cache], then Postgres. Only charged
  * responses are found and kept. They never change, so an entry can't go stale on any instance, and the cache's size and
  * expiry only bound its memory. Rejections, conflicts and runs still in progress are left to Restate.
  */
-
-private val log = LoggerFactory.getLogger(ChargedFees::class.java)
-
 @Component
 class ChargedFees(
     private val cache: Cache<String, FeeResponse>,

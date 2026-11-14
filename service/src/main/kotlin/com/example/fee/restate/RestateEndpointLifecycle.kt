@@ -11,6 +11,8 @@ import java.lang.reflect.InvocationTargetException
 import java.util.concurrent.CompletionStage
 import java.util.concurrent.ExecutionException
 
+private val log = LoggerFactory.getLogger(RestateEndpointLifecycle::class.java)
+
 /**
  * Serves the Spring-built [FeeWorkflow] bean as a Restate endpoint on `restate.endpoint-port`, and keeps it registered
  * with Restate while it runs. It is the only place that starts or stops the endpoint, so tests stop and start it to
@@ -177,9 +179,5 @@ class RestateEndpointLifecycle(
                     throw e.targetException ?: e
                 }
         }
-    }
-
-    private companion object {
-        private val log = LoggerFactory.getLogger(RestateEndpointLifecycle::class.java)
     }
 }

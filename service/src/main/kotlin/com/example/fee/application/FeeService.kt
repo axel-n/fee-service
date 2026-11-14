@@ -18,6 +18,8 @@ import org.springframework.stereotype.Service
 import kotlin.coroutines.cancellation.CancellationException
 import kotlin.time.toKotlinDuration
 
+private val log = LoggerFactory.getLogger(FeeService::class.java)
+
 /**
  * The thin gateway between the API and `FeeWorkflow`: it validates the request with [RequestValidator], answers an id
  * that is already charged from [ChargedFees] (the local cache, then Postgres), submits the workflow of any other id and
@@ -103,9 +105,5 @@ class FeeService(
     private fun unavailable(transactionId: String, cause: Throwable): WorkflowUnavailableException {
         log.warn("Restate call for workflow {} failed: {}", transactionId, cause.toString())
         return WorkflowUnavailableException(cause)
-    }
-
-    private companion object {
-        private val log = LoggerFactory.getLogger(FeeService::class.java)
     }
 }

@@ -19,6 +19,8 @@ build). Everything else here is followed by whoever writes the code, and checked
   single class (a test class takes its file's name, `FeeRuleTest`), and a KDoc can't be followed by a `//` comment.
 - Idiomatic Kotlin: `val` over `var`, data classes for values, sealed types for closed hierarchies, no `!!`, no `lateinit`
   in production code.
+- A logger is a file-private top-level property, right after the imports and before the class and its KDoc:
+  `private val log = LoggerFactory.getLogger(FeeService::class.java)`, never in a companion object.
 - Number literals of 1000 or more are grouped by thousands with underscores, in main and test code: `1_000`, `65_535`,
   `3_000_000_000L`. Strings can't take underscores (JSON, `BigDecimal("…")`), so a whole `BigDecimal` constant is written
   `3_000_000_000.toBigDecimal()`; a fraction stays `BigDecimal("0.0015")`. Ports are grouped too (`9_080`); only a year

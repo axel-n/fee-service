@@ -31,6 +31,8 @@ import java.util.regex.Pattern
 import kotlin.io.path.listDirectoryEntries
 import kotlin.io.path.name
 
+private val log = LoggerFactory.getLogger(AppContainerIT::class.java)
+
 /**
  * The packaged app (`java -jar`) in a container next to a Restate and a Postgres container of its own, on a private
  * network, as they run in production: the app reaches Restate as `restate` and Postgres as `postgres`, Restate reaches
@@ -246,7 +248,6 @@ class AppContainerIT {
         private const val COUNT_COMPLETED =
             "SELECT count(*) AS records FROM fee_record WHERE transaction_id = :id AND status = 'COMPLETED'"
 
-        private val log = LoggerFactory.getLogger(AppContainerIT::class.java)
         private val mapper = ObjectMapper()
         private val http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build()
 
